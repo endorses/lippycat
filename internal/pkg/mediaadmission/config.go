@@ -34,6 +34,9 @@ type Config struct {
 	PendingEndpointCapacity int                 `mapstructure:"pending_endpoint_capacity" yaml:"pending_endpoint_capacity"`
 	PendingBytes            int                 `mapstructure:"pending_bytes" yaml:"pending_bytes"`
 	PendingTTL              time.Duration       `mapstructure:"pending_ttl" yaml:"pending_ttl"`
+	ReplayWindow            time.Duration       `mapstructure:"replay_window" yaml:"replay_window"`
+	ReplayGuardCapacity     int                 `mapstructure:"replay_guard_capacity" yaml:"replay_guard_capacity"`
+	ReplayGuardBytes        int                 `mapstructure:"replay_guard_bytes" yaml:"replay_guard_bytes"`
 	ExpirationBatch         int                 `mapstructure:"expiration_batch" yaml:"expiration_batch"`
 	RetryInterval           time.Duration       `mapstructure:"retry_interval" yaml:"retry_interval"`
 	ShadowEvidenceCapacity  int                 `mapstructure:"shadow_evidence_capacity" yaml:"shadow_evidence_capacity"`
@@ -45,7 +48,8 @@ func DefaultConfig() Config {
 	return Config{Mode: ModeEnforce, FailurePolicy: FailureOpen,
 		EndpointCapacity: 40000, OwnerCapacity: 10000, MaxEndpointsPerOwner: 32,
 		PendingDialogCapacity: 10000, PendingEndpointCapacity: 40000, PendingBytes: 8 << 20,
-		PendingTTL: 30 * time.Second, ExpirationBatch: 256, RetryInterval: time.Second,
+		PendingTTL: 30 * time.Second, ReplayWindow: 2 * time.Minute, ReplayGuardCapacity: 10000, ReplayGuardBytes: 2 << 20,
+		ExpirationBatch: 256, RetryInterval: time.Second,
 		ShadowEvidenceCapacity: 1024, ShadowSampleEvery: 1, MissingMediaInterval: 30 * time.Second}
 }
 
@@ -61,12 +65,13 @@ func (c Config) Validate() error {
 	for name, value := range map[string]int{"endpoint_capacity": c.EndpointCapacity, "owner_capacity": c.OwnerCapacity,
 		"max_endpoints_per_owner": c.MaxEndpointsPerOwner, "pending_dialog_capacity": c.PendingDialogCapacity,
 		"pending_endpoint_capacity": c.PendingEndpointCapacity, "pending_bytes": c.PendingBytes,
-		"expiration_batch": c.ExpirationBatch, "shadow_evidence_capacity": c.ShadowEvidenceCapacity} {
+		"expiration_batch": c.ExpirationBatch, "shadow_evidence_capacity": c.ShadowEvidenceCapacity,
+		"replay_guard_capacity": c.ReplayGuardCapacity, "replay_guard_bytes": c.ReplayGuardBytes} {
 		if value <= 0 {
 			return fmt.Errorf("RTP eBPF %s must be positive", name)
 		}
 	}
-	if c.PendingTTL <= 0 || c.RetryInterval <= 0 || c.MissingMediaInterval <= 0 {
+	if c.PendingTTL <= 0 || c.ReplayWindow <= 0 || c.RetryInterval <= 0 || c.MissingMediaInterval <= 0 {
 		return fmt.Errorf("RTP eBPF durations must be positive")
 	}
 	if c.ShadowSampleEvery == 0 {

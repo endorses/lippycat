@@ -38,7 +38,18 @@ lc show status -P localhost:55555 --insecure
 When media admission is enabled, `rtp_ebpf.scopes[].uncertainty` reports unique
 unknown-call totals and overlapping reason counts. Duplicate counters count
 messages with repeated singleton header groups, separately for CSeq, RSeq and
-RAck; they are cumulative and distinct from active uncertainty. The additive
+RAck; they are cumulative and distinct from active uncertainty. Do not sum
+reason counts as a call total. `malformed_rseq` and `malformed_rack` count each
+malformed header kind once per parsed message, including retransmissions; invalid
+duplicate groups also count as conflicting duplicates.
+
+`replay_guards` and `replay_guard_bytes` show per-domain usage, while
+`replay_guard_capacity` and `replay_guard_byte_limit` are shared pool limits.
+`replay_window_ns` is the configured protection window, `replay_unrecorded`
+counts failed guard insertion attempts, and `replay_degraded_ns` is the remaining
+domain-wide conservative interval. Zero remaining time means the interval is
+inactive; sustained overload may extend it. Older peers omit these additive
+fields. The additive
 `degraded_duration_ns` reports current elapsed degradation for open, closed and
 control-failed states; `open_duration_ns` retains cumulative confirmed-open time.
 These fields contain no call identities, endpoint addresses or raw errors. See

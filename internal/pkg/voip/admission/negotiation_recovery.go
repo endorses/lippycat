@@ -14,7 +14,7 @@ func unresolvedState(state *derivationState) bool {
 	if state == nil || state.rejected {
 		return false
 	}
-	return state.conflict || !state.complete || state.missing || state.recoveryPending
+	return state.conflict || !state.complete || state.missing || state.recoveryPending || state.repeatedPending
 }
 
 // Conflicting linkage is add-only evidence, never a negotiation watermark that
@@ -53,6 +53,9 @@ func (b *Bridge) observeConflict(call *selectedCall, record mediaadmission.Metad
 		}
 		next.dialogConfirmed = old.dialogConfirmed
 		next.previous = rollbackDerivation(old)
+		if !b.retainRetirementEndpoints(call, next, old) {
+			return false
+		}
 		next.endpoints = uniqueEndpoints(append(append([]mediaadmission.EndpointKey(nil), old.endpoints...), record.Endpoints...), b.cfg.Limits.MaxEndpointsPerOwner+1)
 		if len(next.endpoints) > b.cfg.Limits.MaxEndpointsPerOwner {
 			call.contextLost = true
@@ -140,6 +143,11 @@ func (b *Bridge) supersedeUncertainty(call *selectedCall, key mediaadmission.Dia
 	for _, state := range call.derivations {
 		for _, endpoint := range state.retainedEndpoints {
 			protected[endpoint] = true
+		}
+		if state.endpointsHealthy {
+			for _, endpoint := range state.endpoints {
+				protected[endpoint] = true
+			}
 		}
 	}
 	for _, state := range []*derivationState{request, response} {

@@ -6664,8 +6664,23 @@ type MediaAdmissionUncertainty struct {
 	EvidenceLoss          uint64                 `protobuf:"varint,7,opt,name=evidence_loss,json=evidenceLoss,proto3" json:"evidence_loss,omitempty"`
 	IdenticalDuplicates   uint64                 `protobuf:"varint,8,opt,name=identical_duplicates,json=identicalDuplicates,proto3" json:"identical_duplicates,omitempty"`
 	ConflictingDuplicates uint64                 `protobuf:"varint,9,opt,name=conflicting_duplicates,json=conflictingDuplicates,proto3" json:"conflicting_duplicates,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Cumulative parsed message/header groups containing malformed RSeq or RAck.
+	// Each kind counts once per message, including retransmissions and duplicates.
+	MalformedRseq uint64 `protobuf:"varint,10,opt,name=malformed_rseq,json=malformedRseq,proto3" json:"malformed_rseq,omitempty"`
+	MalformedRack uint64 `protobuf:"varint,11,opt,name=malformed_rack,json=malformedRack,proto3" json:"malformed_rack,omitempty"`
+	// Per-domain exact retired-proof history usage and shared configured bounds,
+	// independent of live selected derivation capacity. No probabilistic overflow store is used.
+	ReplayGuards         uint64 `protobuf:"varint,12,opt,name=replay_guards,json=replayGuards,proto3" json:"replay_guards,omitempty"`
+	ReplayGuardCapacity  uint64 `protobuf:"varint,13,opt,name=replay_guard_capacity,json=replayGuardCapacity,proto3" json:"replay_guard_capacity,omitempty"`
+	ReplayGuardBytes     uint64 `protobuf:"varint,14,opt,name=replay_guard_bytes,json=replayGuardBytes,proto3" json:"replay_guard_bytes,omitempty"`
+	ReplayGuardByteLimit uint64 `protobuf:"varint,15,opt,name=replay_guard_byte_limit,json=replayGuardByteLimit,proto3" json:"replay_guard_byte_limit,omitempty"`
+	ReplayWindowNs       uint64 `protobuf:"varint,16,opt,name=replay_window_ns,json=replayWindowNs,proto3" json:"replay_window_ns,omitempty"`
+	// Cumulative retirements that could not be recorded. The remaining domain-wide
+	// conservative interval is a gauge; sustained overload may extend it.
+	ReplayUnrecorded uint64 `protobuf:"varint,17,opt,name=replay_unrecorded,json=replayUnrecorded,proto3" json:"replay_unrecorded,omitempty"`
+	ReplayDegradedNs uint64 `protobuf:"varint,18,opt,name=replay_degraded_ns,json=replayDegradedNs,proto3" json:"replay_degraded_ns,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *MediaAdmissionUncertainty) Reset() {
@@ -6757,6 +6772,69 @@ func (x *MediaAdmissionUncertainty) GetIdenticalDuplicates() uint64 {
 func (x *MediaAdmissionUncertainty) GetConflictingDuplicates() uint64 {
 	if x != nil {
 		return x.ConflictingDuplicates
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetMalformedRseq() uint64 {
+	if x != nil {
+		return x.MalformedRseq
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetMalformedRack() uint64 {
+	if x != nil {
+		return x.MalformedRack
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetReplayGuards() uint64 {
+	if x != nil {
+		return x.ReplayGuards
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetReplayGuardCapacity() uint64 {
+	if x != nil {
+		return x.ReplayGuardCapacity
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetReplayGuardBytes() uint64 {
+	if x != nil {
+		return x.ReplayGuardBytes
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetReplayGuardByteLimit() uint64 {
+	if x != nil {
+		return x.ReplayGuardByteLimit
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetReplayWindowNs() uint64 {
+	if x != nil {
+		return x.ReplayWindowNs
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetReplayUnrecorded() uint64 {
+	if x != nil {
+		return x.ReplayUnrecorded
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetReplayDegradedNs() uint64 {
+	if x != nil {
+		return x.ReplayDegradedNs
 	}
 	return 0
 }
@@ -7390,7 +7468,7 @@ const file_management_proto_rawDesc = "" +
 	"\x1bpublication_started_unix_ns\x18\x15 \x01(\x03R\x18publicationStartedUnixNs\x123\n" +
 	"\x16last_published_unix_ns\x18\x16 \x01(\x03R\x13lastPublishedUnixNs\x12P\n" +
 	"\vuncertainty\x18\x17 \x01(\v2..lippycat.management.MediaAdmissionUncertaintyR\vuncertainty\x120\n" +
-	"\x14degraded_duration_ns\x18\x18 \x01(\x04R\x12degradedDurationNs\"\x90\x03\n" +
+	"\x14degraded_duration_ns\x18\x18 \x01(\x04R\x12degradedDurationNs\"\xa1\x06\n" +
 	"\x19MediaAdmissionUncertainty\x12#\n" +
 	"\runknown_calls\x18\x01 \x01(\x04R\funknownCalls\x12/\n" +
 	"\x13conflicting_headers\x18\x02 \x01(\x04R\x12conflictingHeaders\x12!\n" +
@@ -7401,7 +7479,17 @@ const file_management_proto_rawDesc = "" +
 	"\x0efork_ambiguity\x18\x06 \x01(\x04R\rforkAmbiguity\x12#\n" +
 	"\revidence_loss\x18\a \x01(\x04R\fevidenceLoss\x121\n" +
 	"\x14identical_duplicates\x18\b \x01(\x04R\x13identicalDuplicates\x125\n" +
-	"\x16conflicting_duplicates\x18\t \x01(\x04R\x15conflictingDuplicates*j\n" +
+	"\x16conflicting_duplicates\x18\t \x01(\x04R\x15conflictingDuplicates\x12%\n" +
+	"\x0emalformed_rseq\x18\n" +
+	" \x01(\x04R\rmalformedRseq\x12%\n" +
+	"\x0emalformed_rack\x18\v \x01(\x04R\rmalformedRack\x12#\n" +
+	"\rreplay_guards\x18\f \x01(\x04R\freplayGuards\x122\n" +
+	"\x15replay_guard_capacity\x18\r \x01(\x04R\x13replayGuardCapacity\x12,\n" +
+	"\x12replay_guard_bytes\x18\x0e \x01(\x04R\x10replayGuardBytes\x125\n" +
+	"\x17replay_guard_byte_limit\x18\x0f \x01(\x04R\x14replayGuardByteLimit\x12(\n" +
+	"\x10replay_window_ns\x18\x10 \x01(\x04R\x0ereplayWindowNs\x12+\n" +
+	"\x11replay_unrecorded\x18\x11 \x01(\x04R\x10replayUnrecorded\x12,\n" +
+	"\x12replay_degraded_ns\x18\x12 \x01(\x04R\x10replayDegradedNs*j\n" +
 	"\x0eForwardingMode\x12\x1f\n" +
 	"\x1bFORWARDING_MODE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17FORWARDING_MODE_PACKETS\x10\x01\x12\x1a\n" +

@@ -374,15 +374,24 @@ stale exchange or another dialog cannot establish recovery. Independent unresolv
 contexts, lost lifecycle/resource evidence, failed endpoint promotions and control
 writes still prevent restored enforcement.
 
-In enforce mode, obsolete uncertain-context endpoint ownership remains available
-for the role's existing trailing-media grace, using `--pcap-grace-period`. Valid
-negotiation that takes an endpoint back cancels only that endpoint's pending
-retirement. Cleanup rechecks exact lifetime and current independent requirements;
-a stale callback cannot remove a reused lifetime's ownership. Authoritative call
-completion leaves final cleanup to the existing completion grace. Healthy
-re-offers and hold/resume retain historical registry ownership. Shadow recovery
-advances proof and diagnostics while preserving userspace endpoint ownership.
-Retirement state uses existing configured metadata and per-owner limits.
+In enforce mode, obsolete uncertainty-only endpoint ownership remains available
+for the role's trailing-media grace. Endpoints required by a healthy historical
+exchange, the complete repair, or an independent obligation remain protected;
+partial or conflicting observations do not become healthy history merely because
+they were retained. Valid negotiation that takes an endpoint back cancels only
+that endpoint's pending retirement. Cleanup rechecks exact lifetime and current
+independent requirements; a stale callback cannot remove a reused lifetime's
+ownership. Authoritative call completion leaves final cleanup to completion
+grace. Healthy re-offers and hold/resume retain historical registry ownership.
+Shadow recovery advances proof and diagnostics while preserving userspace endpoint
+ownership. Retirement state uses existing configured metadata and per-owner limits.
+
+Tap uses its effective `--pcap-grace-period` for both endpoint retirement and
+call completion, with nonpositive values normalized to the existing five-second
+default before routing is constructed. Hunter uses its configured `PCAPGracePeriod`
+with the same five-second fallback; it has no `--pcap-grace-period` flag. A direct
+low-level admission bridge can intentionally use zero for immediate retirement;
+that library behavior does not change role startup defaults.
 
 Grace protects attribution during its window, including an obsolete pair with
 one endpoint shared by another call. After expiry, the existing one-sided
@@ -393,9 +402,11 @@ are secondary hardening and are not implemented by this change.
 The SIP parser combines repeated `Require` lines and preserves the last singleton
 `CSeq`, `RSeq` and `RAck` value for general consumers. Admission accepts identical
 valid duplicates after semantic comparison: numeric fields ignore leading zeroes,
-whitespace is normalized and SIP methods compare case sensitively. Any malformed
-occurrence or conflicting value invalidates the affected proof, even if the last
-line is valid. Conflicting CSeq retains only bounded valid minimum/maximum evidence
+whitespace is normalized and SIP methods compare case sensitively. A malformed
+singleton RSeq or RAck invalidates its reliable linkage without making an otherwise
+valid ordinary offer/answer uncertain. A repeated group containing any malformed
+value remains conflicting, including valid/malformed mixtures and identical invalid
+repetitions. Conflicting CSeq retains only bounded valid minimum/maximum evidence
 for its initiator; method conflicts and malformed or unavailable bounds remain
 explicitly uncertain. A complete clean confirmed replacement must exceed the
 applicable uncertainty watermark. Safe selected-call SDP endpoints may still be
@@ -403,26 +414,62 @@ learned within configured limits, without authorizing output or supplying proof.
 The open/closed failure policy and all explicit capture/userspace restrictions
 remain in force.
 
+The parser retains the validated `CSeqMin`/`CSeqMax` range so the evidence
+accurately describes every valid occurrence, independently of the last header
+value exposed to general consumers. Recovery currently uses only `CSeqMax` as
+the freshness bound; `CSeqMin` is retained for the parser evidence contract and
+its range validation, not as a second recovery threshold.
+
 Pending proof, endpoint provenance and delayed cleanup are bound to authoritative
-call lifetimes. Retirement invalidates old work. Bounded prior-initiator sequence
-watermarks conservatively quarantine replay after Call-ID reuse, including reused
-tags. Each retained Call-ID/initiator identity consumes one configured derivation
-context and 128 accounted bytes until the admission bridge closes; this history
-has no TTL eviction. Malformed conflicts without usable bounds quarantine that
-initiator identity; lost context with unavailable identity/bounds blocks the
-reused Call-ID. History exhaustion conservatively retains evidence loss rather
-than forgetting old proof. Local generations cannot distinguish arbitrary
-identical wire messages; when available provenance and retained bounds cannot
-establish freshness, negotiation remains uncertain rather than borrowing the
-previous lifetime's proof.
+call lifetimes. Explicitly bound old session/generation evidence is rejected even
+after replay history expires. Retirement records bounded exact prior-initiator
+sequence guards to quarantine reused wire identities during `replay_window`
+(default `2m`), measured from retirement using the bridge's monotonic clock rather
+than packet timestamps. A subsequent retirement of the same identity refreshes
+its window; replay observations do not extend it. Malformed conflicts without
+usable bounds block that initiator; lost identity/bounds block the reused Call-ID
+within the window.
+
+Replay history has a separate exact-only pool shared across observation domains:
+`replay_guard_capacity` (default `10000`) and `replay_guard_bytes` (default
+`2097152`), with 128 accounted bytes per entry. Both bounds apply; history does
+not consume live selected-derivation capacity. Unexpired guards are never evicted
+for new entries. Expiry maintenance in the existing worker scans the exact map,
+with work bounded by the configured capacity. Close releases the accounting.
+There is no probabilistic overflow store.
+
+If a retirement guard cannot be recorded, all proof in that observation domain
+is conservative until the last unrecordable retirement plus `replay_window`.
+This fallback preserves existing exact guards and follows the configured open/closed
+policy; it does not permanently poison the bridge. Sustained overload may extend
+the interval. Once it expires, already-active calls reconcile their remaining
+proof and unrelated uncertainty instead of being blindly declared known. When
+replay pressure discarded observations, recovery requires a fresh complete request
+and matching answer observed after that discard; a cached pre-pressure answer
+cannot replace missing evidence. Retiring a call with such missing evidence records
+a blocked Call-ID guard for the window. Aggregate warnings are rate limited to
+the retry interval and include no wire identities.
+
+The two-minute default is an engineering margin over the usual 32-second
+64-times-T1 SIP transaction horizon with T1 at 500 ms, described in
+[RFC 3261 section 17.1.1.2](https://www.rfc-editor.org/rfc/rfc3261.html#section-17.1.1.2),
+and the existing 30-second `pending_ttl`. It is not a bound on all SIP dialogs,
+TCP reassembly, capture queues, hunter buffering, or forwarding delays. Configure
+the window for known deployment delays. After it expires, unbound identical wire
+identities cannot distinguish a fresh exchange from an old capture or delayed
+message; arbitrary replay remains outside this finite protection guarantee.
 
 Early-dialog proof is kept separately for each bounded fork. Observed confirmation
 resolves the winning dialog; losing-dialog exclusive ownership follows trailing
 media grace while shared and independent requirements remain. Multiple successful
-forks remain conservative. Identical repeated SDP in a later valid reliable
-provisional does not reopen an answered body, but its new reliable transaction
-still requires correct acknowledgment/linkage. Equal SDP bytes alone cannot
-validate an unrelated RSeq, RAck, dialog or lifetime.
+forks remain conservative. Both an INVITE offer with its reliable-response answer
+and a delayed offer with its PRACK answer can retain the canonical accepted SDP
+while identical SDP repeats in a later reliable provisional. Each new provisional
+requires its own valid next RSeq and matching RAck/PRACK in the same lifetime and
+early dialog. Same-RSeq retransmissions do not create a new acknowledgement debt.
+Changed SDP remains conservative and add-only until valid repair; final 200
+repeating the canonical answer cannot bypass an outstanding PRACK. Equal SDP
+bytes alone cannot validate unrelated RSeq, RAck, dialog or lifetime evidence.
 
 Per-domain `rtp_ebpf.scopes[].uncertainty` reports unique active `unknown_calls`
 and overlapping reason counts: `conflicting_headers`, `faulty_prack`,
@@ -433,6 +480,22 @@ messages bearing a repeated singleton header group, counted separately for
 CSeq, RSeq and RAck. Three or more repeated lines in one group count once, not
 once per line; these counters do not count currently unknown calls. Identical
 valid duplicates alone create no uncertainty.
+
+`malformed_rseq` and `malformed_rack` separately count parsed messages containing
+at least one malformed occurrence of that header kind, once per kind per message,
+including retransmissions. A mixed or invalid duplicate group increments both its
+malformed-kind counter and `conflicting_duplicates`; a malformed singleton does
+not increment the duplicate counter. These occurrence counters are independent
+of active unknown-call totals and may overlap.
+
+`replay_guards` and `replay_guard_bytes` report per-domain exact-history usage;
+`replay_guard_capacity` and `replay_guard_byte_limit` are shared pool bounds,
+not allowances multiplied by domain count. `replay_window_ns` reports the effective
+configured window. `replay_unrecorded` cumulatively counts failed guard insertion
+attempts, and `replay_degraded_ns` is the remaining domain-wide conservative
+interval, zero when inactive. Active calls affected by that interval also appear
+in unique unknown-call totals and overlapping `evidence_loss` counts. These
+fields require no identities or dynamic labels; older peers omit them.
 
 `degraded_since_unix_ns` identifies the current degradation start and
 `degraded_duration_ns` its elapsed duration, including degraded-closed and

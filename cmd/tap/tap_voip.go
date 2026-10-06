@@ -331,11 +331,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	callCompletionMonitorConfig := &processor.CallCompletionMonitorConfig{
-		GracePeriod:   viper.GetDuration("tap.per_call_pcap.grace_period"),
-		ClosedCallTTL: viper.GetDuration("tap.per_call_pcap.closed_call_ttl"),
-		RetryWindow:   viper.GetDuration("tap.voip.sip_retry_window"),
-	}
+	callCompletionMonitorConfig := tapVoIPCompletionConfig()
 
 	// Build auto-rotate PCAP config if enabled
 	var autoRotateConfig *processor.AutoRotateConfig
@@ -592,6 +588,14 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	runtime.startHook = routing.Start
 	return runtime.run("VoIP Tap node", config)
+}
+
+func tapVoIPCompletionConfig() *processor.CallCompletionMonitorConfig {
+	return &processor.CallCompletionMonitorConfig{
+		GracePeriod:   effectiveTapVoIPGrace(viper.GetDuration("tap.per_call_pcap.grace_period")),
+		ClosedCallTTL: viper.GetDuration("tap.per_call_pcap.closed_call_ttl"),
+		RetryWindow:   viper.GetDuration("tap.voip.sip_retry_window"),
+	}
 }
 
 func tapSIPStreamConfig(cmd *cobra.Command) (voip.Config, error) {

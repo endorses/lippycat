@@ -327,11 +327,12 @@ func TestChainedPartialFaultyRecoveryReleasesBoundedProvenance(t *testing.T) {
 	}
 }
 
-func TestOrdinaryPartialSDPRecoveryDoesNotAuthorizeRetirement(t *testing.T) {
+func TestOrdinaryPartialSDPRecoveryRetiresUncertainEndpoints(t *testing.T) {
 	for _, mode := range []mediaadmission.Mode{mediaadmission.ModeEnforce, mediaadmission.ModeShadow} {
 		for _, policy := range []mediaadmission.FailurePolicy{mediaadmission.FailureOpen, mediaadmission.FailureClosed} {
 			t.Run(fmt.Sprintf("%s/%s", mode, policy), func(t *testing.T) {
 				bridge, registry, _ := retirementFixture(t, mode, policy)
+				bridge.cfg.RetirementGrace = time.Minute
 				invite := offer("ordinary-partial")
 				invite.Headers = map[string]string{"cseq": "1 INVITE"}
 				invite.SDP = derivationSDP("192.0.2.1", 10000, true)
@@ -346,6 +347,16 @@ func TestOrdinaryPartialSDPRecoveryDoesNotAuthorizeRetirement(t *testing.T) {
 				require.NoError(t, submitDerivation(t, bridge, registry, replacement))
 				require.Zero(t, bridge.Stats().UnknownDerivations)
 				retirementOwns(t, registry, invite.CallID, "192.0.2.1:10000", "192.0.2.2:20000", "192.0.2.1:30000", "192.0.2.2:40000")
+				bridge.publicationMu.Lock()
+				require.NoError(t, bridge.expireRetirements(time.Now().Add(2*time.Minute)))
+				bridge.publicationMu.Unlock()
+				retirementOwns(t, registry, invite.CallID, "192.0.2.1:30000", "192.0.2.2:40000")
+				if mode == mediaadmission.ModeEnforce {
+					require.Empty(t, registry.ResolveMediaEndpoints("192.0.2.1:10000", "").CallID)
+					require.Empty(t, registry.ResolveMediaEndpoints("192.0.2.2:20000", "").CallID)
+				} else {
+					retirementOwns(t, registry, invite.CallID, "192.0.2.1:10000", "192.0.2.2:20000")
+				}
 			})
 		}
 	}

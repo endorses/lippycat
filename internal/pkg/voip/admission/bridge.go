@@ -62,31 +62,35 @@ type Stats struct {
 }
 
 type selectedCall struct {
-	lifetimeAmbiguous   bool
-	forkAmbiguous       bool
-	repairRetire        []mediaadmission.EndpointKey
-	completing          bool
-	retirements         map[mediaadmission.EndpointKey]time.Time
-	retirementFailed    bool
-	retirementFailureAt time.Time
-	derivations         map[derivationSide]*derivationState
-	contextLost         bool
-	unknown             bool
-	known               bool
-	mediaRevision       uint64
-	mediaSet            map[mediaadmission.EndpointKey]struct{}
-	promote             []mediaadmission.EndpointKey
-	retry               bool
-	answered            bool
-	activeMedia         bool
-	selectedAt          time.Time
-	lifetime            callregistry.Lifetime
-	owner               mediaadmission.OwnerID
-	revision            uint64
-	metadataCutoff      uint64
+	lifetimeAmbiguous     bool
+	replayBlockedUntil    time.Time
+	replayEvidenceMissing bool
+	replayMissingCutoff   uint64
+	forkAmbiguous         bool
+	repairRetire          []mediaadmission.EndpointKey
+	completing            bool
+	retirements           map[mediaadmission.EndpointKey]time.Time
+	retirementFailed      bool
+	retirementFailureAt   time.Time
+	derivations           map[derivationSide]*derivationState
+	contextLost           bool
+	unknown               bool
+	known                 bool
+	mediaRevision         uint64
+	mediaSet              map[mediaadmission.EndpointKey]struct{}
+	promote               []mediaadmission.EndpointKey
+	retry                 bool
+	answered              bool
+	activeMedia           bool
+	selectedAt            time.Time
+	lifetime              callregistry.Lifetime
+	owner                 mediaadmission.OwnerID
+	revision              uint64
+	metadataCutoff        uint64
 }
 
 type Bridge struct {
+	malformedRSeq, malformedRAck                         uint64
 	identicalDuplicateGroups, conflictingDuplicateGroups uint64
 	proofHistory                                         lifetimeProofHistory
 	retrying                                             atomic.Bool
@@ -403,13 +407,14 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	}
 	retireSuperseded, retirementCSeq := false, uint64(0)
 	recoveryKey := b.key(result, nil)
-	if result.ResponseCode >= 300 && !recoveryKey.HeaderConflict {
+	lifetimePermitted := b.checkKeyLifetimeLocked(current, recoveryKey)
+	if lifetimePermitted && result.ResponseCode >= 300 && !recoveryKey.HeaderConflict {
 		b.rejectDerivation(current, result)
-	} else if validRecoveryCSeq(result) && !recoveryKey.HeaderConflict && result.ResponseCode > 100 && result.ResponseCode < 300 && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE") {
+	} else if lifetimePermitted && validRecoveryCSeq(result) && !recoveryKey.HeaderConflict && result.ResponseCode > 100 && result.ResponseCode < 300 && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE") {
 		b.requireRequestDerivation(current, result)
 		retireSuperseded, retirementCSeq = b.acceptDerivation(current, result)
 	}
-	if !known && !current.known && (result.Method == "INVITE" || result.CSeqMethod == "INVITE") {
+	if lifetimePermitted && !known && !current.known && (result.Method == "INVITE" || result.CSeqMethod == "INVITE") {
 		// An absent/expired pending offer cannot prove a selected call has no
 		// media. A later valid offer/answer or lifetime retirement supplies the
 		// missing derivation; a registry snapshot alone does not.
@@ -417,7 +422,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 			b.observeDerivation(current, mediaadmission.MetadataRecord{Key: b.key(result, nil), Complete: true})
 		}
 	}
-	if result.ResponseCode == 0 && validRecoveryCSeq(result) && !recoveryKey.HeaderConflict && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE" || result.CSeqMethod == "ACK") {
+	if lifetimePermitted && result.ResponseCode == 0 && validRecoveryCSeq(result) && !recoveryKey.HeaderConflict && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE" || result.CSeqMethod == "ACK") {
 		recoveryKey = b.bindRequestKey(current, recoveryKey)
 		retireSuperseded, retirementCSeq = b.finishConfirmedNegotiation(current, recoveryKey)
 	}
@@ -765,6 +770,7 @@ func (b *Bridge) retrySelected() error {
 		b.mu.Unlock()
 		return nil
 	}
+	b.expireLifetimeProofLocked(time.Now())
 	pending := make(map[string]callregistry.Lifetime)
 	for id, state := range b.selected {
 		if state.retry || len(state.promote) > 0 {
@@ -926,6 +932,9 @@ func (b *Bridge) promoteCurrent(id string, lifetime callregistry.Lifetime) error
 func (b *Bridge) recoverLocked() error {
 	if !b.needsSnapshot || b.closed {
 		return nil
+	}
+	if time.Now().Before(b.proofHistory.blockedUntil) {
+		return errors.New("replay protection remains capacity degraded")
 	}
 	if b.lostSelection {
 		counter, ok := b.cfg.Registry.(interface{ ActiveCallCount() int })

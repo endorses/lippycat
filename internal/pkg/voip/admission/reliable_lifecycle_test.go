@@ -288,7 +288,7 @@ func TestReliablePendingProofExpiryAndEvictionCannotSupplyMissingResponse(t *tes
 }
 
 // Final removal releases live proof and endpoint reservations. A bounded hash
-// watermark remains charged until bridge shutdown to reject lifetime replay.
+// watermark remains in the separately bounded replay pool until window expiry.
 func assertRetiredLifetimeCharges(t *testing.T, bridge *Bridge, historyCount int) {
 	t.Helper()
 	bridge.mu.Lock()
@@ -298,8 +298,9 @@ func assertRetiredLifetimeCharges(t *testing.T, bridge *Bridge, historyCount int
 	require.Zero(t, bytes)
 	require.Zero(t, endpoints)
 	usage := bridge.cfg.Metadata.Stats()
-	require.Equal(t, historyCount, usage.SelectedContexts)
-	require.Equal(t, historyCount*lifetimeProofEntryBytes, usage.SelectedBytes)
+	require.Zero(t, usage.SelectedContexts)
+	require.Zero(t, usage.SelectedBytes)
+	require.Len(t, bridge.proofHistory.initiators, historyCount)
 	require.Zero(t, usage.SelectedEndpoints)
 }
 

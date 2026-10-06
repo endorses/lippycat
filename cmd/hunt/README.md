@@ -764,6 +764,15 @@ supported packet rate. Consider sampling first as identity volume grows. Larger
 capacity increases memory and mutex-held maintenance scans, during which eligible
 `TryLock` misses remain evidence loss. See the guide for separate storage costs.
 
+Endpoint retirement uses the configured `PCAPGracePeriod`, with the existing
+five-second fallback for nonpositive values. Hunter has no `--pcap-grace-period`
+flag. Retired proof has a separate bounded pool shared across observation domains,
+configured under `hunter.voip.rtp_ebpf` with `replay_window` (default `2m`),
+`replay_guard_capacity` (`10000`) and `replay_guard_bytes` (`2097152`). Unrecordable
+retirements cause temporary domain-wide uncertainty until the last failure plus
+the window; sustained overload may extend it. Expiry does not protect against
+arbitrary old captures with identical unbound wire identities.
+
 See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
 semantics, platform/privilege requirements, observation domains, configuration,
 failure states and verification status.

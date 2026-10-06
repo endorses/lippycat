@@ -973,6 +973,15 @@ The option does not enable admission. Sampled outcomes remain incomplete
 when frame, ownership, revision, or publication evidence is missing or ambiguous;
 counts do not prove parity for all traffic. Loss categories remain separate.
 
+Tap normalizes nonpositive `--pcap-grace-period` to the existing five-second
+default before constructing routing; endpoint retirement and call completion use
+the same effective grace. Retired proof has a separate bounded pool shared across
+observation domains, configured under `tap.voip.rtp_ebpf` with `replay_window`
+(default `2m`), `replay_guard_capacity` (`10000`) and `replay_guard_bytes`
+(`2097152`). Unrecordable retirements cause temporary domain-wide uncertainty until
+the last failure plus the window; sustained overload may extend it. Expiry does
+not protect against arbitrary old captures with identical unbound wire identities.
+
 See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
 semantics, platform/privilege requirements, observation domains, configuration,
 failure states and verification status.

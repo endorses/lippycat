@@ -51,9 +51,10 @@ func (a *reliableEvidenceAccumulator) observe(name, value string) {
 		a.cseqSeen = true
 	case "rseq":
 		number, valid := sequenceNumber(value, 32, true)
-		if !valid || (a.rseqSeen && number != a.rseqNumber) {
+		if a.rseqSeen && (!valid || a.evidence.RSeqMalformed || number != a.rseqNumber) {
 			a.evidence.Conflicts.RSeq = true
 		}
+		a.evidence.RSeqMalformed = a.evidence.RSeqMalformed || !valid
 		if !a.rseqSeen {
 			a.rseqNumber = number
 		}
@@ -70,9 +71,10 @@ func (a *reliableEvidenceAccumulator) observe(name, value string) {
 			method = fields[2]
 			valid = rseqValid && cseqValid && IsRequestMethod(method)
 		}
-		if !valid || (a.rackSeen && (rseq != a.rackRSeq || cseq != a.rackCSeq || method != a.rackMethod)) {
+		if a.rackSeen && (!valid || a.evidence.RAckMalformed || rseq != a.rackRSeq || cseq != a.rackCSeq || method != a.rackMethod) {
 			a.evidence.Conflicts.RAck = true
 		}
+		a.evidence.RAckMalformed = a.evidence.RAckMalformed || !valid
 		if !a.rackSeen {
 			a.rackRSeq, a.rackCSeq, a.rackMethod = rseq, cseq, method
 		}

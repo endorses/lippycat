@@ -3,26 +3,30 @@ package admission
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 )
 
-// A watermark contains hashes and sequence bounds, never retained SIP payloads.
-// Storage survives final removal: forgetting a retired initiator would make an
-// indistinguishable delayed PRACK usable by a later identical-tag lifetime.
-// Capacity exhaustion therefore retains conservative loss instead of eviction.
+// Retired wire proof is protected for a configured monotonic window. Exact
+// guards have a separate budget; unrecordable retirements conservatively block
+// the domain until one window after the last failure, never until restart.
 type lifetimeProofHistory struct {
-	initiators map[[32]byte]retiredInitiatorProof
-	lost       bool
+	initiators   map[[32]byte]retiredInitiatorProof
+	blockedUntil time.Time
+	unrecorded   uint64
+	lastWarning  time.Time
 }
 
 type retiredInitiatorProof struct {
 	lifetime callregistry.Lifetime
 	maximum  uint64
 	blocked  bool
+	expires  time.Time
 }
 
 // The reservation includes the fixed entry and conservative map allocation
@@ -50,7 +54,7 @@ func (b *Bridge) rememberLifetimeLocked(callID string, old *selectedCall) error 
 		return nil
 	}
 	candidates := make(map[[32]byte]retiredInitiatorProof)
-	if old.contextLost {
+	if old.contextLost || old.replayEvidenceMissing {
 		// Missing initiator/bounds can affect any reused transaction of this call,
 		// but cannot poison an unrelated Call-ID. An empty initiator is a domain-
 		// separated call-level marker, not a valid SIP request identity.
@@ -86,24 +90,31 @@ func (b *Bridge) rememberLifetimeLocked(callID string, old *selectedCall) error 
 			candidates[hash] = candidate
 		}
 	}
-	newCount := 0
-	for hash := range candidates {
-		if _, exists := b.proofHistory.initiators[hash]; !exists {
-			newCount++
-		}
+	now := time.Now()
+	b.expireLifetimeProofLocked(now)
+	if b.proofHistory.initiators == nil {
+		b.proofHistory.initiators = make(map[[32]byte]retiredInitiatorProof)
 	}
-	if newCount > 0 {
-		next := mediaadmission.SelectedDerivationUsage{Contexts: newCount, Bytes: newCount * lifetimeProofEntryBytes}
-		if err := b.cfg.Metadata.ReserveSelectedDerivation(mediaadmission.SelectedDerivationUsage{}, next); err != nil {
-			b.proofHistory.lost = true
-			return err
-		}
-		if b.proofHistory.initiators == nil {
-			b.proofHistory.initiators = make(map[[32]byte]retiredInitiatorProof, newCount)
-		}
-	}
+	var capacityErr error
+
 	for hash, candidate := range candidates {
-		previous := b.proofHistory.initiators[hash]
+		previous, exists := b.proofHistory.initiators[hash]
+		var reservationErr error
+		if !exists {
+			reservationErr = b.cfg.Metadata.ReserveReplayGuards(mediaadmission.SelectedDerivationUsage{}, mediaadmission.SelectedDerivationUsage{Contexts: 1, Bytes: lifetimeProofEntryBytes})
+		}
+		if reservationErr != nil {
+			b.proofHistory.unrecorded++
+			b.proofHistory.blockedUntil = now.Add(b.cfg.Limits.ReplayWindow)
+			b.needsSnapshot = true
+			capacityErr = errors.Join(mediaadmission.ErrCapacity, b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, mediaadmission.ErrCapacity))
+			if b.proofHistory.lastWarning.IsZero() || now.Sub(b.proofHistory.lastWarning) >= b.cfg.Limits.RetryInterval {
+				logger.Warn("Replay guard capacity exhausted", "domain", b.cfg.Domain, "guards", len(b.proofHistory.initiators), "window", b.cfg.Limits.ReplayWindow)
+				b.proofHistory.lastWarning = now
+			}
+			continue
+		}
+		candidate.expires = now.Add(b.cfg.Limits.ReplayWindow)
 		if previous.maximum > candidate.maximum {
 			candidate.maximum = previous.maximum
 		}
@@ -111,7 +122,7 @@ func (b *Bridge) rememberLifetimeLocked(callID string, old *selectedCall) error 
 		b.proofHistory.initiators[hash] = candidate
 	}
 
-	return nil
+	return capacityErr
 }
 
 // checkKeyLifetimeLocked rejects explicitly bound evidence from another
@@ -133,7 +144,14 @@ func (b *Bridge) observeLifetimeKeyLocked(call *selectedCall, key mediaadmission
 	if call == nil {
 		return false
 	}
-	if b.proofHistory.lost || b.retiredCallBlockedLocked(key.CallID) {
+	b.expireLifetimeProofLocked(time.Now())
+	if time.Now().Before(b.proofHistory.blockedUntil) {
+		call.replayBlockedUntil = b.proofHistory.blockedUntil
+		call.replayEvidenceMissing = true
+		call.replayMissingCutoff = b.nextMetadata
+		return false
+	}
+	if b.retiredCallBlockedLocked(key.CallID) {
 		call.lifetimeAmbiguous = true
 		return false
 	}
@@ -168,7 +186,7 @@ func (b *Bridge) observeLifetimeKeyLocked(call *selectedCall, key mediaadmission
 // uncertainty untouched. A missing opposite-side watermark is not by itself
 // authority to accept an old or unconfirmed transaction.
 func (b *Bridge) canConfirmedLifetimeLocked(call *selectedCall, key mediaadmission.DialogKey) bool {
-	if call == nil || b.proofHistory.lost || b.retiredCallBlockedLocked(key.CallID) || !key.CSeqValid || key.HeaderConflict || key.FromTag == "" || key.CallID == "" {
+	if call == nil || time.Now().Before(b.proofHistory.blockedUntil) || b.retiredCallBlockedLocked(key.CallID) || !key.CSeqValid || key.HeaderConflict || key.FromTag == "" || key.CallID == "" {
 		return false
 	}
 	if key.LifetimeSession != 0 || key.LifetimeGeneration != 0 {
@@ -185,14 +203,43 @@ func (b *Bridge) canConfirmedLifetimeLocked(call *selectedCall, key mediaadmissi
 
 func (b *Bridge) releaseLifetimeProofLocked() error {
 	count := len(b.proofHistory.initiators)
-	if count > 0 {
-		previous := mediaadmission.SelectedDerivationUsage{Contexts: count, Bytes: count * lifetimeProofEntryBytes}
-		if err := b.cfg.Metadata.ReserveSelectedDerivation(previous, mediaadmission.SelectedDerivationUsage{}); err != nil {
-			return fmt.Errorf("release retired lifetime proof reservation: %w", err)
-		}
+	if err := b.cfg.Metadata.ReserveReplayGuards(mediaadmission.SelectedDerivationUsage{Contexts: count, Bytes: count * lifetimeProofEntryBytes}, mediaadmission.SelectedDerivationUsage{}); err != nil {
+		return err
 	}
 	b.proofHistory = lifetimeProofHistory{}
 	return nil
+}
+
+// Expiry clears only pressure introduced by missing replay storage. Recompute
+// active calls from their remaining derivations; missing proof is not invented.
+// Caller holds b.mu. A delayed worker may retain protection longer, never shorter.
+func (b *Bridge) expireLifetimeProofLocked(now time.Time) {
+	for hash, guard := range b.proofHistory.initiators {
+		if !now.Before(guard.expires) {
+			if err := b.cfg.Metadata.ReserveReplayGuards(mediaadmission.SelectedDerivationUsage{Contexts: 1, Bytes: lifetimeProofEntryBytes}, mediaadmission.SelectedDerivationUsage{}); err != nil {
+				b.needsSnapshot = true
+				if publicationErr := b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, err); publicationErr != nil {
+					logger.Error("Replay guard release failed", "domain", b.cfg.Domain, "error", publicationErr)
+				}
+				continue
+			}
+			delete(b.proofHistory.initiators, hash)
+		}
+	}
+	if len(b.proofHistory.initiators) == 0 {
+		b.proofHistory.initiators = nil
+	}
+	if !b.proofHistory.blockedUntil.IsZero() && !now.Before(b.proofHistory.blockedUntil) {
+		b.proofHistory.blockedUntil = time.Time{}
+	}
+	for _, call := range b.selected {
+		if !call.replayBlockedUntil.IsZero() && !now.Before(call.replayBlockedUntil) {
+			call.replayBlockedUntil = time.Time{}
+			call.known, call.unknown, call.mediaSet = b.derivationSummary(call)
+			call.retry = true
+			b.needsSnapshot = true
+		}
+	}
 }
 
 // retireLifetimeLocked transfers the old selected-context reservation into its

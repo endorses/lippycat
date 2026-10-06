@@ -14,13 +14,18 @@ func (b *Bridge) repeatReliableResponseLocked(call *selectedCall, side derivatio
 	}
 	requestSide := derivationSide{side.initiator, side.sender, side.initiator, false}
 	request := call.derivations[requestSide]
-	if request == nil || !request.reliableAnswered || !request.complete || request.missing || request.rejected {
+	if request == nil || !request.complete || request.missing || request.rejected || request.conflict {
 		return false
 	}
 	answerSide := requestSide
 	answerSide.prack = true
-	answer := call.derivations[answerSide]
-	if answer == nil || !b.reliableAnswerMatches(call, answerSide, answer, time.Now()) {
+	answer := request
+	if request.reliableAnswered {
+		answer = call.derivations[answerSide]
+		if answer == nil || !b.reliableAnswerMatches(call, answerSide, answer, time.Now()) {
+			return false
+		}
+	} else if !request.hasSDP || request.prackCSeq <= request.cseq {
 		return false
 	}
 	latest := max(old.rseq, old.repeatedRSeq)
@@ -57,22 +62,49 @@ func (b *Bridge) observeRepeatedPRACKLocked(call *selectedCall, key mediaadmissi
 	request := call.derivations[requestSide]
 	answerSide := requestSide
 	answerSide.prack = true
-	answer := call.derivations[answerSide]
-	if request == nil || answer == nil || !request.reliableAnswered || !request.complete || request.rejected || request.missing || !answer.complete || !answer.hasSDP {
-		// Ordinary bodyless PRACKs carry no media answer. Keep their previous
-		// add-only metadata behavior: a missing required body stays unresolved,
-		// while an already offered body is not poisoned by its acknowledgment.
+	answer := request
+	if request == nil || !request.complete || request.rejected || request.missing || request.conflict {
+		return true
+	}
+	responseSide := derivationSide{key.ToTag, key.FromTag, key.FromTag, false}
+	response := call.derivations[responseSide]
+	if request.reliableAnswered {
+		answer = call.derivations[answerSide]
+		if answer == nil || !answer.complete || !answer.hasSDP {
+			return true
+		}
+	} else {
+		// An offered INVITE's SDP answer belongs to the response; its bodyless
+		// PRACK acknowledges transport of that answer without replacing either
+		// canonical body. Store the acknowledgement on the existing request.
+		answerSide = requestSide
+		if !request.hasSDP || response == nil || !response.reliable || !response.complete ||
+			!response.hasSDP || response.conflict || response.rejected || response.cseq != request.cseq ||
+			response.branch != request.branch || response.method != "INVITE" ||
+			(response.repeatedRSeq == 0 && key.RAckRSeq != response.rseq &&
+				(!answer.repeatedAckValid || response.rseq == ^uint32(0) || key.RAckRSeq != response.rseq+1)) {
+			return true
+		}
+	}
+	if response == nil || !response.reliable || !response.complete || response.conflict || response.rejected || response.rseq >= 1<<31 {
+		return true
+	}
+	latest := max(response.rseq, response.repeatedRSeq)
+	if key.RAckRSeq != latest && (response.repeatedPending || latest == ^uint32(0) || key.RAckRSeq != latest+1) {
 		return true
 	}
 	// Invalid, stale, or unrelated references leave both the original body proof
 	// and any outstanding acknowledgment untouched.
-	if !key.CSeqValid || key.HeaderConflict || !key.RAckValid || uint64(key.RAckCSeq) != request.cseq || key.RAckRSeq <= answer.rackRSeq || key.CSeq <= request.prackCSeq {
+	if !key.CSeqValid || key.HeaderConflict || !key.RAckValid || uint64(key.RAckCSeq) != request.cseq || (request.reliableAnswered && key.RAckRSeq <= answer.rackRSeq) || key.CSeq <= request.cseq || (request.reliableAnswered && key.CSeq <= request.prackCSeq) {
 		return true
 	}
-	if answer.repeatedAckValid && key.CSeq <= answer.repeatedAckSequence {
+	if answer.repeatedAckSequence != 0 && key.CSeq <= answer.repeatedAckSequence {
 		return true
 	}
 	next := *answer
+	if !request.reliableAnswered && next.prackCSeq == 0 {
+		next.prackCSeq, next.prackBranch = key.CSeq, key.Branch
+	}
 	next.repeatedAckValid = true
 	next.repeatedAckRSeq, next.repeatedAckCSeq = key.RAckRSeq, key.RAckCSeq
 	next.repeatedAckSequence, next.repeatedAckBranch = key.CSeq, key.Branch
@@ -80,8 +112,6 @@ func (b *Bridge) observeRepeatedPRACKLocked(call *selectedCall, key mediaadmissi
 	if !b.putDerivation(call, answerSide, &next) {
 		return true
 	}
-	responseSide := derivationSide{key.ToTag, key.FromTag, key.FromTag, false}
-	response := call.derivations[responseSide]
 	if response != nil && response.repeatedPending && repeatedAckMatches(request, response, &next, time.Now()) {
 		confirmed := *response
 		confirmed.repeatedPending = false

@@ -1,6 +1,7 @@
 package sip
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -66,6 +67,47 @@ func TestCSeqEvidenceBoundsAndLastLineClassification(t *testing.T) {
 			require.Equal(t, test.conflict, evidence.Conflicts.CSeq)
 			require.Equal(t, test.methodConflict, evidence.CSeqMethodConflict)
 			require.Equal(t, test.malformed, evidence.CSeqMalformed)
+		})
+	}
+}
+
+func TestMalformedReliableSingletonEvidence(t *testing.T) {
+	for _, header := range []string{"RSeq: 0", "RSeq: abc", "RSeq: 4294967296", "RAck: 0 1 INVITE", "RAck: abc 1 INVITE", "RAck: 101 1 INVITE extra"} {
+		t.Run(header, func(t *testing.T) {
+			method := "INVITE"
+			if strings.HasPrefix(header, "RAck") {
+				method = "PRACK"
+			}
+			event, err := Parse([]byte("SIP/2.0 183 Progress\r\nCSeq: 1 "+method+"\r\nRequire: 100rel\r\n"+header+"\r\nContent-Length: 0\r\n\r\n"), ParseOptions{})
+			require.NoError(t, err)
+			evidence := event.ReliableHeaderEvidence
+			require.Equal(t, ReliableHeaderConflicts{}, evidence.Conflicts)
+			require.Equal(t, method == "INVITE", evidence.RSeqMalformed)
+			require.Equal(t, method == "PRACK", evidence.RAckMalformed)
+			require.True(t, evidence.CSeqValid)
+			proof := ParseReliableHeadersWithEvidence(event.Headers, evidence)
+			require.False(t, proof.ResponseValid)
+			require.False(t, proof.RAckValid)
+		})
+	}
+}
+
+func TestMalformedReliableDuplicateGroupRemainsConflicting(t *testing.T) {
+	for _, headers := range []string{
+		"RSeq: 101\r\nRSeq: abc", "RSeq: abc\r\nRSeq: 101", "RSeq: abc\r\nRSeq: abc",
+		"RAck: 101 1 INVITE\r\nRAck: abc", "RAck: abc\r\nRAck: 101 1 INVITE", "RAck: abc\r\nRAck: abc",
+	} {
+		t.Run(headers, func(t *testing.T) {
+			event, err := Parse([]byte("SIP/2.0 183 Progress\r\nCSeq: 1 INVITE\r\nRequire: 100rel\r\n"+headers+"\r\nContent-Length: 0\r\n\r\n"), ParseOptions{})
+			require.NoError(t, err)
+			evidence := event.ReliableHeaderEvidence
+			if strings.HasPrefix(headers, "RSeq") {
+				require.True(t, evidence.RSeqMalformed)
+				require.True(t, evidence.Conflicts.RSeq)
+			} else {
+				require.True(t, evidence.RAckMalformed)
+				require.True(t, evidence.Conflicts.RAck)
+			}
 		})
 	}
 }

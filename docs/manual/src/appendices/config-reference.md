@@ -986,6 +986,9 @@ evidence-loss categories remain distinct from exact whole-traffic counts.
 | `pending_endpoint_capacity` | `40000`   | Retained metadata endpoints.                                   |
 | `pending_bytes`             | `8388608` | Pending metadata accounting bound.                             |
 | `pending_ttl`               | `30s`     | Pending metadata expiry.                                       |
+| `replay_window`             | `2m`      | Retired identity proof protection window.                      |
+| `replay_guard_capacity`     | `10000`   | Shared exact retired-proof entry bound across domains.         |
+| `replay_guard_bytes`        | `2097152` | Shared retired-proof accounting bound; 128 bytes per entry.    |
 | `expiration_batch`          | `256`     | Bounded expiry work per sweep.                                 |
 | `retry_interval`            | `1s`      | Reconciliation interval.                                       |
 | `shadow_evidence_capacity`  | `1024`    | Retained diagnostic samples.                                   |

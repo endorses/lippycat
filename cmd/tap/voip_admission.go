@@ -32,6 +32,7 @@ type tapVoIPRouting struct {
 }
 
 func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config, shards int, session *admissionintegration.Session, grace time.Duration, interfaces []string) (_ *tapVoIPRouting, err error) {
+	grace = effectiveTapVoIPGrace(grace)
 	cfg := mediaadmission.DefaultConfig()
 	if session != nil {
 		cfg = session.Config
@@ -92,6 +93,16 @@ func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config
 	}
 	return r, nil
 }
+
+// Normalize before constructing either completion or admission: neither role
+// should depend on a downstream constructor mutating shared configuration.
+func effectiveTapVoIPGrace(grace time.Duration) time.Duration {
+	if grace <= 0 {
+		return voip.DefaultConfig().PCAPGracePeriod
+	}
+	return grace
+}
+
 func partitionTapLimit(limit, domains, index int) int {
 	if limit == 0 {
 		return 0

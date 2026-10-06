@@ -60,8 +60,8 @@ func TestSelectedDerivationBudgetIsGlobalAcrossDomainBridges(t *testing.T) {
 					require.Equal(t, mediaadmission.StateDegradedClosed, scope.State)
 				}
 			}
-			// Final removal releases live descriptors but retains charged
-			// anti-replay history within this same configured shared pool.
+			// Final removal releases live descriptors; replay history uses
+			// its own shared pool and does not block new live reservations.
 			registry.Remove("domain-zero", callregistry.EndCompleted)
 			assertRetiredLifetimeCharges(t, first, 1)
 			require.Error(t, second.retrySelected())
@@ -75,7 +75,7 @@ func TestSelectedDerivationBudgetIsGlobalAcrossDomainBridges(t *testing.T) {
 			require.Zero(t, stats.SelectedEndpoints)
 			if limit != "endpoints" {
 				message.CallID = "replacement-before-shutdown"
-				require.Error(t, submitDerivation(t, second, registry, message), "charged history prevents another live reservation at this configured limit")
+				require.NoError(t, submitDerivation(t, second, registry, message), "separate history leaves live derivation capacity available")
 				registry.Remove(message.CallID, callregistry.EndCompleted)
 			}
 			require.NoError(t, first.Close())

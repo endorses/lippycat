@@ -1248,4 +1248,19 @@ message MediaAdmissionUncertainty {
  uint64 evidence_loss = 7;
  uint64 identical_duplicates = 8;
  uint64 conflicting_duplicates = 9;
+ // Cumulative parsed message/header groups containing malformed RSeq or RAck.
+ // Each kind counts once per message, including retransmissions and duplicates.
+ uint64 malformed_rseq = 10;
+ uint64 malformed_rack = 11;
+ // Per-domain exact retired-proof history usage and shared configured bounds,
+ // independent of live selected derivation capacity. No probabilistic overflow store is used.
+ uint64 replay_guards = 12;
+ uint64 replay_guard_capacity = 13;
+ uint64 replay_guard_bytes = 14;
+ uint64 replay_guard_byte_limit = 15;
+ uint64 replay_window_ns = 16;
+ // Cumulative retirements that could not be recorded. The remaining domain-wide
+ // conservative interval is a gauge; sustained overload may extend it.
+ uint64 replay_unrecorded = 17;
+ uint64 replay_degraded_ns = 18;
 }

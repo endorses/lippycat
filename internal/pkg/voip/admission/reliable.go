@@ -89,8 +89,33 @@ func (b *Bridge) rejectPRACK(call *selectedCall, key mediaadmission.DialogKey) {
 	requestSide := side
 	requestSide.prack = false
 	request := call.derivations[requestSide]
+	// Rejection belongs to the auxiliary acknowledgement's own transaction,
+	// never the canonical offer/answer that supplied the SDP bodies.
+	for _, ackSide := range []derivationSide{requestSide, side} {
+		ack := call.derivations[ackSide]
+		if ack == nil || !ack.repeatedAckValid || ack.repeatedAckSequence != key.CSeq || ack.repeatedAckBranch != key.Branch {
+			continue
+		}
+		next := *ack
+		next.repeatedAckValid = false
+		b.putDerivation(call, ackSide, &next)
+		responseSide := derivationSide{side.peer, side.sender, side.initiator, false}
+		if response := call.derivations[responseSide]; response != nil && response.repeatedRSeq == ack.repeatedAckRSeq {
+			pending := *response
+			pending.repeatedPending = true
+			b.putDerivation(call, responseSide, &pending)
+		}
+	}
+	request = call.derivations[requestSide]
 	matched := false
 	if request != nil {
+		if !request.reliableAnswered && request.prackCSeq == key.CSeq && request.prackBranch == key.Branch {
+			next := *request
+			next.prackCSeq, next.prackBranch = 0, ""
+			b.putDerivation(call, requestSide, &next)
+			request = call.derivations[requestSide]
+		}
+
 		next := *request
 		if exactPRACKProvenance(request, key) {
 			next.complete, matched = false, true

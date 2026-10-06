@@ -11,7 +11,7 @@ import (
 )
 
 func TestAdmissionTelemetryTransportAndJSON(t *testing.T) {
-	s := mediaadmission.Snapshot{Enabled: true, ConfiguredMode: mediaadmission.ModeShadow, EndpointCapacity: 20, Scopes: []mediaadmission.ScopeTelemetry{{ScopeStatus: mediaadmission.ScopeStatus{Domain: 2, State: mediaadmission.StateControlFailed, ControlUncertain: true, DesiredGeneration: 5, InstalledGeneration: 4, Reason: "sensitive-value", PendingUpdates: 3, DegradedDuration: 123, Uncertainty: mediaadmission.UncertaintyStats{UnknownCalls: 2, Reasons: [mediaadmission.UncertaintyReasonCount]uint64{mediaadmission.ReasonFaultyPRACK: 2}, IdenticalDuplicates: 8, ConflictingDuplicates: 3}}, Counters: [16]uint64{0: 11, 11: 7}}}, Metadata: mediaadmission.MetadataStats{Expired: 6}, Evidence: mediaadmission.EvidenceStats{ReadErrors: 1, Incomplete: true}}
+	s := mediaadmission.Snapshot{Enabled: true, ConfiguredMode: mediaadmission.ModeShadow, EndpointCapacity: 20, Scopes: []mediaadmission.ScopeTelemetry{{ScopeStatus: mediaadmission.ScopeStatus{Domain: 2, State: mediaadmission.StateControlFailed, ControlUncertain: true, DesiredGeneration: 5, InstalledGeneration: 4, Reason: "sensitive-value", PendingUpdates: 3, DegradedDuration: 123, Uncertainty: mediaadmission.UncertaintyStats{UnknownCalls: 2, Reasons: [mediaadmission.UncertaintyReasonCount]uint64{mediaadmission.ReasonFaultyPRACK: 2}, IdenticalDuplicates: 8, ConflictingDuplicates: 3, MalformedRSeq: 4, MalformedRAck: 5, ReplayGuards: 6, ReplayGuardCapacity: 10, ReplayGuardBytes: 768, ReplayGuardByteLimit: 1280, ReplayWindowNanos: 32000000000, ReplayUnrecorded: 7, ReplayDegradedNanos: 8000000000}}, Counters: [16]uint64{0: 11, 11: 7}}}, Metadata: mediaadmission.MetadataStats{Expired: 6}, Evidence: mediaadmission.EvidenceStats{ReadErrors: 1, Incomplete: true}}
 	stats := admissiontelemetry.ToProto(s)
 	wire, err := proto.Marshal(&management.HunterStats{RtpEbpf: stats})
 	require.NoError(t, err)
@@ -26,11 +26,17 @@ func TestAdmissionTelemetryTransportAndJSON(t *testing.T) {
 	require.Contains(t, string(bytes), `"unknown_calls":2`)
 	require.Contains(t, string(bytes), `"faulty_prack":2`)
 	require.Contains(t, string(bytes), `"degraded_duration_ns":123`)
+	for _, field := range []string{`"malformed_rseq":4`, `"malformed_rack":5`, `"replay_guards":6`, `"replay_guard_capacity":10`, `"replay_guard_bytes":768`, `"replay_guard_byte_limit":1280`, `"replay_window_ns":32000000000`, `"replay_unrecorded":7`, `"replay_degraded_ns":8000000000`} {
+		require.Contains(t, string(bytes), field)
+	}
 	bytes, err = StatusResponseToJSON(&management.StatusResponse{ProcessorStats: &management.ProcessorStats{RtpEbpf: stats}}, false)
 	require.NoError(t, err)
 	var object map[string]any
 	require.NoError(t, json.Unmarshal(bytes, &object))
 	require.Contains(t, object, "rtp_ebpf")
+	for _, field := range []string{`"malformed_rseq":4`, `"malformed_rack":5`, `"replay_guards":6`, `"replay_guard_capacity":10`, `"replay_guard_bytes":768`, `"replay_guard_byte_limit":1280`, `"replay_window_ns":32000000000`, `"replay_unrecorded":7`, `"replay_degraded_ns":8000000000`} {
+		require.Contains(t, string(bytes), field)
+	}
 	bytes, err = StatusResponseToJSON(&management.StatusResponse{ProcessorStats: &management.ProcessorStats{}}, false)
 	require.NoError(t, err)
 	require.NotContains(t, string(bytes), "rtp_ebpf")

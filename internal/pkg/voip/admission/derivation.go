@@ -36,6 +36,7 @@ type derivationState struct {
 	endpoints                        []mediaadmission.EndpointKey
 	retirementEndpoints              []mediaadmission.EndpointKey
 	retainedEndpoints                []mediaadmission.EndpointKey
+	endpointsHealthy                 bool
 	previous                         *derivationState
 	responseCode                     int
 	reliable                         bool
@@ -162,8 +163,8 @@ func (b *Bridge) storeDerivation(call *selectedCall, side derivationSide, next *
 
 // Preserve bounded endpoint provenance when the rollback predecessor advances.
 // Healthy historical associations survive until authoritative call cleanup.
-// Only endpoints from an unresolved PRACK exchange and its attempted repairs
-// can become candidates for destructive retirement after confirmed recovery.
+// Only complete, confirmed exchanges supply healthy provenance. Retaining a
+// partial or conflicting exchange cannot turn its endpoints into requirements.
 func (b *Bridge) retainRetirementEndpoints(call *selectedCall, next, old *derivationState) bool {
 	keys := append([]mediaadmission.EndpointKey(nil), old.retirementEndpoints...)
 	safe := append([]mediaadmission.EndpointKey(nil), old.retainedEndpoints...)
@@ -171,7 +172,7 @@ func (b *Bridge) retainRetirementEndpoints(call *selectedCall, next, old *deriva
 		if state == nil {
 			continue
 		}
-		if next.prackRecovery && state.cseq >= next.prackRecoveryCSeq {
+		if !state.endpointsHealthy || (next.prackRecovery && state.cseq >= next.prackRecoveryCSeq) {
 			keys = append(keys, state.endpoints...)
 			keys = append(keys, state.retirementEndpoints...)
 		} else {
@@ -367,6 +368,7 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 			return false
 		}
 		if key.CSeq == old.cseq {
+			next.endpointsHealthy = old.endpointsHealthy
 			next.delayedAckAnswered, next.delayedAckBranch = old.delayedAckAnswered, old.delayedAckBranch
 			next.observed = old.observed
 			if old.conflict {
@@ -394,6 +396,7 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 			} else {
 				next.complete = old.complete && next.complete && (ackRetransmission || (key.Branch == old.branch && key.CSeqMethod == old.method)) && old.digest == next.digest && sameDerivationEndpoints(old.endpoints, next.endpoints)
 			}
+			next.endpointsHealthy = next.endpointsHealthy && next.complete
 			next.repeatedRSeq, next.repeatedPending = old.repeatedRSeq, old.repeatedPending
 			// A final SDP retransmission may repeat the reliable offer, but
 			// cannot replace its exact response linkage or its matched answer.
@@ -407,6 +410,8 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 			next.accepted = old.accepted
 			next.reliableAnswered = old.reliableAnswered
 			next.prackCSeq, next.prackBranch = old.prackCSeq, old.prackBranch
+			next.repeatedAckValid, next.repeatedAckRSeq, next.repeatedAckCSeq = old.repeatedAckValid, old.repeatedAckRSeq, old.repeatedAckCSeq
+			next.repeatedAckSequence, next.repeatedAckBranch, next.repeatedAckExpires = old.repeatedAckSequence, old.repeatedAckBranch, old.repeatedAckExpires
 			if old.reliable {
 				next.proofExpires = old.proofExpires
 			}
@@ -435,6 +440,11 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 	if delayedACK || ackRetransmission {
 		next.branch, next.method = old.branch, "INVITE"
 		next.delayedAckAnswered, next.delayedAckBranch = true, key.Branch
+	}
+	if old != nil && next.cseq == old.cseq && !sameDerivationEndpoints(old.endpoints, next.endpoints) {
+		if !b.retainRetirementEndpoints(call, next, old) {
+			return false
+		}
 	}
 	b.putDerivation(call, side, next)
 	return true
@@ -532,6 +542,10 @@ func (b *Bridge) finishConfirmedNegotiation(call *selectedCall, key mediaadmissi
 	replacement := repaired || (request.recoveryEligible && !request.recoveryPending && !unresolvedState(request.previous) && !unresolvedState(response.previous))
 	if b.canConfirmedLifetimeLocked(call, key) {
 		call.lifetimeAmbiguous = false
+		if request.observed > call.replayMissingCutoff && response.observed > call.replayMissingCutoff {
+			call.replayEvidenceMissing = false
+			call.replayMissingCutoff = 0
+		}
 	}
 	retirePRACK := replacement && request.prackRecovery
 	answerSide := requestSide
@@ -544,6 +558,7 @@ func (b *Bridge) finishConfirmedNegotiation(call *selectedCall, key mediaadmissi
 	}
 	for _, side := range []derivationSide{requestSide, {key.ToTag, key.FromTag, key.FromTag, false}} {
 		next := *call.derivations[side]
+		next.endpointsHealthy = true
 		if repaired || (!next.recoveryPending && !unresolvedState(next.previous)) {
 			next.previous = nil
 		}
@@ -727,7 +742,7 @@ func (b *Bridge) confirmedDelayedACKKey(call *selectedCall, key mediaadmission.D
 }
 
 func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadmission.EndpointKey]struct{}) {
-	known, unknown := call.known, call.contextLost || call.lifetimeAmbiguous || call.forkAmbiguous
+	known, unknown := call.known, call.contextLost || call.replayEvidenceMissing || call.lifetimeAmbiguous || call.forkAmbiguous || time.Now().Before(call.replayBlockedUntil)
 	media := make(map[mediaadmission.EndpointKey]struct{})
 	for side, state := range call.derivations {
 		if side.initiator == "" {
@@ -738,7 +753,7 @@ func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadm
 			}
 			continue
 		}
-		unknown = unknown || state.recoveryPending
+		unknown = unknown || state.recoveryPending || state.repeatedPending
 		unknown = unknown || state.conflict
 		if !state.accepted && state.previous != nil {
 			unknown = unknown || unresolvedState(state.previous)

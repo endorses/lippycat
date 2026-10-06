@@ -21,6 +21,15 @@ type UncertaintyStats struct {
 	Reasons               [UncertaintyReasonCount]uint64
 	IdenticalDuplicates   uint64
 	ConflictingDuplicates uint64
+	MalformedRSeq         uint64
+	MalformedRAck         uint64
+	ReplayGuards          uint64
+	ReplayGuardCapacity   uint64
+	ReplayGuardBytes      uint64
+	ReplayGuardByteLimit  uint64
+	ReplayWindowNanos     uint64
+	ReplayUnrecorded      uint64
+	ReplayDegradedNanos   uint64
 }
 
 // UpdateUncertainty publishes diagnostics without changing kernel policy. Unknown

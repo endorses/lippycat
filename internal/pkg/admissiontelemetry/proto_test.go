@@ -1,9 +1,14 @@
 package admissiontelemetry
 
 import (
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
 	"testing"
 )
 
@@ -26,7 +31,7 @@ func TestSampledTelemetryProjectionAndCompatibility(t *testing.T) {
 }
 
 func TestUncertaintyTelemetryProjection(t *testing.T) {
-	u := mediaadmission.UncertaintyStats{UnknownCalls: 2, IdenticalDuplicates: 8, ConflictingDuplicates: 3}
+	u := mediaadmission.UncertaintyStats{UnknownCalls: 2, IdenticalDuplicates: 8, ConflictingDuplicates: 3, MalformedRSeq: 4, MalformedRAck: 5, ReplayGuards: 6, ReplayGuardCapacity: 10, ReplayGuardBytes: 768, ReplayGuardByteLimit: 1280, ReplayWindowNanos: 32000000000, ReplayUnrecorded: 7, ReplayDegradedNanos: 8000000000}
 	for i := range u.Reasons {
 		u.Reasons[i] = uint64(i + 1)
 	}
@@ -43,10 +48,55 @@ func TestUncertaintyTelemetryProjection(t *testing.T) {
 	require.Equal(t, uint64(6), got.Uncertainty.EvidenceLoss)
 	require.Equal(t, uint64(8), got.Uncertainty.IdenticalDuplicates)
 	require.Equal(t, uint64(3), got.Uncertainty.ConflictingDuplicates)
+	require.Equal(t, uint64(4), got.Uncertainty.MalformedRseq)
+	require.Equal(t, uint64(5), got.Uncertainty.MalformedRack)
+	require.Equal(t, uint64(6), got.Uncertainty.ReplayGuards)
+	require.Equal(t, uint64(10), got.Uncertainty.ReplayGuardCapacity)
+	require.Equal(t, uint64(768), got.Uncertainty.ReplayGuardBytes)
+	require.Equal(t, uint64(1280), got.Uncertainty.ReplayGuardByteLimit)
+	require.Equal(t, uint64(32000000000), got.Uncertainty.ReplayWindowNs)
+	require.Equal(t, uint64(7), got.Uncertainty.ReplayUnrecorded)
+	require.Equal(t, uint64(8000000000), got.Uncertainty.ReplayDegradedNs)
 	raw, err := proto.Marshal(wire)
 	require.NoError(t, err)
 	decoded := proto.Clone(wire)
 	proto.Reset(decoded)
 	require.NoError(t, proto.Unmarshal(raw, decoded))
 	require.True(t, proto.Equal(wire, decoded))
+}
+
+func TestReplayDiagnosticsAdditiveWireCompatibility(t *testing.T) {
+	// Reconstruct the previously published uncertainty descriptor with fields
+	// 1–9 only, so compatibility is checked against an actual older wire reader.
+	current := (&management.MediaAdmissionUncertainty{}).ProtoReflect().Descriptor()
+	legacyMessage := protodesc.ToDescriptorProto(current)
+	legacyMessage.Field = legacyMessage.Field[:9]
+	file, err := protodesc.NewFile(&descriptorpb.FileDescriptorProto{
+		Name: proto.String("legacy_admission.proto"), Package: proto.String("legacy"), Syntax: proto.String("proto3"),
+		MessageType: []*descriptorpb.DescriptorProto{legacyMessage},
+	}, nil)
+	require.NoError(t, err)
+	legacy := dynamicpb.NewMessage(file.Messages().Get(0))
+	currentMessage := &management.MediaAdmissionUncertainty{UnknownCalls: 2, MalformedRseq: 4, MalformedRack: 5, ReplayGuards: 6, ReplayWindowNs: 32000000000, ReplayDegradedNs: 8000000000}
+	raw, err := proto.Marshal(currentMessage)
+	require.NoError(t, err)
+	require.NoError(t, proto.Unmarshal(raw, legacy))
+	require.Equal(t, uint64(2), legacy.Get(legacy.Descriptor().Fields().ByName("unknown_calls")).Uint())
+	require.NotEmpty(t, legacy.GetUnknown(), "older peers preserve additive fields without interpreting them")
+	forwarded, err := proto.Marshal(legacy)
+	require.NoError(t, err)
+	var decoded management.MediaAdmissionUncertainty
+	require.NoError(t, proto.Unmarshal(forwarded, &decoded))
+	require.True(t, proto.Equal(currentMessage, &decoded))
+
+	// A response from the old peer has none of the new fields. Zero and absent
+	// values leave replay configuration unknown rather than inventing a bound.
+	legacy.Reset()
+	legacy.Set(legacy.Descriptor().Fields().ByName("unknown_calls"), protoreflect.ValueOfUint64(2))
+	raw, err = proto.Marshal(legacy)
+	require.NoError(t, err)
+	require.NoError(t, proto.Unmarshal(raw, &decoded))
+	require.Equal(t, uint64(2), decoded.UnknownCalls)
+	require.Zero(t, decoded.ReplayWindowNs)
+	require.Zero(t, decoded.MalformedRseq)
 }

@@ -56,6 +56,13 @@ func (n *NodesView) renderMediaAdmission() string {
 			fmt.Sprintf("RTP admission domain %d: %s; unknown calls %d; degraded %s", scope.Domain, scope.State, u.GetUnknownCalls(), time.Duration(scope.DegradedDurationNs).Round(time.Millisecond)),
 			fmt.Sprintf("Reasons (overlap): headers %d, PRACK %d, partial SDP %d, delayed offer %d, forks %d, evidence loss %d", u.GetConflictingHeaders(), u.GetFaultyPrack(), u.GetPartialSdp(), u.GetDelayedOffer(), u.GetForkAmbiguity(), u.GetEvidenceLoss()),
 			fmt.Sprintf("Duplicate header groups: identical %d, conflicting %d", u.GetIdenticalDuplicates(), u.GetConflictingDuplicates()),
+			fmt.Sprintf("Malformed header groups: RSeq %d, RAck %d", u.GetMalformedRseq(), u.GetMalformedRack()),
+		}
+		if u.GetReplayWindowNs() > 0 {
+			lines = append(lines,
+				fmt.Sprintf("Replay guards (domain/shared cap): %d/%d; bytes %d/%d; window %s", u.GetReplayGuards(), u.GetReplayGuardCapacity(), u.GetReplayGuardBytes(), u.GetReplayGuardByteLimit(), time.Duration(u.GetReplayWindowNs()).Round(time.Millisecond)),
+				fmt.Sprintf("Replay retirements unrecorded: %d; domain proof degraded for %s", u.GetReplayUnrecorded(), time.Duration(u.GetReplayDegradedNs()).Round(time.Millisecond)),
+			)
 		}
 		for _, line := range lines {
 			text.WriteString(nodesview.TruncateString(line, n.width))

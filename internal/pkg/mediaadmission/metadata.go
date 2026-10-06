@@ -40,6 +40,7 @@ type DialogKey struct {
 }
 
 type MetadataStats struct {
+	ReplayContexts, ReplayBytes                        int
 	SelectedContexts, SelectedBytes, SelectedEndpoints int
 	SelectedRejected                                   uint64
 	Dialogs                                            int
@@ -55,6 +56,23 @@ type MetadataStats struct {
 // SelectedDerivationUsage charges the separate, session-wide selected-context
 // pool. It shares configured limits with pending metadata, not retained entries.
 type SelectedDerivationUsage struct{ Contexts, Bytes, Endpoints int }
+
+// ReserveReplayGuards accounts a separate process-wide pool, shared by domain
+// bridges. Retirement history must never take capacity from live derivations.
+func (s *MetadataStore) ReserveReplayGuards(old, next SelectedDerivationUsage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if old.Contexts < 0 || old.Bytes < 0 || next.Contexts < 0 || next.Bytes < 0 || old.Contexts > s.stats.ReplayContexts || old.Bytes > s.stats.ReplayBytes {
+		return errors.New("invalid replay guard reservation")
+	}
+	contexts := s.stats.ReplayContexts - old.Contexts + next.Contexts
+	bytes := s.stats.ReplayBytes - old.Bytes + next.Bytes
+	if contexts > s.config.ReplayGuardCapacity || bytes > s.config.ReplayGuardBytes {
+		return ErrCapacity
+	}
+	s.stats.ReplayContexts, s.stats.ReplayBytes = contexts, bytes
+	return nil
+}
 
 // ReserveSelectedDerivation atomically replaces one context's resource charge.
 // Bridges in different domains share this store and therefore these limits.

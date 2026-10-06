@@ -231,9 +231,7 @@ func TestNegotiationRecoveryRepeatedReliableSDPKeepsResolvedBody(t *testing.T) {
 				ack.Headers = map[string]string{"cseq": "3 PRACK", "rack": "102 1 INVITE"}
 				if order == "response-first" {
 					_ = submitDerivation(t, bridge, registry, later)
-					if !changed {
-						assertDerivationState(t, bridge, controller, mediaadmission.FailureClosed, false)
-					}
+					assertDerivationState(t, bridge, controller, mediaadmission.FailureClosed, true)
 					_ = submitDerivation(t, bridge, registry, ack)
 				} else {
 					_ = submitDerivation(t, bridge, registry, ack)
@@ -433,8 +431,9 @@ func TestNegotiationRecoveryRetiredInitiatorWatermarkIsBoundedAndCharged(t *test
 	before := bridge.cfg.Metadata.Stats()
 	require.NoError(t, bridge.rememberLifetimeLocked("watermark-test", old))
 	charged := bridge.cfg.Metadata.Stats()
-	require.Equal(t, before.SelectedContexts+1, charged.SelectedContexts, "one bounded entry per initiator, not per media sender")
-	require.Equal(t, before.SelectedBytes+lifetimeProofEntryBytes, charged.SelectedBytes)
+	require.Len(t, bridge.proofHistory.initiators, 1)
+	require.Equal(t, before.SelectedContexts, charged.SelectedContexts, "replay history has a separate budget")
+	require.Equal(t, before.SelectedBytes, charged.SelectedBytes)
 	require.Equal(t, before.SelectedEndpoints, charged.SelectedEndpoints, "history keeps no media ownership")
 	require.NoError(t, bridge.rememberLifetimeLocked("watermark-test", old))
 	require.Equal(t, charged, bridge.cfg.Metadata.Stats(), "repeated retirement does not duplicate charge")
@@ -455,9 +454,11 @@ func TestNegotiationRecoveryRetiredInitiatorWatermarkIsBoundedAndCharged(t *test
 	require.Equal(t, before, bridge.cfg.Metadata.Stats())
 }
 
-func TestNegotiationRecoveryRetiredWatermarkNeverEvictsOnExhaustion(t *testing.T) {
+func TestNegotiationRecoveryRetiredWatermarkExhaustionExpires(t *testing.T) {
 	bridge, _, _ := retirementFixture(t, mediaadmission.ModeEnforce, mediaadmission.FailureClosed)
 	cfg := bridge.cfg.Limits
+	bridge.cfg.Limits.ReplayGuardCapacity = 1
+	cfg.ReplayGuardCapacity = 1
 	cfg.PendingDialogCapacity, cfg.PendingBytes = 1, lifetimeProofEntryBytes
 	store, err := mediaadmission.NewMetadataStore(cfg)
 	require.NoError(t, err)
@@ -468,14 +469,18 @@ func TestNegotiationRecoveryRetiredWatermarkNeverEvictsOnExhaustion(t *testing.T
 	require.NoError(t, bridge.rememberLifetimeLocked("first-retired-call", old))
 	require.ErrorIs(t, bridge.rememberLifetimeLocked("second-retired-call", old), mediaadmission.ErrCapacity)
 	require.Len(t, bridge.proofHistory.initiators, 1, "capacity failure preserves the original anti-replay watermark")
-	require.True(t, bridge.proofHistory.lost)
+	require.True(t, time.Now().Before(bridge.proofHistory.blockedUntil))
 	current := &selectedCall{lifetime: callregistry.Lifetime{Session: 1, Generation: 2}}
 	key := mediaadmission.DialogKey{CallID: "second-retired-call", FromTag: "from", CSeq: 9, CSeqMethod: "INVITE", CSeqValid: true}
 	require.False(t, bridge.checkKeyLifetimeLocked(current, key), "missing replay evidence cannot silently authorize reuse")
 	require.False(t, bridge.canConfirmedLifetimeLocked(current, key), "a clean message cannot recreate exhausted provenance")
-	require.True(t, current.lifetimeAmbiguous)
-	require.Equal(t, 1, store.Stats().SelectedContexts)
-	require.Equal(t, lifetimeProofEntryBytes, store.Stats().SelectedBytes)
+	require.False(t, current.lifetimeAmbiguous)
+	require.False(t, current.replayBlockedUntil.IsZero())
+	bridge.expireLifetimeProofLocked(time.Now().Add(bridge.cfg.Limits.ReplayWindow + time.Second))
+	require.True(t, bridge.checkKeyLifetimeLocked(current, key))
+	require.True(t, bridge.canConfirmedLifetimeLocked(current, key))
+	require.Equal(t, 0, store.Stats().SelectedContexts)
+	require.Zero(t, store.Stats().SelectedBytes)
 	require.NoError(t, bridge.releaseLifetimeProofLocked())
 	require.Zero(t, store.Stats().SelectedContexts)
 	require.Zero(t, store.Stats().SelectedBytes)
@@ -498,9 +503,9 @@ func TestNegotiationRecoveryRetirementTransfersFullReservation(t *testing.T) {
 	require.Equal(t, endpoints, store.Stats().SelectedEndpoints)
 	require.NoError(t, bridge.retireLifetimeLocked("full-reservation-retirement", old))
 	require.Empty(t, old.derivations)
-	require.False(t, bridge.proofHistory.lost, "old live context releases before historical reservation")
-	require.Equal(t, 1, store.Stats().SelectedContexts)
-	require.Equal(t, lifetimeProofEntryBytes, store.Stats().SelectedBytes)
+	require.True(t, bridge.proofHistory.blockedUntil.IsZero(), "old live context releases before historical reservation")
+	require.Zero(t, store.Stats().SelectedContexts)
+	require.Zero(t, store.Stats().SelectedBytes)
 	require.Zero(t, store.Stats().SelectedEndpoints)
 	require.Zero(t, store.Stats().SelectedRejected)
 	require.NoError(t, bridge.releaseLifetimeProofLocked())
@@ -512,7 +517,7 @@ func TestNegotiationRecoveryMissingRetiredEvidenceCannotInventFreshness(t *testi
 	bridge, _, _ := retirementFixture(t, mediaadmission.ModeEnforce, mediaadmission.FailureClosed)
 	old := &selectedCall{lifetime: callregistry.Lifetime{Session: 1, Generation: 1}, contextLost: true}
 	require.NoError(t, bridge.retireLifetimeLocked("missing-retired-evidence", old))
-	require.False(t, bridge.proofHistory.lost, "missing bounds are scoped to their hashed call")
+	require.True(t, bridge.proofHistory.blockedUntil.IsZero(), "missing bounds are scoped to their hashed call")
 	require.True(t, bridge.retiredCallBlockedLocked("missing-retired-evidence"))
 	current := &selectedCall{lifetime: callregistry.Lifetime{Session: 1, Generation: 2}}
 	key := mediaadmission.DialogKey{CallID: "missing-retired-evidence", FromTag: "from", CSeq: 90, CSeqMethod: "INVITE", CSeqValid: true}
@@ -533,9 +538,9 @@ func TestNegotiationRecoveryMalformedRetiredBoundsAreScopedToInitiator(t *testin
 	}}
 	before := bridge.cfg.Metadata.Stats()
 	require.NoError(t, bridge.rememberLifetimeLocked("malformed-retired-bounds", old))
-	require.False(t, bridge.proofHistory.lost, "malformed transaction does not cause global evidence loss")
-	require.Equal(t, before.SelectedContexts+1, bridge.cfg.Metadata.Stats().SelectedContexts)
-	require.Equal(t, before.SelectedBytes+lifetimeProofEntryBytes, bridge.cfg.Metadata.Stats().SelectedBytes)
+	require.True(t, bridge.proofHistory.blockedUntil.IsZero(), "malformed transaction does not cause global evidence loss")
+	require.Equal(t, before.SelectedContexts, bridge.cfg.Metadata.Stats().SelectedContexts)
+	require.Equal(t, before.SelectedBytes, bridge.cfg.Metadata.Stats().SelectedBytes)
 	key := mediaadmission.DialogKey{CallID: "malformed-retired-bounds", FromTag: "from", CSeq: 100, CSeqMethod: "INVITE", CSeqValid: true}
 	current := &selectedCall{lifetime: callregistry.Lifetime{Session: 1, Generation: 2}}
 	require.False(t, bridge.checkKeyLifetimeLocked(current, key), "same initiator has no reliable freshness bound")

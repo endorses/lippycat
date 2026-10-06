@@ -23,8 +23,10 @@ type ReliableHeaderDuplicates struct {
 	RAck bool
 }
 
-// ReliableHeaderConflicts identifies singleton evidence that is conflicting or
-// malformed. Valid equivalent numbers (including leading zeroes) compare equal;
+// ReliableHeaderConflicts identifies conflicting singleton evidence and
+// malformed CSeq. Malformed RSeq/RAck singleton values are separate; a
+// duplicate group containing a malformed value is conflicting. Valid equivalent
+// numbers (including leading zeroes) compare equal;
 // methods are validated SIP tokens and compare case sensitively.
 type ReliableHeaderConflicts struct {
 	CSeq bool
@@ -35,7 +37,11 @@ type ReliableHeaderConflicts struct {
 // ReliableHeaderEvidence contains bounded proof metadata, never raw values.
 // CSeqMin/Max include only fully valid occurrences. CSeqBoundsValid requires
 // every occurrence valid and a single method; conflicting numbers still provide
-// a range. CSeqValid additionally requires a single sequence number.
+// a range. Recovery currently uses only CSeqMax as its freshness bound; CSeqMin
+// preserves the validated range contract independently of last-line headers.
+// CSeqValid additionally requires a single sequence number.
+// RSeqMalformed/RAckMalformed record any malformed occurrence, separately from
+// conflicts, and invalidate only that header's reliable linkage proof.
 type ReliableHeaderEvidence struct {
 	Conflicts          ReliableHeaderConflicts
 	CSeqValid          bool
@@ -43,6 +49,8 @@ type ReliableHeaderEvidence struct {
 	CSeqMin, CSeqMax   uint32
 	CSeqMethodConflict bool
 	CSeqMalformed      bool
+	RSeqMalformed      bool
+	RAckMalformed      bool
 }
 
 // ParseReliableHeadersWithEvidence accepts identical valid repetitions while
@@ -50,7 +58,7 @@ type ReliableHeaderEvidence struct {
 // value hidden by the ordinary last-line representation.
 func ParseReliableHeadersWithEvidence(headers map[string]string, evidence ReliableHeaderEvidence) ReliableHeaders {
 	return ParseReliableHeaders(headers, ReliableHeaderDuplicates{
-		CSeq: evidence.Conflicts.CSeq, RSeq: evidence.Conflicts.RSeq, RAck: evidence.Conflicts.RAck,
+		CSeq: evidence.Conflicts.CSeq, RSeq: evidence.Conflicts.RSeq || evidence.RSeqMalformed, RAck: evidence.Conflicts.RAck || evidence.RAckMalformed,
 	})
 }
 

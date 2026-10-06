@@ -34,3 +34,14 @@ func TestSIPResultFromEventPreservesConflictingBounds(t *testing.T) {
 	require.True(t, result.ReliableHeaderEvidence.Conflicts.CSeq)
 	require.Equal(t, uint64(3), result.CSeqNumber)
 }
+
+func TestSIPResultFromEventPreservesMalformedReliableSingletons(t *testing.T) {
+	event, err := sip.Parse([]byte("SIP/2.0 200 OK\r\nCSeq: 1 INVITE\r\nRSeq: abc\r\nRAck: 0 1 INVITE\r\nContent-Length: 0\r\n\r\n"), sip.ParseOptions{})
+	require.NoError(t, err)
+	result := SIPResultFromEvent(event, nil)
+	require.Equal(t, event.ReliableHeaderEvidence, result.ReliableHeaderEvidence)
+	require.True(t, result.ReliableHeaderEvidence.RSeqMalformed)
+	require.True(t, result.ReliableHeaderEvidence.RAckMalformed)
+	require.Equal(t, sip.ReliableHeaderConflicts{}, result.ReliableHeaderEvidence.Conflicts)
+	require.True(t, result.ReliableHeaderEvidence.CSeqValid)
+}

@@ -1,9 +1,10 @@
 # Building and translating the manual
 
-English Markdown in `src/` is the authoritative source. German translations live
-in `po/de.po`. Every edition shares chapter filenames, examples, diagrams, and
-explicit heading IDs. English is published at the existing site root; German is
-published at `/de/`. Generated HTML and translation templates are not committed.
+English Markdown in `src/` is the authoritative source. Translations live in
+`po/de.po` (German) and `po/ca.po` (Catalan). Every edition shares chapter
+filenames, examples, diagrams, and explicit heading IDs. English is published
+at the existing site root; German is published at `/de/` and Catalan at `/ca/`.
+Generated HTML and translation templates are not committed.
 
 ## Tools
 
@@ -32,14 +33,15 @@ make manual-serve          # Build and serve the whole site on localhost:3000
 make manual-serve MANUAL_PORT=3001
 ```
 
-Open `http://localhost:3000/` for English or `http://localhost:3000/de/` for German.
+Open `http://localhost:3000/` for English, `http://localhost:3000/de/` for German,
+or `http://localhost:3000/ca/` for Catalan.
 The language selector preserves the current chapter, heading fragment, and query
 string. The preview server binds to localhost. Rebuild/restart it after edits;
 it serves the assembled site rather than providing mdBook's single-edition live
 reload. `make manual-clean` removes generated HTML.
 
 GitHub Actions builds all configured editions into one Pages artifact. The CNAME
-stays at the artifact root. Pull-request checks validate catalogs and build both
+stays at the artifact root. Pull-request checks validate catalogs and build all
 editions without publishing them.
 
 ## Updating translations
@@ -67,7 +69,8 @@ python3 docs/manual/tools/manual.py check --require-complete
 ```
 
 Catalog checks run regression tests for fuzzy fallback, validate Gettext syntax,
-and preserve inline code and Markdown link targets. They do not replace a review of technical meaning and German wording.
+and preserve inline code and Markdown link targets. They do not replace a review
+of technical meaning and language-specific wording.
 Avoid unrelated catalog reformatting; `msgcat --sort-by-file` provides standard PO
 formatting when needed. `make manual-extract` only regenerates the template.
 
@@ -132,6 +135,43 @@ identical across languages. Explain examples in the surrounding translated prose
 Retain explicit `{#heading-id}` attributes when renaming headings. For a new
 heading, choose an explicit stable ID before translating it. These IDs preserve
 existing English fragment URLs and cross-language navigation.
+
+## Catalan conventions
+
+Use standard Catalan and address readers consistently with **vós**: **executeu**,
+**feu**, **podeu**, and **vostre**. Prefer neutral phrasing when natural. Retain
+established acronyms such as CLI, TUI, PCAP, TLS, SIP, and RTP.
+
+| English                  | Catalan                            |
+| ------------------------ | ---------------------------------- |
+| packet capture (process) | captura de paquets                 |
+| capture (result)         | captura                            |
+| capture file             | fitxer de captura / fitxer PCAP    |
+| packet                   | paquet                             |
+| processor                | processador                        |
+| hunter node              | node Hunter                        |
+| tap node                 | node Tap                           |
+| network interface        | interfície de xarxa                |
+| network segment          | segment de xarxa                   |
+| protocol analysis        | anàlisi de protocols               |
+| LI delivery              | lliurament LI / lliurament X2/X3   |
+| data/event delivery      | transmissió de dades/esdeveniments |
+| lawful interception      | intercepció legal (LI)             |
+| sanitized identifier     | identificador depurat              |
+
+Distinguish sanitization from anonymization: **depurat** does not promise that an
+identifier is anonymous. Translate **anonymized** as **anonimitzat** only when the
+source makes that claim. Preserve authorization requirements, negation, expiry,
+resource limits, and delivery guarantees exactly; consult the English source and
+German translation when resolving technical intent.
+
+The TUI remains English-only. Retain visible labels such as **Capture**, **Nodes**,
+**Statistics**, **Settings**, **Help**, **Live Capture**, **Offline Capture**,
+**Remote Capture**, **Stats**, **Overview**, and **Distributed**. Translate the
+surrounding explanation, for example, “la pestanya Capture”. Translate descriptive
+link labels, but preserve their destinations. The shared rules above for inline
+code, command examples, configuration keys, and stable heading IDs also apply to
+Catalan.
 
 ## Adding another language
 

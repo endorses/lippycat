@@ -29,7 +29,7 @@ func TestBridgeUncertaintyHealthyReliableAndIndependentPartial(t *testing.T) {
 		t.Run(string(policy), func(t *testing.T) {
 			bridge, registry, controller := retirementFixture(t, mediaadmission.ModeEnforce, policy)
 			invite := retirementHealthyCall(t, bridge, registry, "reliable-prack")
-			request, answer := recoveryAtSequence(invite, "callee", "UPDATE", 40)
+			request, _ := recoveryAtSequence(invite, "callee", "UPDATE", 40)
 			request.SDP = derivationSDP("192.0.2.2", 40000, true)
 			_ = submitDerivation(t, bridge, registry, request)
 			stats := uncertaintySnapshot(t, bridge, controller)
@@ -37,7 +37,7 @@ func TestBridgeUncertaintyHealthyReliableAndIndependentPartial(t *testing.T) {
 			require.Equal(t, uint64(1), stats.Reasons[mediaadmission.ReasonPartialSDP])
 			require.Zero(t, stats.Reasons[mediaadmission.ReasonFaultyPRACK], "a retained healthy PRACK is not the cause of unrelated partial SDP")
 			require.Zero(t, stats.Reasons[mediaadmission.ReasonDelayedOffer], "the reliable delayed offer has already been answered")
-			request, answer = recoveryAtSequence(invite, "callee", "UPDATE", 41)
+			request, answer := recoveryAtSequence(invite, "callee", "UPDATE", 41)
 			_ = submitDerivation(t, bridge, registry, request)
 			require.NoError(t, submitDerivation(t, bridge, registry, answer))
 			require.Zero(t, uncertaintySnapshot(t, bridge, controller).UnknownCalls)

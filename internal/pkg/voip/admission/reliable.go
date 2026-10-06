@@ -16,7 +16,7 @@ func (b *Bridge) observePRACK(call *selectedCall, record mediaadmission.Metadata
 		call.contextLost = true
 		return true // Independently validated endpoints may still be promoted.
 	}
-	if current := call.derivations[side]; current != nil && key.RAckValid && current.cseq > uint64(key.RAckCSeq) && current.cseq >= key.CSeq {
+	if current := call.derivations[side]; current != nil && current.cseq > key.CSeq {
 		return false // A later observed negotiation already superseded this answer.
 	}
 	side.prack = true

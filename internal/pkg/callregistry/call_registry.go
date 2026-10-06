@@ -533,6 +533,48 @@ func (c *Core) ExpiredUnpinned(cutoff time.Time) []Call {
 	return result
 }
 
+// TryDissociateEndpointsForLifetime releases only the requested endpoint
+// ownerships for an exact live call incarnation. Missing endpoints are an
+// accepted no-op. The call lifecycle and pins remain unchanged.
+func (c *Core) TryDissociateEndpointsForLifetime(callID string, lifetime Lifetime, endpoints []string) bool {
+	if callID == "" || lifetime == (Lifetime{}) {
+		return false
+	}
+	c.mu.Lock()
+	call, exists := c.calls[callID]
+	if c.closed || !exists || call.Lifetime != lifetime {
+		c.mu.Unlock()
+		return false
+	}
+	changed := false
+	for _, endpoint := range endpoints {
+		if _, owned := c.callEndpoints[callID][endpoint]; !owned {
+			continue
+		}
+		delete(c.callEndpoints[callID], endpoint)
+		c.endpointCalls[endpoint] = withoutCallID(c.endpointCalls[endpoint], callID)
+		if len(c.endpointCalls[endpoint]) == 0 {
+			delete(c.endpointCalls, endpoint)
+			delete(c.endpointWinner, endpoint)
+		} else if c.endpointWinner[endpoint] == callID {
+			c.recomputeEndpointWinnerLocked(endpoint)
+		}
+		c.associationCount--
+		changed = true
+	}
+	if len(c.callEndpoints[callID]) == 0 {
+		delete(c.callEndpoints, callID)
+	}
+	var observation EndpointObservation
+	var observers []EndpointObserver
+	if changed {
+		observation, observers = c.endpointObservationLocked(callID)
+	}
+	c.mu.Unlock()
+	notifyEndpoints(observers, observation)
+	return true
+}
+
 // DissociateEndpoints releases every endpoint owned by callID while retaining
 // the call lifecycle record (for example during a trailing-media grace period).
 func (c *Core) DissociateEndpoints(callID string) {

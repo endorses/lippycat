@@ -68,6 +68,7 @@ type SIPEvent struct {
 	CallID, From, To, FromUser, ToUser, FromURI, ToURI string
 	FromTag, ToTag, PAssertedIdentity, ContentType     string
 	Headers                                            map[string]string
+	DuplicateReliableHeaders                           ReliableHeaderDuplicates
 	Body                                               []byte
 	SDP                                                []byte
 	SourceIP, DestinationIP                            string
@@ -173,14 +174,23 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 		if name == "via" && topVia == "" {
 			topVia = value
 		}
-		// List-valued Require combines across header lines. Singleton proof
-		// fields retain duplicates as an invalid comma-separated value, so a
-		// later line cannot replace conflicting reliable-response evidence.
-		if previous, exists := ev.Headers[name]; exists && (name == "require" || name == "rseq" || name == "rack" || name == "cseq") {
-			ev.Headers[name] = previous + ", " + value
-		} else {
-			ev.Headers[name] = value
+		// Keep last-line singleton values for ordinary consumers. Duplicate
+		// linkage is recorded separately so reliable matching cannot mistake
+		// the surviving value for unambiguous proof.
+		if previous, exists := ev.Headers[name]; exists {
+			switch name {
+			case "require":
+				ev.Headers[name] = previous + ", " + value
+				continue
+			case "cseq":
+				ev.DuplicateReliableHeaders.CSeq = true
+			case "rseq":
+				ev.DuplicateReliableHeaders.RSeq = true
+			case "rack":
+				ev.DuplicateReliableHeaders.RAck = true
+			}
 		}
+		ev.Headers[name] = value
 	}
 	bodyStart := headerEnd + sepLen
 	if bodyStart < len(data) {

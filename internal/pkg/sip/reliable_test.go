@@ -49,18 +49,23 @@ func TestReliableHeadersParserPreservesAmbiguity(t *testing.T) {
 	}{
 		{"require list", "Require: timer\r\nRequire: 100rel\r\nRSeq: 101\r\n", true, false},
 		{"folded require", "Require: timer,\r\n 100rel\r\nRSeq: 101\r\n", true, false},
+		{"identical rseq", "Require: 100rel\r\nRSeq: 101\r\nrSeQ: 101\r\n", false, false},
 		{"duplicate rseq", "Require: 100rel\r\nRSeq: 9\r\nRSeq: 101\r\n", false, false},
+		{"conflicting cseq", "Require: 100rel\r\nRSeq: 101\r\ncSeQ: 2 INVITE\r\n", false, false},
 		{"duplicate cseq", "Require: 100rel\r\nRSeq: 101\r\nCSeq: 1 INVITE\r\n", false, false},
+		{"identical rack", "RAck: 101 1 INVITE\r\nrAcK: 101 1 INVITE\r\n", false, false},
+		{"ordinary rack", "RAck: 101 1 INVITE\r\n", false, true},
+		{"duplicate prack cseq", "CSeq: 2 PRACK\r\nRAck: 101 1 INVITE\r\n", false, false},
 		{"duplicate rack", "RAck: 9 1 INVITE\r\nRAck: 101 1 INVITE\r\n", false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			start, cseq := "SIP/2.0 183 Progress", "1 INVITE"
-			if test.name == "duplicate rack" {
+			if test.name == "duplicate rack" || test.name == "identical rack" || test.name == "ordinary rack" || test.name == "duplicate prack cseq" {
 				start, cseq = "PRACK sip:peer@example.invalid SIP/2.0", "2 PRACK"
 			}
 			event, err := Parse([]byte(fmt.Sprintf("%s\r\nCSeq: %s\r\n%sContent-Length: 0\r\n\r\n", start, cseq, test.extra)), ParseOptions{})
 			require.NoError(t, err)
-			proof := ParseReliableHeaders(event.Headers)
+			proof := ParseReliableHeaders(event.Headers, event.DuplicateReliableHeaders)
 			require.Equal(t, test.response, proof.ResponseValid)
 			require.Equal(t, test.answer, proof.RAckValid)
 		})

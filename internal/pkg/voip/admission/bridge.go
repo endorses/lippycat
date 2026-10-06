@@ -27,6 +27,7 @@ type Registry interface {
 	Call(string) (callregistry.Call, bool)
 	EndpointSnapshot(string) (callregistry.EndpointObservation, bool)
 	TryAssociateEndpointForLifetime(string, callregistry.Lifetime, string) bool
+	TryDissociateEndpointsForLifetime(string, callregistry.Lifetime, []string) bool
 	AddObserver(callregistry.LifecycleObserver)
 	AddEndpointObserver(callregistry.EndpointObserver)
 }
@@ -87,6 +88,7 @@ type Bridge struct {
 	stop                chan struct{}
 	done                chan struct{}
 	mu                  sync.Mutex
+	publicationMu       sync.Mutex
 	cfg                 Config
 	session             uint64
 	nextMetadata        uint64
@@ -202,7 +204,7 @@ func (b *Bridge) ObserveValidated(result pipeline.SIPResult) error {
 
 func (b *Bridge) key(result pipeline.SIPResult, candidates []mediaadmission.MetadataRecord) mediaadmission.DialogKey {
 	key := mediaadmission.DialogKey{Domain: b.cfg.Domain, Session: b.session, CallID: result.CallID, FromTag: result.FromTag, ToTag: result.ToTag, Branch: result.ViaBranch, CSeq: result.CSeqNumber, CSeqMethod: result.CSeqMethod, ResponseCode: result.ResponseCode, DescriptorOnly: len(result.SDP) == 0, CSeqValid: validRecoveryCSeq(result)}
-	reliable := sip.ParseReliableHeaders(result.Headers)
+	reliable := sip.ParseReliableHeaders(result.Headers, result.DuplicateReliableHeaders)
 	key.ReliableResponse = reliable.ResponseValid && result.ResponseCode > 100 && result.ResponseCode < 200 && result.CSeqMethod == "INVITE"
 	key.RSeq, key.RAckValid, key.RAckRSeq, key.RAckCSeq = reliable.RSeq, reliable.RAckValid && result.ResponseCode == 0 && result.Method == "PRACK", reliable.RAckRSeq, reliable.RAckCSeq
 	if len(result.SDP) != 0 && len(result.SDP) <= sip.MaxMessageSize {
@@ -244,6 +246,17 @@ func compatible(key mediaadmission.DialogKey, result pipeline.SIPResult) bool {
 // message. Hunter adapters without a sipflow.Registry call it explicitly after
 // creating/updating their tracker. It never manufactures a registry lifetime.
 func (b *Bridge) Selected(result pipeline.SIPResult) error {
+	// Serialize endpoint publication as well as derivation updates. Otherwise a
+	// delayed promotion could reinstall endpoints retired by a newer exchange.
+	b.publicationMu.Lock()
+	publicationLocked := true
+	releasePublication := func() {
+		if publicationLocked {
+			publicationLocked = false
+			b.publicationMu.Unlock()
+		}
+	}
+	defer releasePublication()
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
@@ -293,6 +306,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	}
 	now := time.Now()
 	previousDerivations := make(map[derivationSide]*derivationState, len(current.derivations))
+	previousMedia := current.mediaSet
 	for side, state := range current.derivations {
 		previousDerivations[side] = state
 	}
@@ -344,11 +358,13 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	if len(promote) == 0 && !known {
 		b.stats.PromotionUnavailable++
 	}
+	retireSuperseded := false
+	recoveryKey := b.key(result, nil)
 	if result.ResponseCode >= 300 {
 		b.rejectDerivation(current, result)
 	} else if result.ResponseCode > 100 && result.ResponseCode < 300 && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE") {
 		b.requireRequestDerivation(current, result)
-		b.acceptDerivation(current, result)
+		retireSuperseded = b.acceptDerivation(current, result)
 	}
 	if !known && !current.known && (result.Method == "INVITE" || result.CSeqMethod == "INVITE") {
 		// An absent/expired pending offer cannot prove a selected call has no
@@ -357,6 +373,10 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 		if result.ResponseCode == 0 {
 			b.observeDerivation(current, mediaadmission.MetadataRecord{Key: b.key(result, nil), Complete: true})
 		}
+	}
+	if result.ResponseCode == 0 && validRecoveryCSeq(result) && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE") {
+		recoveryKey = b.bindRequestKey(current, recoveryKey)
+		retireSuperseded = b.finishConfirmedNegotiation(current, recoveryKey)
 	}
 	if result.ResponseCode >= 200 && result.ResponseCode < 300 && result.CSeqMethod == "INVITE" {
 		current.answered = true
@@ -399,12 +419,50 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 		diagnostic.RecordSelectionLifetime(current.owner, b.cfg.Domain, call.Created, current.selectedAt)
 	}
 	lifetime := call.Lifetime
+	var retire []string
+	if retireSuperseded {
+		obsolete := make(map[mediaadmission.EndpointKey]struct{}, len(previousMedia))
+		for endpoint := range previousMedia {
+			obsolete[endpoint] = struct{}{}
+		}
+		requestSide := derivationSide{recoveryKey.FromTag, recoveryKey.ToTag, recoveryKey.FromTag, false}
+		responseSide := derivationSide{recoveryKey.ToTag, recoveryKey.FromTag, recoveryKey.FromTag, false}
+		answerSide := requestSide
+		answerSide.prack = true
+		for side, state := range previousDerivations {
+			if side != requestSide && side != responseSide && side != answerSide {
+				continue
+			}
+			for _, endpoint := range state.retirementEndpoints {
+				obsolete[endpoint] = struct{}{}
+			}
+			for _, endpoint := range state.endpoints {
+				obsolete[endpoint] = struct{}{}
+			}
+			if state.previous != nil {
+				for _, endpoint := range state.previous.endpoints {
+					obsolete[endpoint] = struct{}{}
+				}
+			}
+		}
+		for endpoint := range obsolete {
+			if _, required := current.mediaSet[endpoint]; !required {
+				retire = append(retire, netip.AddrPortFrom(endpoint.Addr, endpoint.Port).String())
+			}
+		}
+	}
 	b.mu.Unlock()
 	// Registry endpoint callbacks reenter this bridge, so promotion happens with
 	// no bridge lock held. The registry enforces the exact captured lifetime.
+	if len(retire) > 0 && !b.cfg.Registry.TryDissociateEndpointsForLifetime(result.CallID, lifetime, retire) {
+		errs = append(errs, ErrCallUnavailable)
+	}
 	if err := b.promoteCurrent(result.CallID, lifetime); err != nil {
 		errs = append(errs, err)
 	}
+	// Snapshot callbacks can wait on independent lifecycle changes. Publication
+	// is complete; do not hold the writer lock through snapshot confirmation.
+	releasePublication()
 	if snapshot, exists := b.cfg.Registry.EndpointSnapshot(result.CallID); exists && snapshot.Call.Lifetime == lifetime {
 		if err := b.apply(snapshot); err != nil {
 			errs = append(errs, err)
@@ -629,6 +687,12 @@ func (b *Bridge) retryLoop() {
 }
 
 func (b *Bridge) retrySelected() error {
+	// A selected publication already drives reconciliation. Do not let the
+	// retry worker wait behind its callbacks, which may synchronously Close.
+	if !b.publicationMu.TryLock() {
+		return nil
+	}
+	defer b.publicationMu.Unlock()
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
@@ -700,6 +764,11 @@ func mergePromotions(call *selectedCall, previous map[derivationSide]*derivation
 	for side, old := range previous {
 		next := call.derivations[side]
 		if next == nil {
+			if side.prack {
+				for _, key := range old.endpoints {
+					retired[key] = true
+				}
+			}
 			continue // Binding an early dialog tag does not retire its endpoints.
 		}
 		rejected := next.rejected && !old.rejected && next.cseq == old.cseq && next.branch == old.branch && next.method == old.method

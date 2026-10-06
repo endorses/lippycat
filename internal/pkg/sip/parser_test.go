@@ -174,3 +174,34 @@ func TestPipelinedInputHonorsFirstContentLength(t *testing.T) {
 		t.Fatalf("pipelined parse leaked messages: %+v", event)
 	}
 }
+
+// Ordinary SIP consumers retain last-line singleton semantics even when reliable
+// linkage cannot trust duplicated headers.
+func TestDuplicateCSeqRetainsLastMethod(t *testing.T) {
+	for _, method := range []string{"INVITE", "BYE", "CANCEL"} {
+		for _, first := range []string{"7 " + method, "6 OPTIONS"} {
+			t.Run(method+"/"+first, func(t *testing.T) {
+				event, err := Parse([]byte("SIP/2.0 200 OK\r\nCSeq: "+first+"\r\ncSeQ: 7 "+method+"\r\nContent-Length: 0\r\n\r\n"), ParseOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if event.CSeqNumber != 7 || event.CSeqMethod != method || CSeqMethod(event.Headers["cseq"]) != method || event.Headers["cseq"] != "7 "+method {
+					t.Fatalf("duplicate CSeq corrupted last-line classification: number=%d method=%q header=%q", event.CSeqNumber, event.CSeqMethod, event.Headers["cseq"])
+				}
+			})
+		}
+	}
+}
+
+func TestDuplicateReliableSingletonValuesRemainLastLine(t *testing.T) {
+	event, err := Parse([]byte("PRACK sip:peer@example.invalid SIP/2.0\r\nCSeq: 2 PRACK\r\nRSeq: 9\r\nrSeQ: 101\r\nRAck: 9 1 INVITE\r\nrAcK: 101 1 INVITE\r\nContent-Length: 0\r\n\r\n"), ParseOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Headers["rseq"] != "101" || event.Headers["rack"] != "101 1 INVITE" {
+		t.Fatalf("singleton values were combined: %v", event.Headers)
+	}
+	if event.DuplicateReliableHeaders != (ReliableHeaderDuplicates{RSeq: true, RAck: true}) {
+		t.Fatalf("duplicate singleton evidence lost: %+v", event.DuplicateReliableHeaders)
+	}
+}

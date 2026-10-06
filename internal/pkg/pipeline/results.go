@@ -1,6 +1,10 @@
 package pipeline
 
-import "time"
+import (
+	"time"
+
+	"github.com/endorses/lippycat/internal/pkg/sip"
+)
 
 // DomainResult is implemented by output-neutral analysis results.
 type DomainResult interface {
@@ -22,6 +26,7 @@ type SIPResult struct {
 	SDP                            []byte
 	Body                           []byte
 	Headers                        map[string]string
+	DuplicateReliableHeaders       sip.ReliableHeaderDuplicates
 	Packet                         *PacketEnvelope
 	MatchedFilterIDs               []string
 	Lifecycle                      []CallLifecycleObservation

@@ -15,11 +15,31 @@ type ReliableHeaders struct {
 	RAckCSeq      uint32
 }
 
+// ReliableHeaderDuplicates records ambiguous singleton linkage independently
+// of the last-line values exposed to ordinary SIP consumers. Identical repeated
+// singleton headers are ambiguous too; folded continuations are not duplicates.
+type ReliableHeaderDuplicates struct {
+	CSeq bool
+	RSeq bool
+	RAck bool
+}
+
 // ParseReliableHeaders validates RFC 3262 linkage. An INVITE response uses
 // Require: 100rel and one RSeq; PRACK references that response's INVITE CSeq,
 // independently of its own CSeq and Via branch. SIP methods are case sensitive.
-func ParseReliableHeaders(headers map[string]string) ReliableHeaders {
+// Parsed message consumers must pass SIPEvent.DuplicateReliableHeaders. The
+// optional argument retains support for callers validating standalone headers.
+func ParseReliableHeaders(headers map[string]string, duplicates ...ReliableHeaderDuplicates) ReliableHeaders {
 	var result ReliableHeaders
+	var repeated ReliableHeaderDuplicates
+	for _, duplicate := range duplicates {
+		repeated.CSeq = repeated.CSeq || duplicate.CSeq
+		repeated.RSeq = repeated.RSeq || duplicate.RSeq
+		repeated.RAck = repeated.RAck || duplicate.RAck
+	}
+	if repeated.CSeq {
+		return result
+	}
 	cseq := strings.Fields(headers["cseq"])
 	if len(cseq) != 2 {
 		return result
@@ -27,13 +47,13 @@ func ParseReliableHeaders(headers map[string]string) ReliableHeaders {
 	if _, valid := sequenceNumber(cseq[0], 31, false); !valid {
 		return result
 	}
-	if cseq[1] == "INVITE" {
+	if cseq[1] == "INVITE" && !repeated.RSeq {
 		required, valid := reliableRequired(headers["require"])
 		if number, numberValid := sequenceNumber(headers["rseq"], 32, true); valid && required && numberValid {
 			result.ResponseValid, result.RSeq = true, number
 		}
 	}
-	if cseq[1] == "PRACK" {
+	if cseq[1] == "PRACK" && !repeated.RAck {
 		fields := strings.Fields(headers["rack"])
 		if len(fields) != 3 || fields[2] != "INVITE" {
 			return result

@@ -199,13 +199,29 @@ with `pending_ttl`. Once the answer is validated, its bounded current-lifetime
 context survives that expiry until applicable supersession or retirement. An
 exactly matched rejection of the PRACK restores uncertainty.
 
-This supports the delayed-offer answer defined in
-[RFC 3262 section 5](https://www.rfc-editor.org/rfc/rfc3262.html#section-5), rather
-than unrestricted PRACK offer/answer negotiation. After that offer has been
-answered in PRACK, a valid UPDATE can carry a new offer and its response can carry
-the answer, as described in
-[RFC 3311 sections 3 and 5](https://www.rfc-editor.org/rfc/rfc3311.html#section-5).
-Arbitrary UPDATE SDP is not the answer to an outstanding reliable 183 offer.
+The reliable provisional offer requires its answer in PRACK, as defined in
+[RFC 3262 section 5](https://www.rfc-editor.org/rfc/rfc3262.html#section-5).
+SDP in ACK after a bodyless PRACK does not substitute for that missing answer;
+this exchange remains uncertain. An early UPDATE cannot answer an outstanding
+reliable provisional offer. Early and established-dialog UPDATE have different
+offer/answer constraints, as described in
+[RFC 3311 section 5.1](https://www.rfc-editor.org/rfc/rfc3311.html#section-5.1).
+
+After an observed successful final INVITE response establishes the dialog, a
+later complete offer and matching successful answer in re-INVITE or UPDATE can
+supersede unresolved evidence from a faulty, unmatched, unreliable or partial
+PRACK exchange in that same dialog and live call. A request alone, an incomplete
+answer, a rejected exchange or input from another dialog cannot establish this
+recovery. Supersession removes obsolete PRACK endpoint ownership; endpoints
+shared with current valid evidence remain. Other unresolved contexts and failed
+endpoint or control writes still prevent recovery. Replayed superseded PRACK
+evidence cannot restore obsolete endpoints.
+
+The SIP parser combines repeated `Require` lines. For duplicate singleton
+`CSeq`, `RSeq` and `RAck` headers, general consumers retain the last value, while
+reliable offer/answer matching treats the duplicates as invalid proof. Duplicate
+`CSeq` lines therefore do not produce a comma-corrupted method or authorize
+reliable recovery.
 
 ## Failure and diagnostic modes
 

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Recover VoIP admission after faulty, unmatched or partial PRACK evidence through
+  a later complete, confirmed re-INVITE or established-dialog UPDATE. Superseded
+  PRACK endpoint ownership is removed while current shared ownership remains.
+  Early UPDATE and ACK SDP cannot answer an outstanding reliable provisional offer.
+- Combine repeated SIP `Require` headers while preserving the last singleton
+  `CSeq`, `RSeq` and `RAck` value for general consumers. Duplicate singleton
+  headers invalidate reliable offer/answer proof without corrupting CSeq methods.
 - **VoIP hunter upgrade:** application filters now reach hunters with eBPF
   admission disabled. Previously, a receiver-interface mismatch could leave
   hunters selecting calls broadly despite distributed identity or IP filters.

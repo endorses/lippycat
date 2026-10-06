@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  GO_VERSION: "1.25.13"
+  LOG_LEVEL: "info"
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev
+
+      - name: Run unit tests
+        run: |
+          go test -v -race -tags=all -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        continue-on-error: true
+        with:
+          file: ./coverage.txt
+          flags: unittests
+          name: codecov-umbrella
+
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.5.0
+
+      - name: Run golangci-lint
+        run: golangci-lint run --timeout=5m --build-tags=all
+
+      - name: Check go fmt
+        run: |
+          # Preserve upstream formatting in vendored third-party modules.
+          unformatted=$(git ls-files -z -- '*.go' ':!:third_party/**' | xargs -0 -r gofmt -s -l)
+          if [ -n "$unformatted" ]; then
+            echo "The following files need formatting:"
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Check go vet
+        run: go vet -tags=all ./...
+
+  manual-build:
+    name: Build User Manual
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Gettext
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext
+
+      - name: Install mdBook and plugins
+        run: |
+          bash docs/manual/tools/install.sh "$HOME/.local"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Build manual
+        run: make manual-check manual
+
+  build-test:
+    name: Build All Variants
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        variant: [all, hunter, processor, tap, cli, tui]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev
+
+      - name: Build ${{ matrix.variant }} variant
+        run: make ${{ matrix.variant }}
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: lippycat-${{ matrix.variant }}-${{ github.sha }}
+          path: bin/*
+          retention-days: 7
+
+  build-matrix:
+    name: Test and Vet Build Partitions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev libxml2-utils
+
+      - name: Check non-CUDA build matrix
+        run: make build-matrix

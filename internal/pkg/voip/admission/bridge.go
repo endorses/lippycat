@@ -306,7 +306,6 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	}
 	now := time.Now()
 	previousDerivations := make(map[derivationSide]*derivationState, len(current.derivations))
-	previousMedia := current.mediaSet
 	for side, state := range current.derivations {
 		previousDerivations[side] = state
 	}
@@ -358,13 +357,13 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	if len(promote) == 0 && !known {
 		b.stats.PromotionUnavailable++
 	}
-	retireSuperseded := false
+	retireSuperseded, retirementCSeq := false, uint64(0)
 	recoveryKey := b.key(result, nil)
 	if result.ResponseCode >= 300 {
 		b.rejectDerivation(current, result)
 	} else if result.ResponseCode > 100 && result.ResponseCode < 300 && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE") {
 		b.requireRequestDerivation(current, result)
-		retireSuperseded = b.acceptDerivation(current, result)
+		retireSuperseded, retirementCSeq = b.acceptDerivation(current, result)
 	}
 	if !known && !current.known && (result.Method == "INVITE" || result.CSeqMethod == "INVITE") {
 		// An absent/expired pending offer cannot prove a selected call has no
@@ -376,7 +375,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	}
 	if result.ResponseCode == 0 && validRecoveryCSeq(result) && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE") {
 		recoveryKey = b.bindRequestKey(current, recoveryKey)
-		retireSuperseded = b.finishConfirmedNegotiation(current, recoveryKey)
+		retireSuperseded, retirementCSeq = b.finishConfirmedNegotiation(current, recoveryKey)
 	}
 	if result.ResponseCode >= 200 && result.ResponseCode < 300 && result.CSeqMethod == "INVITE" {
 		current.answered = true
@@ -420,11 +419,8 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	}
 	lifetime := call.Lifetime
 	var retire []string
-	if retireSuperseded {
-		obsolete := make(map[mediaadmission.EndpointKey]struct{}, len(previousMedia))
-		for endpoint := range previousMedia {
-			obsolete[endpoint] = struct{}{}
-		}
+	if retireSuperseded && b.cfg.Limits.Mode == mediaadmission.ModeEnforce {
+		obsolete := make(map[mediaadmission.EndpointKey]struct{})
 		requestSide := derivationSide{recoveryKey.FromTag, recoveryKey.ToTag, recoveryKey.FromTag, false}
 		responseSide := derivationSide{recoveryKey.ToTag, recoveryKey.FromTag, recoveryKey.FromTag, false}
 		answerSide := requestSide
@@ -436,17 +432,23 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 			for _, endpoint := range state.retirementEndpoints {
 				obsolete[endpoint] = struct{}{}
 			}
-			for _, endpoint := range state.endpoints {
-				obsolete[endpoint] = struct{}{}
-			}
-			if state.previous != nil {
-				for _, endpoint := range state.previous.endpoints {
+			for _, prior := range []*derivationState{state, state.previous} {
+				if prior == nil || prior.cseq < retirementCSeq {
+					continue
+				}
+				for _, endpoint := range prior.endpoints {
 					obsolete[endpoint] = struct{}{}
 				}
 			}
 		}
+		protected := make(map[mediaadmission.EndpointKey]bool)
+		for _, state := range current.derivations {
+			for _, endpoint := range state.retainedEndpoints {
+				protected[endpoint] = true
+			}
+		}
 		for endpoint := range obsolete {
-			if _, required := current.mediaSet[endpoint]; !required {
+			if _, required := current.mediaSet[endpoint]; !required && !protected[endpoint] {
 				retire = append(retire, netip.AddrPortFrom(endpoint.Addr, endpoint.Port).String())
 			}
 		}

@@ -236,7 +236,10 @@ func testDerivationContextCapacity(t *testing.T, limit string) {
 	case "contexts":
 		cfg.PendingDialogCapacity = 1
 	case "bytes":
-		cfg.PendingBytes = 700
+		// Admit one descriptor, then exhaust the shared pool on its answer.
+		cfg.PendingBytes, _ = derivationCost(derivationSide{"replacement", "peer", "replacement", false}, &derivationState{
+			branch: "replacement", method: "INVITE", endpoints: make([]mediaadmission.EndpointKey, 2),
+		})
 	case "endpoints":
 		cfg.PendingEndpointCapacity = 2
 	}

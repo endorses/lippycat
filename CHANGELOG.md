@@ -10,12 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Recover VoIP admission after faulty, unmatched or partial PRACK evidence through
-  a later complete, confirmed re-INVITE or established-dialog UPDATE. Superseded
-  PRACK endpoint ownership is removed while current shared ownership remains.
-  Early UPDATE and ACK SDP cannot answer an outstanding reliable provisional offer.
+  a later complete, confirmed caller-initiated re-INVITE or established-dialog
+  UPDATE. Enforce-mode repair removes obsolete faulty-context ownership while
+  preserving current shared and independent requirements. Healthy re-offers and
+  hold/resume retain historical endpoint attribution; shadow-mode recovery keeps
+  userspace registry ownership. Early UPDATE and ACK SDP cannot supply the missing
+  admission proof for an outstanding reliable provisional offer.
 - Combine repeated SIP `Require` headers while preserving the last singleton
   `CSeq`, `RSeq` and `RAck` value for general consumers. Duplicate singleton
   headers invalidate reliable offer/answer proof without corrupting CSeq methods.
+  Duplicate CSeq also invalidates ordinary admission negotiation evidence and
+  keeps that call lifetime uncertain, including after a later valid re-offer.
 - **VoIP hunter upgrade:** application filters now reach hunters with eBPF
   admission disabled. Previously, a receiver-interface mismatch could leave
   hunters selecting calls broadly despite distributed identity or IP filters.

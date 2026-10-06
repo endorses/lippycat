@@ -128,3 +128,33 @@ func (b *Bridge) bodylessReliablyAnswered(call *selectedCall, side derivationSid
 	answer := call.derivations[answerSide]
 	return answer != nil && request.method == "INVITE" && b.reliableAnswerMatches(call, answerSide, answer, now)
 }
+
+// Establishment is not evidence of a faulty PRACK. Retain the initiating INVITE
+// sequence separately so historical associations predating this exchange cannot
+// be retired by its eventual repair. The flag survives attempted replacements.
+func (b *Bridge) unresolvedPRACKContext(call *selectedCall, side derivationSide, request *derivationState) (uint64, bool) {
+	if request == nil {
+		return 0, false
+	}
+	if request.prackRecovery {
+		return request.prackRecoveryCSeq, true
+	}
+	answerSide := side
+	answerSide.prack = true
+	if answer := call.derivations[answerSide]; answer != nil {
+		// A response-first replacement may already have advanced the response
+		// descriptor. Keep the exact answer previously validated in this request;
+		// an observed matched rejection still invalidates its completeness.
+		validated := request.reliableAnswered && request.complete && !request.missing && !request.rejected &&
+			answer.complete && !answer.rejected && answer.rackValid && answer.rackCSeq == uint32(request.cseq) &&
+			request.prackCSeq == answer.cseq && request.prackBranch == answer.branch
+		if !validated && !b.reliableAnswerMatches(call, answerSide, answer, time.Now()) {
+			return request.cseq, true
+		}
+	}
+	response := call.derivations[derivationSide{side.peer, side.sender, side.initiator, false}]
+	if request.method == "INVITE" && !request.hasSDP && !request.missing && !request.rejected && response != nil && response.reliable && response.hasSDP && response.cseq == request.cseq && response.branch == request.branch && response.method == request.method {
+		return request.cseq, true // Missing answer to the observed reliable offer.
+	}
+	return 0, false
+}

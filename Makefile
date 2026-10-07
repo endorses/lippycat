@@ -263,7 +263,7 @@ clean-cuda:
 MANUAL_TOOL_BIN ?= $(HOME)/.local/bin
 CARGO_BIN := $(HOME)/.cargo/bin
 
-# Build every configured manual language (English at /, translations at /<code>/).
+# Build every configured manual language (Catalan at /, English/German at /en/, /de/).
 MANUAL_PORT ?= 3000
 manual:
 	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 docs/manual/tools/manual.py build

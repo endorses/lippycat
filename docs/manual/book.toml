@@ -12,7 +12,7 @@ extra-watch-dirs = ["po", "languages.json"]
 [output.html]
 git-repository-url = "https://github.com/endorses/lippycat"
 edit-url-template = "https://github.com/endorses/lippycat/edit/main/docs/manual/{path}"
-site-url = "https://🫦🐱.ws/"
+site-url = "https://lippy.cat/"
 additional-js = [
     "mermaid.min.js",
     "mermaid-init.js",

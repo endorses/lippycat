@@ -23,13 +23,15 @@ OUTPUT = ROOT / "book"
 def languages():
     editions = json.loads((ROOT / "languages.json").read_text())
     codes = [edition["code"] for edition in editions]
-    if not editions or codes[0] != "en" or len(codes) != len(set(codes)):
-        raise ValueError("Configure English first and use unique language codes")
-    for edition in editions:
+    if not editions or "en" not in codes or len(codes) != len(set(codes)):
+        raise ValueError("Configure English and use unique language codes")
+    if editions[0]["path"] != "":
+        raise ValueError("Configure the root edition first with an empty path")
+    for index, edition in enumerate(editions):
         code = edition["code"]
         if not re.fullmatch(r"[a-z]{2,3}(?:-[A-Za-z0-9]+)*", code):
             raise ValueError(f"Invalid language code: {code}")
-        if edition["path"] != ("" if code == "en" else f"{code}/"):
+        if edition["path"] != ("" if index == 0 else f"{code}/"):
             raise ValueError(f"Use a single language directory for {code}")
         for key in ("name", "title", "description"):
             if not isinstance(edition[key], str) or not edition[key]:
@@ -47,7 +49,7 @@ def environment(edition):
         MDBOOK_BOOK__LANGUAGE=edition["code"],
         MDBOOK_BOOK__TITLE=edition["title"],
         MDBOOK_BOOK__DESCRIPTION=edition["description"],
-        MDBOOK_OUTPUT__HTML__SITE_URL=f"https://🫦🐱.ws/{edition['path']}",
+        MDBOOK_OUTPUT__HTML__SITE_URL=f"https://lippy.cat/{edition['path']}",
     )
     if edition["code"] != "en":
         env["MDBOOK_OUTPUT__HTML__EDIT_URL_TEMPLATE"] = (
@@ -104,12 +106,17 @@ class Chapter(HTMLParser):
 
 
 def verify_build(editions):
+    english = next(edition for edition in editions if edition["code"] == "en")
     for source in (ROOT / "src").rglob("*.md"):
         if source.name == "SUMMARY.md":
             continue
         chapter = source.relative_to(ROOT / "src").with_suffix(".html")
-        original = Chapter(OUTPUT / chapter)
-        for edition in editions[1:]:
+        original = Chapter(OUTPUT / english["path"] / chapter)
+        if original.language != "en":
+            raise ValueError(f"en: wrong HTML language in {chapter}")
+        for edition in editions:
+            if edition["code"] == "en":
+                continue
             translated = Chapter(OUTPUT / edition["path"] / chapter)
             if translated.language != edition["code"]:
                 raise ValueError(f"{edition['code']}: wrong HTML language in {chapter}")
@@ -127,7 +134,7 @@ def verify_build(editions):
 
 def build():
     editions = languages()
-    # English must run first: its clean build removes the previous output tree.
+    # The root edition must run first: its clean build removes the output tree.
     with tempfile.TemporaryDirectory(prefix="lippycat-manual-") as directory:
         for edition in editions:
             env = environment(edition)
@@ -166,7 +173,9 @@ def extract():
 
 def update():
     template = extract()
-    for edition in languages()[1:]:
+    for edition in languages():
+        if edition["code"] == "en":
+            continue
         catalog = ROOT / "po" / f"{edition['code']}.po"
         if catalog.exists():
             run(["msgmerge", "--update", "--backup=none", catalog, template])
@@ -206,7 +215,9 @@ def entries(path):
 def check(require_complete=False):
     template = extract()
     expected = {entry["msgid"] for entry in entries(template) if entry["msgid"]}
-    for edition in languages()[1:]:
+    for edition in languages():
+        if edition["code"] == "en":
+            continue
         catalog = ROOT / "po" / f"{edition['code']}.po"
         run(["msgfmt", "--check", "--statistics", "-o", os.devnull, catalog])
         # Merge into a temporary file to detect new/changed English messages
@@ -255,7 +266,11 @@ def serve(port):
     build()
     handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(OUTPUT))
     with http.server.ThreadingHTTPServer(("127.0.0.1", port), handler) as server:
-        print(f"Manual: http://localhost:{port}/ (German: /de/)", flush=True)
+        for edition in languages():
+            print(
+                f"{edition['name']}: http://localhost:{port}/{edition['path']}",
+                flush=True,
+            )
         with contextlib.suppress(KeyboardInterrupt):
             server.serve_forever()
 

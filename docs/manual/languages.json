@@ -1,8 +1,32 @@
 [
   {
+    "code": "ca",
+    "name": "Català",
+    "path": "",
+    "title": "lippycat 🫦🐱 Manual d’usuari",
+    "description": "Guia completa per a la captura i l’anàlisi del trànsit de xarxa amb lippycat",
+    "ui": {
+      "Table of contents": "Índex",
+      "Toggle Table of Contents": "Mostra o amaga l’índex",
+      "Change theme": "Canvia el tema",
+      "Themes": "Temes",
+      "Search (`/`)": "Cerca (`/`)",
+      "Toggle Searchbar": "Mostra o amaga la barra de cerca",
+      "Search this book ...": "Cerca en aquest manual…",
+      "Print this book": "Imprimeix aquest manual",
+      "Git repository": "Repositori Git",
+      "Suggest an edit": "Proposa una modificació",
+      "Previous chapter": "Capítol anterior",
+      "Next chapter": "Capítol següent",
+      "Copy to clipboard": "Copia al porta-retalls",
+      "Copied!": "Copiat!"
+    },
+    "selectorLabel": "Selecciona la llengua"
+  },
+  {
     "code": "en",
     "name": "English",
-    "path": "",
+    "path": "en/",
     "title": "lippycat 🫦🐱 Manual",
     "description": "Comprehensive guide to network traffic capture and analysis with lippycat",
     "selectorLabel": "Select language"
@@ -30,29 +54,5 @@
       "Copied!": "Kopiert!"
     },
     "selectorLabel": "Sprache auswählen"
-  },
-  {
-    "code": "ca",
-    "name": "Català",
-    "path": "ca/",
-    "title": "lippycat 🫦🐱 Manual d’usuari",
-    "description": "Guia completa per a la captura i l’anàlisi del trànsit de xarxa amb lippycat",
-    "ui": {
-      "Table of contents": "Índex",
-      "Toggle Table of Contents": "Mostra o amaga l’índex",
-      "Change theme": "Canvia el tema",
-      "Themes": "Temes",
-      "Search (`/`)": "Cerca (`/`)",
-      "Toggle Searchbar": "Mostra o amaga la barra de cerca",
-      "Search this book ...": "Cerca en aquest manual…",
-      "Print this book": "Imprimeix aquest manual",
-      "Git repository": "Repositori Git",
-      "Suggest an edit": "Proposa una modificació",
-      "Previous chapter": "Capítol anterior",
-      "Next chapter": "Capítol següent",
-      "Copy to clipboard": "Copia al porta-retalls",
-      "Copied!": "Copiat!"
-    },
-    "selectorLabel": "Selecciona la llengua"
   }
 ]

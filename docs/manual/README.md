@@ -2,8 +2,8 @@
 
 English Markdown in `src/` is the authoritative source. Translations live in
 `po/de.po` (German) and `po/ca.po` (Catalan). Every edition shares chapter
-filenames, examples, diagrams, and explicit heading IDs. English is published
-at the existing site root; German is published at `/de/` and Catalan at `/ca/`.
+filenames, examples, diagrams, and explicit heading IDs. Catalan is published
+at the site root; English is published at `/en/` and German at `/de/`.
 Generated HTML and translation templates are not committed.
 
 ## Tools
@@ -33,8 +33,8 @@ make manual-serve          # Build and serve the whole site on localhost:3000
 make manual-serve MANUAL_PORT=3001
 ```
 
-Open `http://localhost:3000/` for English, `http://localhost:3000/de/` for German,
-or `http://localhost:3000/ca/` for Catalan.
+Open `http://localhost:3000/` for Catalan, `http://localhost:3000/en/` for English,
+or `http://localhost:3000/de/` for German.
 The language selector preserves the current chapter, heading fragment, and query
 string. The preview server binds to localhost. Rebuild/restart it after edits;
 it serves the assembled site rather than providing mdBook's single-edition live
@@ -43,6 +43,29 @@ reload. `make manual-clean` removes generated HTML.
 GitHub Actions builds all configured editions into one Pages artifact. The CNAME
 stays at the artifact root. Pull-request checks validate catalogs and build all
 editions without publishing them.
+
+The production domain is `lippy.cat`: Catalan is at `https://lippy.cat/`,
+English at `https://lippy.cat/en/`, and German at `https://lippy.cat/de/`.
+Before deploying the domain change, register the domain, verify ownership in
+GitHub, and configure the repository's Pages custom domain and DNS records
+following [GitHub's custom-domain documentation](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site).
+Enable HTTPS once GitHub has provisioned the certificate.
+
+The previous emoji domain, `🫦🐱.ws` (`xn--5o8hj1i.ws`), needs a separate
+HTTPS-capable forwarding service with a permanent HTTP redirect to
+`https://lippy.cat/en/`. DNS records alone cannot redirect to a language path.
+For existing chapter links, preserve the old English chapter path under `/en/`
+(for example, `/installation.html` redirects to `/en/installation.html`).
+GitHub Pages hosts the manual; the forwarding service only handles requests for
+the previous domain.
+
+For the emoji domain at GoDaddy, open **Domain Settings → DNS → Forwarding**
+and add forwarding to `https://lippy.cat/en` with **Permanent (301)** and
+without masking. GoDaddy documents automatic HTTPS support for new forwarding
+configurations in its [forwarding instructions](https://www.godaddy.com/help/forward-my-godaddy-domain-12123).
+Set this up after the new Pages domain is serving successfully. Test existing
+chapter URLs separately: the basic domain-forwarding documentation does not
+guarantee the path mapping described above.
 
 ## Updating translations
 
@@ -176,7 +199,8 @@ Catalan.
 ## Adding another language
 
 - [ ] Add an entry to `languages.json` with its code, native name, `<code>/` path,
-      translated title, and description. Keep English first with an empty path.
+      translated title, and description. Keep the root edition first with an empty
+      path; all other editions use `<code>/`. English remains the source language.
 - [ ] Run `make manual-translations` to initialize `po/<code>.po`.
 - [ ] Translate the catalog and document any language-specific style conventions.
 - [ ] Run `make manual-check manual` and preview navigation, search, and diagrams.

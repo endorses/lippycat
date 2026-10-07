@@ -39,7 +39,7 @@ jobs:
         run: make manual-check manual
 
       - name: Add CNAME for custom domain
-        run: echo 'xn--5o8hj1i.ws' > docs/manual/book/CNAME
+        run: echo 'lippy.cat' > docs/manual/book/CNAME
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

@@ -535,6 +535,161 @@ target under the retained XID.
 
 Intercepted data is delivered to MDF endpoints using binary TLV (Type-Length-Value) encoding per ETSI TS 103 221-2.
 
+### Optional SIP call-leg correlation {#sip-call-leg-correlation}
+
+Call-leg correlation is disabled by default. Enable selected rules under
+`processor.li.correlation` or `tap.li.correlation` only after verifying the signaling
+and MDF profile. A grouped call uses the FNV-1a ID of its first selected Call-ID for X2
+and X3; the MDF owns the final CIN interpretation and deduplication. Grouping changes
+only Correlation IDs and their dependent sequence contexts. Source packets, payloads,
+matched tasks, authorization, direction and destinations remain unchanged.
+
+A retained first decision always wins. For a new eligible initial transaction, the order
+is trusted session headers (H) and parent Call-ID references (P), SDP origin (S),
+address chaining with the same called identity (R1), exact calling/called identity pair
+(R2), then address chaining with rewritten numbers. H/P disagreement or ambiguity leaves
+the leg separate. Unusable or ambiguous S falls through; ambiguous weaker matches leave
+the leg separate. Enable each method independently. Already published groups are never
+merged retrospectively.
+
+`session_headers` accepts arbitrary valid SIP header names, matched case-insensitively.
+Session-ID selects the initiating UUID: local in the initial INVITE, remote in a
+response-only observation; nil or malformed UUIDs supply no key. P-Charging-Vector
+selects `icid-value`. Proprietary headers compare their complete nonempty values exactly
+after trimming surrounding whitespace; case and semicolons remain significant.
+Conflicting repeated values are not authoritative. `parent_call_id_headers` contains
+trusted headers naming one exact, case-preserved retained parent Call-ID; unknown, later
+or self-referencing parents cannot regroup a published child.
+
+R1 compares initial INVITE transport addresses within `address_window` and before the
+relevant final response. `node_aliases` is a list of disjoint address lists, each
+representing one node; it does not rewrite calling or called identities. Compare
+complete canonical identities, never number suffixes or deployment-specific digit
+substitutions. R2 requires the exact pair within `number_window` and no address match.
+Rewritten-number R1 requires one eligible address candidate and no called-number
+candidate. These heuristics can falsely group unrelated calls; missing observations and
+A,C,B arrival in an A → B → C chain can leave one call split.
+
+S compares the full SDP origin `(username, sess-id, nettype, addrtype,
+unicast-address)`; version is revision metadata. Offer and answer roles remain separate;
+an unknown role supplies no evidence. Distinct initial transactions update an
+independent bounded history before matching. Reuse spanning more than
+`sdp_origin_reuse_window`, or contradictory trusted values of the same header type,
+suspends that origin. Retransmissions neither refresh observation TTL nor renew
+suspension. Suspension deadlines are fixed; distinct use during a period renews it once
+at expiry. At cache capacity S is disabled rather than evicting history. Release starts
+fresh history and never regroups published legs.
+
+Every group must retain a common active task generation across all member decisions.
+Task edits, expiry and reactivation invalidate stale eligibility. Existing decisions
+also pin X3-first and late-signaling legs. At startup, and after a decision cannot be
+retained at capacity, `decision_horizon` blocks new adoption while restored adopted IDs
+still apply. Transactions or forwarding delays beyond that horizon can defeat protection
+of unpersisted standalone decisions. Activity, including RTP publication, refreshes
+retention; terminal decisions use `terminal_grace`, and inactivity follows the
+configured call lifecycle lifetime.
+
+Common-task membership includes the administrative state incarnation as well as XID and
+activation generation. Persistent deployments use the authenticated administrative store
+incarnation; stateless deployments use a fresh runtime incarnation. Replacing
+administrative storage or restarting without it therefore cannot make a reused XID and
+generation join a stale restored group. Retained adopted decisions still reuse their
+selected IDs, but new legs cannot join through stale task contexts.
+
+An empty `store_file` disables restart persistence. Adopted decisions use a dedicated
+authenticated encrypted store, separate from administrative LI state and journals.
+Configure `store_key_file`, `store_key_id` and optional `store_read_keys` entries
+`id=path`; use an independent 32-byte key and a protected directory. Initialize the
+store offline with the node stopped. Corrupt or unauthenticated storage is a startup
+error, not an empty replacement store.
+
+<!-- i18n:skip -->
+```bash
+openssl rand -out /etc/lippycat/keys/li-correlation.key 32
+lc migrate li-correlation --output /var/lib/lippycat/li-correlation.enc \
+  --key-file /etc/lippycat/keys/li-correlation.key --key-id correlation-1 \
+  --max-records 100000
+```
+
+Rotate this store offline with `lc migrate li-correlation rotate`, following the key
+rotation syntax of `lc migrate li-state --source-format=encrypted`. Keep previous keys needed to read
+retained records. Before publication, a committed write selects the adopted ID;
+confirmed noncommit selects standalone. An uncertain write publishes the adopted ID and
+retries without changing a published decision. A crash before uncertainty resolves may
+lose that adoption: restart stability explicitly excludes this window. Publication
+includes admission to a deliverable queue, reorder buffer or spool; successful network
+transmission is not the boundary.
+
+The following defaults leave every matching rule off. Add only trusted header names and
+explicitly enable chosen rules. `sdp_origin_observation_ttl` must exceed
+`sdp_origin_reuse_window`; durations and capacities must be positive. Configure the same
+keys under `tap.li.correlation` for tap.
+
+<!-- i18n:skip -->
+```yaml
+processor:
+  li:
+    correlation:
+      session_headers: []
+      parent_call_id_headers: []
+      sdp_origin_matching: false
+      sdp_origin_reuse_window: 30s
+      sdp_origin_observation_ttl: 10m
+      sdp_origin_suspend: 10m
+      sdp_origin_max_tracked: 10000
+      address_chaining: false
+      address_chaining_rewritten: false
+      number_chaining: false
+      address_window: 2s
+      number_window: 500ms
+      node_aliases: []
+      decision_horizon: 5m
+      terminal_grace: 30s
+      max_candidates: 10000
+      max_records: 100000
+      store_file: ""
+      store_key_file: ""
+      store_key_id: ""
+      store_read_keys: []
+```
+
+`lc show status` exposes aggregate `li_call_correlation` telemetry when grouping is
+enabled: adopted rules and standalone reasons, SDP observations, group-size buckets,
+retained records and candidate/transaction/origin counts with configured limits,
+suspended origins, blind-period cause and remaining nanoseconds, persistence status,
+uncertain writes and unresolved writes. No Call-IDs, numbers, addresses or SIP header
+values are included.
+
+`unrecorded_decisions` counts reservation attempts lost at the record limit. Repeated
+packets may increment it repeatedly; it is not a once-per-leg outcome count.
+
+When a dedicated correlation store is owned, `li_call_correlation.storage` reports its
+actual state, commit outcomes, faults, key IDs and cryptographic usage. This field is
+absent for memory-only grouping; it never exposes store paths or key material.
+
+Calling and called identities come from the complete extracted From/To URI, preferring
+the address inside angle brackets. Extraction removes the `sip:`, `sips:` or `tel:`
+scheme, URI/header parameters after `;` or `?`, and a single-colon SIP host port.
+Comparison preserves the user or telephone value, including case and digits, and
+lowercases only the host after `@`; IPv6 host spelling is preserved apart from case. It
+never compares suffixes, strips telephone punctuation or applies operator-specific digit
+rewrites.
+
+SDP roles are learned from retained initial transactions. A retransmitted initial INVITE
+can establish a previously missing offer without changing its first decision. A
+response-only observation remains unknown; an observed request without SDP can establish
+a delayed offer in a successful response. Its ACK answer requires a unique retained
+Call-ID, From-tag and CSeq association, even when the ACK uses a new Via branch. Unknown
+or ambiguous associations provide no S evidence. Raw SIP requires framed
+`application/sdp` content; Content-Length bounds the body, so a following pipelined
+message cannot become SDP evidence.
+
+Restoring an adopted child preserves its original group ID and common-task context.
+Seeing the original root Call-ID again intersects that retained context rather than
+creating a broader group for the same ID. An empty intersection still preserves already
+selected IDs but cannot admit another leg through correlation. Reactivated task
+generations do not restore lost eligibility.
+
 ### X2 IRI Delivery {#x2-iri-delivery}
 
 X2 delivers SIP-derived IRI events, enabled protocol metadata, and raw RADIUS

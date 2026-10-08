@@ -19,7 +19,7 @@ func TestJournalBatchIndexPurposeAndUsageClassification(t *testing.T) {
 	require.Equal(t, "synthetic index", string(plain))
 	_, err = ring.Open(JournalState, binding, encoded, 64)
 	require.ErrorIs(t, err, ErrEnvelope)
-	_, err = writer.Seal(Purpose(10), binding, nil)
+	_, err = writer.Seal(CallCorrelationState+1, binding, nil)
 	require.ErrorIs(t, err, ErrEnvelope)
 	// Index purpose alone must not put data growth into the reserved allowance.
 	usage.usedSeals = MaxKeyInvocations * 9 / 10

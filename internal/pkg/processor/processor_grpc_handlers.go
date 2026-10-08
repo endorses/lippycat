@@ -555,6 +555,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 	p.populateAdmissionStats(processorStats)
 	p.populateStorageStats(processorStats)
 	p.populateLIEncodingStats(processorStats)
+	p.populateLICallCorrelationStats(processorStats)
 	p.populateLIDeliveryStats(processorStats)
 	processorStats.SipRetry = p.sipRetryTelemetryProto()
 

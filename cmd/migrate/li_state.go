@@ -11,7 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func addLICommands(cmd *cobra.Command) { cmd.AddCommand(newLIStateCommand(), newLIJournalCommand()) }
+func addLICommands(cmd *cobra.Command) {
+	cmd.AddCommand(newLIStateCommand(), newLIJournalCommand(), newLICallCorrelationCommand())
+}
 
 func newLIStateCommand() *cobra.Command {
 	var source, destination, sourceFormat, keyFile, keyID, radiusStateFile string

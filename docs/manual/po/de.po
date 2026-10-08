@@ -33170,3 +33170,167 @@ msgid "Shared retired-proof accounting bound; 128 bytes per entry."
 msgstr ""
 "Gemeinsame Ressourcengrenze für Nachweise beendeter Lebensdauern; 128 Bytes "
 "je Eintrag."
+
+#: src/part5-advanced/lawful-interception.md:538
+msgid "Optional SIP call-leg correlation"
+msgstr "Optionale SIP-Anrufabschnittskorrelation"
+
+#: src/part5-advanced/lawful-interception.md:540
+msgid ""
+"Call-leg correlation is disabled by default. Enable selected rules under "
+"`processor.li.correlation` or `tap.li.correlation` only after verifying the "
+"signaling and MDF profile. A grouped call uses the FNV-1a ID of its first "
+"selected Call-ID for X2 and X3; the MDF owns the final CIN interpretation "
+"and deduplication. Grouping changes only Correlation IDs and their dependent "
+"sequence contexts. Source packets, payloads, matched tasks, authorization, "
+"direction and destinations remain unchanged."
+msgstr "Die Anrufabschnittskorrelation ist standardmäßig deaktiviert. Aktivieren Sie ausgewählte Regeln unter `processor.li.correlation` oder `tap.li.correlation` erst nach Prüfung der Signalisierung und des MDF-Profils. Ein gruppierter Anruf verwendet für X2 und X3 die FNV-1a-ID seiner zuerst gewählten Call-ID; die endgültige CIN-Interpretation und Deduplizierung liegen beim MDF. Die Gruppierung ändert nur Correlation IDs und deren abhängige Sequenzkontexte. Quellpakete, Nutzdaten, zugeordnete Aufgaben, Autorisierung, Richtung und Ziele bleiben unverändert."
+
+#: src/part5-advanced/lawful-interception.md:542
+msgid ""
+"A retained first decision always wins. For a new eligible initial "
+"transaction, the order is trusted session headers (H) and parent Call-ID "
+"references (P), SDP origin (S), address chaining with the same called "
+"identity (R1), exact calling/called identity pair (R2), then address "
+"chaining with rewritten numbers. H/P disagreement or ambiguity leaves the "
+"leg separate. Unusable or ambiguous S falls through; ambiguous weaker "
+"matches leave the leg separate. Enable each method independently. Already "
+"published groups are never merged retrospectively."
+msgstr "Eine aufbewahrte Erstentscheidung hat immer Vorrang. Bei einer neuen zulässigen initialen Transaktion gilt folgende Reihenfolge: vertrauenswürdige Sitzungskopfzeilen (H) und übergeordnete Call-ID-Verweise (P), SDP-Ursprung (S), Adressverkettung mit gleicher angerufener Identität (R1), exaktes Paar aus anrufender und angerufener Identität (R2), danach Adressverkettung mit umgeschriebenen Rufnummern. Widersprüche oder Mehrdeutigkeiten bei H/P lassen den Abschnitt getrennt. Unbrauchbare oder mehrdeutige S-Evidenz führt zur nächsten Regel; mehrdeutige schwächere Treffer lassen den Abschnitt getrennt. Jede Methode wird unabhängig aktiviert. Bereits veröffentlichte Gruppen werden niemals nachträglich zusammengeführt."
+
+#: src/part5-advanced/lawful-interception.md:544
+msgid ""
+"`session_headers` accepts arbitrary valid SIP header names, matched case-"
+"insensitively. Session-ID selects the initiating UUID: local in the initial "
+"INVITE, remote in a response-only observation; nil or malformed UUIDs supply "
+"no key. P-Charging-Vector selects `icid-value`. Proprietary headers compare "
+"their complete nonempty values exactly after trimming surrounding "
+"whitespace; case and semicolons remain significant. Conflicting repeated "
+"values are not authoritative. `parent_call_id_headers` contains trusted "
+"headers naming one exact, case-preserved retained parent Call-ID; unknown, "
+"later or self-referencing parents cannot regroup a published child."
+msgstr "`session_headers` akzeptiert beliebige gültige SIP-Kopfzeilennamen und vergleicht diese ohne Beachtung der Groß-/Kleinschreibung. Session-ID wählt die initiierende UUID: lokal im initialen INVITE, remote bei einer ausschließlich beobachteten Antwort; leere oder fehlerhafte UUIDs liefern keinen Schlüssel. P-Charging-Vector wählt `icid-value`. Proprietäre Kopfzeilen vergleichen ihre vollständigen nichtleeren Werte exakt nach Entfernen äußerer Leerzeichen; Groß-/Kleinschreibung und Semikolons bleiben relevant. Widersprüchliche wiederholte Werte sind nicht maßgeblich. `parent_call_id_headers` enthält vertrauenswürdige Kopfzeilen mit einer exakten, in ihrer Schreibweise erhaltenen, aufbewahrten übergeordneten Call-ID; unbekannte, spätere oder selbstreferenzierende Verweise können ein veröffentlichtes Kind nicht neu gruppieren."
+
+#: src/part5-advanced/lawful-interception.md:546
+msgid ""
+"R1 compares initial INVITE transport addresses within `address_window` and "
+"before the relevant final response. `node_aliases` is a list of disjoint "
+"address lists, each representing one node; it does not rewrite calling or "
+"called identities. Compare complete canonical identities, never number "
+"suffixes or deployment-specific digit substitutions. R2 requires the exact "
+"pair within `number_window` and no address match. Rewritten-number R1 "
+"requires one eligible address candidate and no called-number candidate. "
+"These heuristics can falsely group unrelated calls; missing observations and "
+"A,C,B arrival in an A → B → C chain can leave one call split."
+msgstr "R1 vergleicht Transportadressen initialer INVITEs innerhalb von `address_window` und vor der zugehörigen endgültigen Antwort. `node_aliases` ist eine Liste disjunkter Adresslisten, die jeweils einen Knoten darstellen; anrufende oder angerufene Identitäten werden nicht umgeschrieben. Verglichen werden vollständige kanonische Identitäten, niemals Rufnummernsuffixe oder deploymentspezifische Ziffernersetzungen. R2 erfordert das exakte Paar innerhalb von `number_window` und keinen Adresstreffer. R1 mit umgeschriebenen Rufnummern erfordert einen zulässigen Adresskandidaten und keinen Kandidaten mit gleicher angerufener Nummer. Diese Heuristiken können unabhängige Anrufe fälschlich gruppieren; fehlende Beobachtungen und die Ankunftsfolge A,C,B in einer Kette A → B → C können einen Anruf aufgeteilt lassen."
+
+#: src/part5-advanced/lawful-interception.md:548
+msgid ""
+"S compares the full SDP origin `(username, sess-id, nettype, addrtype, "
+"unicast-address)`; version is revision metadata. Offer and answer roles "
+"remain separate; an unknown role supplies no evidence. Distinct initial "
+"transactions update an independent bounded history before matching. Reuse "
+"spanning more than `sdp_origin_reuse_window`, or contradictory trusted "
+"values of the same header type, suspends that origin. Retransmissions "
+"neither refresh observation TTL nor renew suspension. Suspension deadlines "
+"are fixed; distinct use during a period renews it once at expiry. At cache "
+"capacity S is disabled rather than evicting history. Release starts fresh "
+"history and never regroups published legs."
+msgstr "S vergleicht den vollständigen SDP-Ursprung `(username, sess-id, nettype, addrtype, unicast-address)`; die Version ist Revisionsmetadatum. Offer- und Answer-Rollen bleiben getrennt; eine unbekannte Rolle liefert keine Evidenz. Unterschiedliche initiale Transaktionen aktualisieren vor dem Abgleich einen unabhängigen begrenzten Verlauf. Wiederverwendung über mehr als `sdp_origin_reuse_window` oder widersprüchliche vertrauenswürdige Werte desselben Kopfzeilentyps sperren diesen Ursprung. Wiederholungen erneuern weder die Beobachtungs-TTL noch die Sperre. Sperrfristen sind fest; eine unterschiedliche Verwendung während eines Zeitraums verlängert ihn bei Ablauf einmal. Bei voller Cache-Kapazität wird S deaktiviert, statt Verlauf zu verdrängen. Die Freigabe beginnt mit neuem Verlauf und gruppiert veröffentlichte Abschnitte niemals neu."
+
+#: src/part5-advanced/lawful-interception.md:550
+msgid ""
+"Every group must retain a common active task generation across all member "
+"decisions. Task edits, expiry and reactivation invalidate stale eligibility. "
+"Existing decisions also pin X3-first and late-signaling legs. At startup, "
+"and after a decision cannot be retained at capacity, `decision_horizon` "
+"blocks new adoption while restored adopted IDs still apply. Transactions or "
+"forwarding delays beyond that horizon can defeat protection of unpersisted "
+"standalone decisions. Activity, including RTP publication, refreshes "
+"retention; terminal decisions use `terminal_grace`, and inactivity follows "
+"the configured call lifecycle lifetime."
+msgstr "Jede Gruppe muss über alle Mitgliedsentscheidungen hinweg eine gemeinsame aktive Aufgabengeneration behalten. Aufgabenänderungen, Ablauf und erneute Aktivierung machen veraltete Zulässigkeit ungültig. Bestehende Entscheidungen binden auch Abschnitte mit X3 zuerst und später Signalisierung. Beim Start und wenn eine Entscheidung wegen voller Kapazität nicht aufbewahrt werden kann, verhindert `decision_horizon` neue Zuordnungen; wiederhergestellte übernommene IDs gelten weiterhin. Transaktionen oder Weiterleitungsverzögerungen jenseits dieses Horizonts können den Schutz nichtpersistierter eigenständiger Entscheidungen umgehen. Aktivität einschließlich RTP-Veröffentlichung erneuert die Aufbewahrung; terminale Entscheidungen verwenden `terminal_grace`, und Inaktivität folgt der konfigurierten Lebensdauer des Anruflebenszyklus."
+
+#: src/part5-advanced/lawful-interception.md:552
+msgid ""
+"An empty `store_file` disables restart persistence. Adopted decisions use a "
+"dedicated authenticated encrypted store, separate from administrative LI "
+"state and journals. Configure `store_key_file`, `store_key_id` and optional "
+"`store_read_keys` entries `id=path`; use an independent 32-byte key and a "
+"protected directory. Initialize the store offline with the node stopped. "
+"Corrupt or unauthenticated storage is a startup error, not an empty "
+"replacement store."
+msgstr "Ein leeres `store_file` deaktiviert die Persistenz über Neustarts. Übernommene Entscheidungen verwenden einen eigenen authentifizierten verschlüsselten Speicher, getrennt von administrativem LI-Zustand und Journalen. Konfigurieren Sie `store_key_file`, `store_key_id` und optionale `store_read_keys`-Einträge `id=path`; verwenden Sie einen unabhängigen 32-Byte-Schlüssel und ein geschütztes Verzeichnis. Initialisieren Sie den Speicher offline bei gestopptem Knoten. Beschädigter oder nicht authentifizierter Speicher ist ein Startfehler und wird nicht durch einen leeren Speicher ersetzt."
+
+#: src/part5-advanced/lawful-interception.md:607
+msgid ""
+"Rotate this store offline with `lc migrate li-correlation rotate`, following "
+"the key rotation syntax of `lc migrate li-state --source-format=encrypted`. "
+"Keep previous keys needed to read retained records. Before publication, a "
+"committed write selects the adopted ID; confirmed noncommit selects "
+"standalone. An uncertain write publishes the adopted ID and retries without "
+"changing a published decision. A crash before uncertainty resolves may lose "
+"that adoption: restart stability explicitly excludes this window. "
+"Publication includes admission to a deliverable queue, reorder buffer or "
+"spool; successful network transmission is not the boundary."
+msgstr ""
+"Rotieren Sie diesen Speicher offline mit `lc migrate li-correlation rotate` "
+"entsprechend der Schlüsselrotationssyntax von `lc migrate li-state --source-format=encrypted`. "
+"Bewahren Sie frühere Schlüssel auf, die zum Lesen aufbewahrter Datensätze "
+"erforderlich sind. Vor Veröffentlichung wählt ein bestätigter Schreibvorgang "
+"die übernommene ID; ein bestätigter Nichtabschluss wählt eine eigenständige "
+"ID. Ein ungewisser Schreibvorgang veröffentlicht die übernommene ID und wird "
+"wiederholt, ohne eine veröffentlichte Entscheidung zu ändern. Ein Absturz "
+"vor Klärung der Ungewissheit kann diese Zuordnung verlieren: "
+"Neustartstabilität schließt dieses Zeitfenster ausdrücklich aus. "
+"Veröffentlichung umfasst die Aufnahme in eine ausleitbare Warteschlange, "
+"einen Neuordnungspuffer oder einen Spool; erfolgreiche Netzwerkübertragung "
+"ist nicht die Grenze."
+
+#: src/part5-advanced/lawful-interception.md:564
+msgid ""
+"The following defaults leave every matching rule off. Add only trusted "
+"header names and explicitly enable chosen rules. "
+"`sdp_origin_observation_ttl` must exceed `sdp_origin_reuse_window`; "
+"durations and capacities must be positive. Configure the same keys under "
+"`tap.li.correlation` for tap."
+msgstr "Die folgenden Standardwerte lassen alle Abgleichregeln deaktiviert. Fügen Sie nur vertrauenswürdige Kopfzeilennamen hinzu und aktivieren Sie gewählte Regeln ausdrücklich. `sdp_origin_observation_ttl` muss größer als `sdp_origin_reuse_window` sein; Dauern und Kapazitäten müssen positiv sein. Konfigurieren Sie für Tap dieselben Schlüssel unter `tap.li.correlation`."
+
+#: src/appendices/config-reference.md:634
+msgid ""
+"Optional SIP call-leg grouping uses `processor.li.correlation` or "
+"`tap.li.correlation`, with every matching rule disabled by default. The "
+"[call-leg correlation reference](../part5-advanced/lawful-"
+"interception.md#sip-call-leg-correlation) lists all keys, matching "
+"precedence, bounds, restart limitations and dedicated encrypted-store setup. "
+"Configuration is independent of task authorization and source packet "
+"selection."
+msgstr "Die optionale SIP-Anrufabschnittsgruppierung verwendet `processor.li.correlation` oder `tap.li.correlation`; alle Abgleichregeln sind standardmäßig deaktiviert. Die [Referenz zur Anrufabschnittskorrelation](../part5-advanced/lawful-interception.md#sip-call-leg-correlation) enthält alle Schlüssel, Abgleichprioritäten, Grenzen, Neustarteinschränkungen und die Einrichtung des eigenen verschlüsselten Speichers. Die Konfiguration ist unabhängig von Aufgabenautorisierung und Quellpaketauswahl."
+
+#: src/part5-advanced/lawful-interception.md
+msgid "`lc show status` exposes aggregate `li_call_correlation` telemetry when grouping is enabled: adopted rules and standalone reasons, SDP observations, group-size buckets, retained records and candidate/transaction/origin counts with configured limits, suspended origins, blind-period cause and remaining nanoseconds, persistence status, uncertain writes and unresolved writes. No Call-IDs, numbers, addresses or SIP header values are included."
+msgstr "`lc show status` zeigt bei aktivierter Gruppierung aggregierte `li_call_correlation`-Telemetrie: übernehmende Regeln und Gründe für eigenständige Abschnitte, SDP-Beobachtungen, Gruppengrößenklassen, aufbewahrte Datensätze und Kandidaten-/Transaktions-/Ursprungszahlen mit konfigurierten Grenzen, gesperrte Ursprünge, Ursache und verbleibende Nanosekunden des Blindzeitraums, Persistenzstatus sowie ungewisse und ungeklärte Schreibvorgänge. Call-IDs, Rufnummern, Adressen oder SIP-Kopfzeilenwerte sind nicht enthalten."
+
+#: src/part5-advanced/lawful-interception.md
+msgid "`unrecorded_decisions` counts reservation attempts lost at the record limit. Repeated packets may increment it repeatedly; it is not a once-per-leg outcome count."
+msgstr "`unrecorded_decisions` zählt Zuordnungsversuche, die an der Datensatzgrenze verloren gehen. Wiederholte Pakete können den Zähler mehrfach erhöhen; er ist kein Ergebniszähler mit einer Zählung pro Anrufabschnitt."
+
+#: src/part5-advanced/lawful-interception.md
+msgid "When a dedicated correlation store is owned, `li_call_correlation.storage` reports its actual state, commit outcomes, faults, key IDs and cryptographic usage. This field is absent for memory-only grouping; it never exposes store paths or key material."
+msgstr "Wenn ein eigener Korrelationsspeicher vorhanden ist, meldet `li_call_correlation.storage` dessen tatsächlichen Zustand, Commit-Ergebnisse, Fehler, Schlüssel-IDs und kryptografische Nutzung. Bei rein speicherinterner Gruppierung fehlt dieses Feld; Speicherpfade oder Schlüsselmaterial werden niemals offengelegt."
+
+#: src/part5-advanced/lawful-interception.md
+msgid "Calling and called identities come from the complete extracted From/To URI, preferring the address inside angle brackets. Extraction removes the `sip:`, `sips:` or `tel:` scheme, URI/header parameters after `;` or `?`, and a single-colon SIP host port. Comparison preserves the user or telephone value, including case and digits, and lowercases only the host after `@`; IPv6 host spelling is preserved apart from case. It never compares suffixes, strips telephone punctuation or applies operator-specific digit rewrites."
+msgstr "Anrufende und angerufene Identitäten stammen aus der vollständig extrahierten From/To-URI; die Adresse in Winkelklammern hat Vorrang. Die Extraktion entfernt das Schema `sip:`, `sips:` oder `tel:`, URI-/Kopfzeilenparameter nach `;` oder `?` sowie einen SIP-Host-Port mit einem einzelnen Doppelpunkt. Der Vergleich erhält den Benutzer- oder Telefonwert einschließlich Groß-/Kleinschreibung und Ziffern und schreibt nur den Host nach `@` klein; die IPv6-Hostschreibweise bleibt abgesehen von der Groß-/Kleinschreibung erhalten. Es werden niemals Suffixe verglichen, Telefonzeichen entfernt oder betreiberspezifische Ziffern umgeschrieben."
+
+#: src/part5-advanced/lawful-interception.md
+msgid "SDP roles are learned from retained initial transactions. A retransmitted initial INVITE can establish a previously missing offer without changing its first decision. A response-only observation remains unknown; an observed request without SDP can establish a delayed offer in a successful response. Its ACK answer requires a unique retained Call-ID, From-tag and CSeq association, even when the ACK uses a new Via branch. Unknown or ambiguous associations provide no S evidence. Raw SIP requires framed `application/sdp` content; Content-Length bounds the body, so a following pipelined message cannot become SDP evidence."
+msgstr "SDP-Rollen werden aus aufbewahrten initialen Transaktionen ermittelt. Ein wiederholtes initiales INVITE kann ein zuvor fehlendes Offer feststellen, ohne seine Erstentscheidung zu ändern. Eine ausschließlich beobachtete Antwort bleibt unbekannt; bei einer beobachteten Anfrage ohne SDP kann eine erfolgreiche Antwort ein verzögertes Offer feststellen. Dessen ACK-Answer erfordert eine eindeutige aufbewahrte Zuordnung von Call-ID, From-Tag und CSeq, auch wenn das ACK einen neuen Via-Branch verwendet. Unbekannte oder mehrdeutige Zuordnungen liefern keine S-Evidenz. Rohes SIP erfordert abgegrenzten `application/sdp`-Inhalt; Content-Length begrenzt den Body, damit eine folgende Nachricht im selben Datenstrom nicht zur SDP-Evidenz werden kann."
+
+#: src/part5-advanced/lawful-interception.md
+msgid "Restoring an adopted child preserves its original group ID and common-task context. Seeing the original root Call-ID again intersects that retained context rather than creating a broader group for the same ID. An empty intersection still preserves already selected IDs but cannot admit another leg through correlation. Reactivated task generations do not restore lost eligibility."
+msgstr "Die Wiederherstellung eines zugeordneten Kindes erhält dessen ursprüngliche Gruppen-ID und Kontext gemeinsamer Aufgaben. Wird die ursprüngliche Root-Call-ID erneut gesehen, wird dieser aufbewahrte Kontext geschnitten, statt eine breitere Gruppe für dieselbe ID anzulegen. Eine leere Schnittmenge erhält bereits ausgewählte IDs, kann aber keinen weiteren Abschnitt durch Korrelation aufnehmen. Erneut aktivierte Aufgabengenerationen stellen verlorene Zulässigkeit nicht wieder her."
+
+#: src/part5-advanced/lawful-interception.md
+msgid "Common-task membership includes the administrative state incarnation as well as XID and activation generation. Persistent deployments use the authenticated administrative store incarnation; stateless deployments use a fresh runtime incarnation. Replacing administrative storage or restarting without it therefore cannot make a reused XID and generation join a stale restored group. Retained adopted decisions still reuse their selected IDs, but new legs cannot join through stale task contexts."
+msgstr "Die Zugehörigkeit zu gemeinsamen Aufgaben umfasst neben XID und Aktivierungsgeneration auch die Inkarnation des administrativen Zustands. Persistente Deployments verwenden die authentifizierte Inkarnation des administrativen Speichers; zustandslose Deployments verwenden eine neue Laufzeitinkarnation. Das Ersetzen des administrativen Speichers oder ein Neustart ohne diesen kann daher nicht bewirken, dass eine wiederverwendete XID und Generation einer veralteten wiederhergestellten Gruppe beitreten. Aufbewahrte zugeordnete Entscheidungen verwenden weiterhin ihre ausgewählten IDs, aber neue Abschnitte können nicht über veraltete Aufgabenkontexte beitreten."

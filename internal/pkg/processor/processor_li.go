@@ -131,6 +131,12 @@ var _ li.FilterPusher = (*processorFilterPusher)(nil)
 // liStoragePreparation retains authenticated owners across New and Start.
 // Runtime globals are published only after the complete constructor succeeds.
 type liStoragePreparation struct {
+	correlationContext  uuid.UUID
+	correlationStop     chan struct{}
+	correlationStopOnce sync.Once
+	correlation         *li.CallCorrelator
+	correlationStore    *li.CallCorrelationStore
+	correlationWorkers  sync.WaitGroup
 	once                sync.Once
 	err                 error
 	manager             *delivery.Manager
@@ -287,6 +293,9 @@ func (p *Processor) initLIRuntime() {
 			p.callLifecycle.SubscribeFinalizer(p.closePersistentLICall)
 		}
 		p.callLifecycle.Subscribe(func(event CallFinalizationEvent) {
+			if p.liStorage.correlation != nil {
+				p.liStorage.correlation.Finalize(event.CallID)
+			}
 			if liDeliveryClient != nil && p.config.LIDeliveryX3SpoolDir == "" {
 				liDeliveryClient.CancelCall(event.CallID, event.Generation)
 			}
@@ -306,7 +315,7 @@ func (p *Processor) initLIRuntime() {
 	}
 
 	// Set packet processor callback for X2/X3 encoding and delivery
-	p.liManager.SetPacketProcessor(func(task *li.InterceptTask, pkt *types.PacketDisplay) {
+	processPacket := func(task *li.InterceptTask, pkt *types.PacketDisplay, decision *li.CallCorrelationDecision) {
 		// Raw RADIUS is dispatched through its dedicated observation callback.
 		// Never route an admitted RADIUS task into a SIP or RTP encoder.
 		if li.IsRADIUSTask(task) {
@@ -351,7 +360,13 @@ func (p *Processor) initLIRuntime() {
 			if task.DeliveryType == li.DeliveryX2Only {
 				policy = x2x3.SIPContentIRIOnly
 			}
-			pdu, err := liX2Encoder.EncodeIRIWithPolicy(pkt, task.XID, policy)
+			var pdu *x2x3.PDU
+			var err error
+			if decision != nil && decision.CallID != "" {
+				pdu, err = liX2Encoder.EncodeIRIWithPolicyAndCorrelationID(pkt, task.XID, policy, decision.CorrelationID)
+			} else {
+				pdu, err = liX2Encoder.EncodeIRIWithPolicy(pkt, task.XID, policy)
+			}
 			if err != nil {
 				liX2Errors.Add(1)
 				logger.Warn("X2 encode error",
@@ -374,7 +389,7 @@ func (p *Processor) initLIRuntime() {
 				if err != nil {
 					logger.Warn("X2 PDU marshal error", "xid", task.XID, "error", err)
 				} else if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
-					if err := liDeliveryClient.SendX2WithMetadata(task.XID, task.DestinationIDs, data, metadata); err != nil {
+					if err := liDeliveryClient.SendX2WithMetadataAndPublication(task.XID, task.DestinationIDs, data, metadata, func() { p.publishLICorrelation(decision) }); err != nil {
 						logger.Debug("X2 delivery queued failed", "xid", task.XID, "error", err)
 					} else {
 						logger.Debug("X2 IRI queued",
@@ -425,7 +440,13 @@ func (p *Processor) initLIRuntime() {
 				callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
 				callsAny.(*sync.Map).LoadOrStore(callID, struct{}{})
 			}
-			pdu, err := liX3Encoder.EncodeCC(pkt, task.XID)
+			var pdu *x2x3.PDU
+			var err error
+			if decision != nil && decision.CallID != "" {
+				pdu, err = liX3Encoder.EncodeCCWithCorrelationID(pkt, task.XID, decision.CorrelationID)
+			} else {
+				pdu, err = liX3Encoder.EncodeCC(pkt, task.XID)
+			}
 			if err != nil {
 				liX3Errors.Add(1)
 				logger.Debug("X3 encode error",
@@ -452,7 +473,7 @@ func (p *Processor) initLIRuntime() {
 				} else if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
 					// Route through reorder buffer per destination
 					if p.config.LIDeliveryX3SpoolDir != "" {
-						p.deliverPersistentX3(task, pkt, data, metadata, admission)
+						p.deliverPersistentX3WithPublication(task, pkt, data, metadata, admission, func() { p.publishLICorrelation(decision) })
 						return
 					}
 					ssrc := pkt.VoIPData.SSRC
@@ -485,12 +506,14 @@ func (p *Processor) initLIRuntime() {
 							}
 						}
 						destination, destinationErr := liDeliveryMgr.GetDestination(did)
-						if destinationErr != nil {
+						if destinationErr != nil || !delivery.DestinationAcceptsPDU(destination, delivery.PDUTypeX3) {
 							insertionTaskAdmission.Release()
 							if insertionOwnsCallAdmission && insertionCallAdmission != nil {
 								insertionCallAdmission.Release()
 							}
-							recordBufferedX3Discard(1)
+							if destinationErr != nil {
+								recordBufferedX3Discard(1)
+							}
 							continue
 						}
 						bufKey := fmt.Sprintf("%s-%s", task.XID, did)
@@ -545,7 +568,7 @@ func (p *Processor) initLIRuntime() {
 						entryMetadata.DestinationGeneration = li.DestinationDeliveryGeneration(destination)
 						entryMetadata.CallID = callID
 						entryMetadata.CallGeneration = generation
-						buf.(*delivery.ReorderBuffer).DeliverEntryX3AfterCommit(delivery.ReorderEntry{CallID: callID, Generation: generation, PDU: data, Metadata: entryMetadata}, ssrc, rtpSeq, func() {
+						accepted := buf.(*delivery.ReorderBuffer).AcceptEntryX3AfterCommit(delivery.ReorderEntry{CallID: callID, Generation: generation, PDU: data, Metadata: entryMetadata}, ssrc, rtpSeq, func() {
 							// DeliverCallX3 may synchronously invoke its delivery
 							// callback. Release the outer admissions after insertion
 							// so that callback can safely re-admit even when a task
@@ -555,6 +578,9 @@ func (p *Processor) initLIRuntime() {
 								insertionCallAdmission.Release()
 							}
 						})
+						if accepted {
+							p.publishLICorrelation(decision)
+						}
 					}
 					logger.Debug("X3 CC queued via reorder buffer",
 						"xid", task.XID,
@@ -576,7 +602,20 @@ func (p *Processor) initLIRuntime() {
 			}
 		}
 
-	})
+	}
+	p.liManager.SetPacketProcessor(func(task *li.InterceptTask, pkt *types.PacketDisplay) { processPacket(task, pkt, nil) })
+	if p.liStorage.correlation != nil {
+		p.liManager.SetPacketBatchProcessor(func(tasks []*li.InterceptTask, pkt *types.PacketDisplay) {
+			identities := make([]li.CallCorrelationTask, 0, len(tasks))
+			for _, task := range tasks {
+				identities = append(identities, li.CallCorrelationTask{StateIncarnation: p.liStorage.correlationContext, XID: task.XID, Generation: task.ActivationGeneration})
+			}
+			decision := p.liStorage.correlation.Resolve(pkt, identities)
+			for _, task := range tasks {
+				processPacket(task, pkt, &decision)
+			}
+		})
+	}
 
 	logger.Info("LI Manager initialized",
 		"x1_listen", p.config.LIX1ListenAddr,
@@ -695,6 +734,9 @@ func (p *Processor) prepareLIStorageOnce() error {
 	if err := p.liManager.PrepareAdministrativeStorage(); err != nil {
 		return fmt.Errorf("authenticate LI administrative storage: %w", err)
 	}
+	if err := p.prepareLICorrelation(); err != nil {
+		return err
+	}
 	if err := p.validateLIConfiguration(); err != nil {
 		return fmt.Errorf("invalid LI configuration: %w", err)
 	}
@@ -719,7 +761,13 @@ func (p *Processor) prepareLIStorageOnce() error {
 		config.X2SpoolValidateKeys = validateJournalKeys
 		config.X3SpoolValidateKeys = validateJournalKeys
 		config.StateIncarnation = p.liManager.StateIncarnation()
-		config.ProtectedStoragePaths = []string{p.config.FilterFile, p.config.LIStateFile}
+		config.ProtectedStoragePaths = []string{p.config.FilterFile, p.config.LIStateFile, p.config.LICallCorrelation.StoreFile}
+		if p.liStorage.correlationStore != nil {
+			config.ProtectedStoragePaths = append(config.ProtectedStoragePaths, p.config.LICallCorrelation.StoreKeys.Active.File)
+			for _, ref := range p.config.LICallCorrelation.StoreKeys.Prior {
+				config.ProtectedStoragePaths = append(config.ProtectedStoragePaths, ref.File)
+			}
+		}
 		if pin, err := p.liManager.RADIUSCorrelationStateFile(); err == nil && pin != "" {
 			config.ProtectedStoragePaths = append(config.ProtectedStoragePaths, pin)
 		}
@@ -839,6 +887,7 @@ func (p *Processor) startLIManager() (err error) {
 	}()
 
 	// Start the LI Manager (syncs tasks/destinations from ADMF)
+	p.startLICorrelationMaintenance()
 	p.liStorage.started.Store(true)
 	if err := p.liManager.Start(); err != nil {
 		return err
@@ -933,8 +982,19 @@ func cleanupLIReorderBuffer(key any, buf *delivery.ReorderBuffer, maxIdle time.D
 // Called during processor shutdown.
 func (p *Processor) stopLIManager() (result error) {
 	p.closeLIRADIUS()
+	if p.liStorage != nil {
+		p.liStorage.correlationStopOnce.Do(func() {
+			if p.liStorage.correlationStop != nil {
+				close(p.liStorage.correlationStop)
+			}
+		})
+		p.liStorage.correlationWorkers.Wait()
+		if p.liStorage.correlation != nil {
+			result = errors.Join(result, p.liStorage.correlation.Close())
+		}
+	}
 	if p.liManager == nil {
-		return nil
+		return result
 	}
 	if p.config.LIDeliveryX3SpoolDir != "" && p.liStorage != nil && p.liStorage.published {
 		// Call admissions/packet producers were joined by Processor.Shutdown.

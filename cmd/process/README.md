@@ -415,6 +415,15 @@ settings is missing or invalid.
 See [Lawful Interception](../../docs/manual/src/part5-advanced/lawful-interception.md)
 for the complete deployment configuration.
 
+Optional SIP call-leg grouping is configured under `processor.li.correlation` in YAML.
+All matching methods default off. Trusted session headers, including proprietary
+headers, parent Call-ID references, SDP origins and independently enabled chaining
+rules can select one shared X2/X3 ID without changing authorization or delivery
+selection. Coordinate the MDF profile before enabling it. Durable adopted decisions
+use a separate initialized encrypted store; startup blindness and uncertain writes
+limit restart guarantees. See [call-leg correlation](../../docs/LI_INTEGRATION.md#optional-sip-call-leg-correlation)
+for the hierarchy, defaults, limits, key setup and offline initialization.
+
 ### Production Mode Enforcement
 
 Set `LIPPYCAT_PRODUCTION=true` to block the `--insecure` flag and require mutual authentication:

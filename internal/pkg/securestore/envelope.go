@@ -41,9 +41,11 @@ const (
 	// JournalBatchIndex authenticates journal batch/index metadata. Product
 	// growth uses Seal; only terminal/control metadata may use SealControl.
 	JournalBatchIndex
+	// CallCorrelationState authenticates the dedicated LI call-leg decision store.
+	CallCorrelationState
 )
 
-func (p Purpose) valid() bool { return p >= FilterSnapshot && p <= JournalBatchIndex }
+func (p Purpose) valid() bool { return p >= FilterSnapshot && p <= CallCorrelationState }
 func (p Purpose) control() bool {
 	return p.valid() && p != X2Product && p != X3Product
 }

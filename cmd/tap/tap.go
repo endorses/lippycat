@@ -582,6 +582,7 @@ func runTapProtocol(cmd *cobra.Command, args []string, protocol protocolcatalog.
 	// Apply LI configuration (only available in -tags li builds)
 	if liConfig := GetLIConfig(); liConfig != nil {
 		config.LIEnabled = liConfig.Enabled
+		config.LICallCorrelation = liConfig.CallCorrelation
 		config.LIX1ListenAddr = liConfig.X1ListenAddr
 		config.LIX1TLSCertFile = liConfig.X1TLSCertFile
 		config.LIX1TLSKeyFile = liConfig.X1TLSKeyFile

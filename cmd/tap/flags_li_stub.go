@@ -7,6 +7,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 
+	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/spf13/cobra"
 )
@@ -14,12 +15,13 @@ import (
 // LIConfig holds all LI-related configuration.
 // In non-LI builds, this is only used for the nil return type.
 type LIConfig struct {
-	Enabled       bool
-	X1ListenAddr  string
-	X1TLSCertFile string
-	X1TLSKeyFile  string
-	X1TLSCAFile   string
-	ADMFEndpoint  string
+	CallCorrelation li.CallCorrelationConfig
+	Enabled         bool
+	X1ListenAddr    string
+	X1TLSCertFile   string
+	X1TLSKeyFile    string
+	X1TLSCAFile     string
+	ADMFEndpoint    string
 	// ADMF client (X1 notifications) TLS
 	ADMFTLSCertFile string
 	ADMFTLSKeyFile  string
@@ -94,3 +96,5 @@ func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {}
 func applyRADIUSLIConfig(_ *cobra.Command, _ *processor.Config) error { return nil }
 
 func applyLIStoreKeyConfig(_ *cobra.Command, _ *processor.Config) error { return nil }
+
+func applyLICallCorrelationConfig(_ *processor.Config) error { return nil }

@@ -3,11 +3,19 @@
 package process
 
 import (
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
+	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/radiusconfig"
 	"github.com/spf13/cobra"
@@ -76,12 +84,14 @@ var (
 
 // LIConfig holds all LI-related configuration.
 type LIConfig struct {
-	Enabled       bool
-	X1ListenAddr  string
-	X1TLSCertFile string
-	X1TLSKeyFile  string
-	X1TLSCAFile   string
-	ADMFEndpoint  string
+	CallCorrelation      li.CallCorrelationConfig
+	callCorrelationError error
+	Enabled              bool
+	X1ListenAddr         string
+	X1TLSCertFile        string
+	X1TLSKeyFile         string
+	X1TLSCAFile          string
+	ADMFEndpoint         string
 	// ADMF client (X1 notifications) TLS
 	ADMFTLSCertFile string
 	ADMFTLSKeyFile  string
@@ -205,6 +215,7 @@ func RegisterLIFlags(cmd *cobra.Command) {
 
 // BindLIViperFlags binds LI flags to viper for config file support.
 func BindLIViperFlags(cmd *cobra.Command) {
+	bindLICallCorrelationEnvironment()
 	_ = viper.BindPFlag("processor.li.enabled", cmd.Flags().Lookup("li-enabled"))
 	_ = viper.BindPFlag("processor.li.x1_listen_addr", cmd.Flags().Lookup("li-x1-listen"))
 	_ = viper.BindPFlag("processor.li.x1_tls_cert", cmd.Flags().Lookup("li-x1-tls-cert"))
@@ -285,7 +296,10 @@ func BindLIViperFlags(cmd *cobra.Command) {
 
 // GetLIConfig returns the LI configuration from flags and viper.
 func GetLIConfig() *LIConfig {
+	correlation, correlationErr := readLICallCorrelationConfig()
 	return &LIConfig{
+		CallCorrelation:                       correlation,
+		callCorrelationError:                  correlationErr,
 		Enabled:                               cmdutil.GetBoolConfig("processor.li.enabled", liEnabled),
 		X1ListenAddr:                          cmdutil.GetStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
 		X1TLSCertFile:                         cmdutil.GetStringConfig("processor.li.x1_tls_cert", liX1TLSCertFile),
@@ -354,4 +368,165 @@ func applyRADIUSLIConfig(cmd *cobra.Command, config *processor.Config) error {
 	config.LIRADIUSCorrelationStateFile = c.CorrelationStateFile
 	config.LIRADIUSCorrelationLifetime = c.TransactionTimeout
 	return nil
+}
+
+// Correlation remains YAML/environment configured, with identical keys for tap
+// and processor. Header lists accept JSON arrays or comma-separated environment
+// values; nested node aliases use a JSON array of arrays in the environment.
+func liCallCorrelationFields(config *li.CallCorrelationConfig) map[string]any {
+	return map[string]any{
+		"session_headers":            &config.SessionHeaders,
+		"parent_call_id_headers":     &config.ParentCallIDHeaders,
+		"sdp_origin_matching":        &config.SDPOriginMatching,
+		"sdp_origin_reuse_window":    &config.SDPOriginReuseWindow,
+		"sdp_origin_observation_ttl": &config.SDPOriginObservationTTL,
+		"sdp_origin_suspend":         &config.SDPOriginSuspend,
+		"sdp_origin_max_tracked":     &config.SDPOriginMaxTracked,
+		"address_chaining":           &config.AddressChaining,
+		"address_chaining_rewritten": &config.AddressChainingRewritten,
+		"number_chaining":            &config.NumberChaining,
+		"address_window":             &config.AddressWindow,
+		"number_window":              &config.NumberWindow,
+		"node_aliases":               &config.NodeAliases,
+		"decision_horizon":           &config.DecisionHorizon,
+		"terminal_grace":             &config.TerminalGrace,
+		"store_key_file":             &config.StoreKeys.Active.File,
+		"store_key_id":               &config.StoreKeys.Active.ID,
+		"store_read_keys":            &config.StoreKeys.Prior,
+		"store_file":                 &config.StoreFile,
+		"max_candidates":             &config.MaxCandidates,
+		"max_records":                &config.MaxRecords,
+	}
+}
+
+func bindLICallCorrelationEnvironment() {
+	config := li.DefaultCallCorrelationConfig()
+	for name := range liCallCorrelationFields(&config) {
+		key := "processor.li.correlation." + name
+		environment := "LIPPYCAT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+		if err := viper.BindEnv(key, environment); err != nil {
+			panic(err) // Static environment binding errors are programming errors.
+		}
+	}
+}
+
+func readLICallCorrelationConfig() (li.CallCorrelationConfig, error) {
+	config := li.DefaultCallCorrelationConfig()
+	for name, target := range liCallCorrelationFields(&config) {
+		key := "processor.li.correlation." + name
+		raw := viper.Get(key)
+		environment := "LIPPYCAT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+		if value, present := os.LookupEnv(environment); present {
+			raw = value // Explicit empty settings override YAML as well.
+		} else if !viper.IsSet(key) {
+			continue
+		}
+		var err error
+		switch field := target.(type) {
+		case *bool:
+			*field, err = strconv.ParseBool(fmt.Sprint(raw))
+		case *int:
+			*field, err = strconv.Atoi(fmt.Sprint(raw))
+		case *time.Duration:
+			*field, err = time.ParseDuration(fmt.Sprint(raw))
+		case *string:
+			var ok bool
+			*field, ok = raw.(string)
+			if !ok {
+				err = fmt.Errorf("must be a string")
+			}
+		case *[]string:
+			if value, ok := raw.(string); ok && !strings.HasPrefix(strings.TrimSpace(value), "[") {
+				*field = nil
+				for _, item := range strings.Split(value, ",") {
+					if item = strings.TrimSpace(item); item != "" {
+						*field = append(*field, item)
+					}
+				}
+			} else {
+				err = decodeLICorrelationList(raw, field)
+			}
+		case *[][]string:
+			err = decodeLICorrelationList(raw, field)
+		case *[]securestore.KeyRef:
+			*field, err = readLICorrelationKeys(raw)
+		}
+		if err != nil {
+			return config, fmt.Errorf("invalid %s: %w", key, err)
+		}
+	}
+	if config.StoreFile != "" || config.StoreKeys.Active.ID != "" || config.StoreKeys.Active.File != "" || len(config.StoreKeys.Prior) > 0 {
+		if _, err := securestore.ParseReadKey(config.StoreKeys.Active.ID + "=" + config.StoreKeys.Active.File); err != nil {
+			return config, fmt.Errorf("processor.li.correlation requires a valid store_key_id and store_key_file")
+		}
+		seen := map[string]bool{config.StoreKeys.Active.ID: true}
+		for _, key := range config.StoreKeys.Prior {
+			if seen[key.ID] {
+				return config, fmt.Errorf("processor.li.correlation store keys require unique IDs")
+			}
+			seen[key.ID] = true
+		}
+	}
+	if err := config.Validate(); err != nil {
+		return config, fmt.Errorf("invalid processor.li.correlation: %w", err)
+	}
+	return config, nil
+}
+
+func decodeLICorrelationList(raw any, target any) error {
+	var data []byte
+	var err error
+	if value, ok := raw.(string); ok {
+		data = []byte(value)
+	} else {
+		data, err = json.Marshal(raw)
+		if err != nil {
+			return fmt.Errorf("encode list: %w", err)
+		}
+	}
+	if err := json.Unmarshal(data, target); err != nil {
+		return fmt.Errorf("expected a string list (nested lists for node_aliases): %w", err)
+	}
+	return nil
+}
+
+func applyLICallCorrelationConfig(config *processor.Config) error {
+	resolved := GetLIConfig()
+	if resolved.callCorrelationError != nil {
+		return resolved.callCorrelationError
+	}
+	config.LICallCorrelation = resolved.CallCorrelation
+	return nil
+}
+
+func readLICorrelationKeys(raw any) ([]securestore.KeyRef, error) {
+	var values []string
+	if value, ok := raw.(string); ok {
+		if value != "" {
+			reader := csv.NewReader(strings.NewReader(value))
+			reader.FieldsPerRecord = -1
+			var err error
+			values, err = reader.Read()
+			if err != nil {
+				return nil, fmt.Errorf("store read keys require one CSV record of id=path entries")
+			}
+			if _, err := reader.Read(); err != io.EOF {
+				return nil, fmt.Errorf("store read keys require one CSV record of id=path entries")
+			}
+		}
+	} else if err := decodeLICorrelationList(raw, &values); err != nil {
+		return nil, fmt.Errorf("store read keys require a string list of id=path entries")
+	}
+	if len(values) > securestore.MaxPriorKeys {
+		return nil, fmt.Errorf("at most four store read keys are supported")
+	}
+	var keys []securestore.KeyRef
+	for _, value := range values {
+		key, err := securestore.ParseReadKey(value)
+		if err != nil {
+			return nil, fmt.Errorf("store read keys require valid id=path entries")
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
 }

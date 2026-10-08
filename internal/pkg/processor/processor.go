@@ -69,6 +69,7 @@ import (
 
 // Config contains processor configuration
 type Config struct {
+	LICallCorrelation                  li.CallCorrelationConfig
 	EventAnalysis                      *eventconfig.Config
 	ListenAddr                         string
 	ProcessorID                        string

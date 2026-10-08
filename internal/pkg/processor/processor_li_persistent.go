@@ -59,6 +59,10 @@ func (p *Processor) newRTPProvenance(pkt *types.PacketDisplay) (li.DeliveryProve
 // The caller holds the original task/call capture grants across the entire
 // bounded fan-out. Delayed callbacks use only their one-use accepted permit.
 func (p *Processor) deliverPersistentX3(task *li.InterceptTask, pkt *types.PacketDisplay, data []byte, metadata li.DeliveryMetadata, admission *CallAdmission) {
+	p.deliverPersistentX3WithPublication(task, pkt, data, metadata, admission, nil)
+}
+
+func (p *Processor) deliverPersistentX3WithPublication(task *li.InterceptTask, pkt *types.PacketDisplay, data []byte, metadata li.DeliveryMetadata, admission *CallAdmission, published func()) {
 	metadata.StateIncarnation = p.liManager.StateIncarnation()
 	metadata.TaskEndAt = li.TaskAuthorizationCutoff(task)
 	metadata.Deadline = metadata.AdmittedAt.Add(p.config.LIDeliveryX3MaxAge)
@@ -109,8 +113,11 @@ func (p *Processor) deliverPersistentX3(task *li.InterceptTask, pkt *types.Packe
 				candidate.Discard()
 			}
 		}
-		buffer.(*delivery.ReorderBuffer).AcceptEntryX3AfterCommit(delivery.ReorderEntry{Accepted: permit, PDU: data, Metadata: copyMetadata,
+		accepted := buffer.(*delivery.ReorderBuffer).AcceptEntryX3AfterCommit(delivery.ReorderEntry{Accepted: permit, PDU: data, Metadata: copyMetadata,
 			CallID: metadata.CallID, Generation: metadata.CallGeneration}, pkt.VoIPData.SSRC, pkt.VoIPData.SequenceNum, nil)
+		if accepted && published != nil {
+			published()
+		}
 	}
 }
 

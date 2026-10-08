@@ -35,6 +35,13 @@ func validateIndependentStorageKeys(config Config, persistence filtering.Persist
 		}
 		rings = append(rings, ring)
 	}
+	if config.LICallCorrelation.Enabled() && config.LICallCorrelation.StoreFile != "" {
+		ring, err := securestore.LoadKeyring(config.LICallCorrelation.StoreKeys)
+		if err != nil {
+			return fmt.Errorf("validate LI call correlation encryption keys: %w", err)
+		}
+		rings = append(rings, ring)
+	}
 	if config.LIDeliveryX2SpoolDir != "" {
 		ring, err := securestore.LoadKeyring(x2StorageKeyConfig(config))
 		if err != nil {
@@ -70,6 +77,9 @@ func (p *Processor) storageKeyValidator(state *securestore.Keyring) (func(*secur
 	rings := []*securestore.Keyring{p.filterManager.Keyring()}
 	if state != nil {
 		rings = append(rings, state)
+	}
+	if ring := p.liCorrelationKeyring(); ring != nil {
+		rings = append(rings, ring)
 	}
 	if err := securestore.CheckIndependent(rings...); err != nil {
 		return nil, err

@@ -711,6 +711,37 @@ message ProcessorStats {
     // Latest startup or periodic snapshot diagnostics; absent when LI is disabled.
     LIReconciliationStats li_reconciliation = 17;
     MediaAdmissionStatus rtp_ebpf = 18;
+    // Aggregate optional call-leg grouping observations; absent when disabled.
+    LICallCorrelationStats li_call_correlation = 19;
+}
+
+// No call identifiers, selectors, addresses or SIP header values are exposed.
+message LICallCorrelationStats {
+    map<string, uint64> adopted = 1;
+    map<string, uint64> standalone = 2;
+    map<string, uint64> sdp = 3;
+    uint64 records = 4;
+    uint64 candidates = 5;
+    uint64 transactions = 6;
+    uint64 origins = 7;
+    uint64 suspended_origins = 8;
+    uint64 groups_two = 9;
+    uint64 groups_three = 10;
+    uint64 groups_four_or_more = 11;
+    uint64 max_records = 12;
+    uint64 max_candidates = 13;
+    uint64 max_origins = 14;
+    bool blind = 15;
+    string blind_cause = 16;
+    int64 blind_remaining_ns = 17;
+    bool persistence = 18;
+    uint64 uncertain_writes = 19;
+    uint64 unresolved_writes = 20;
+    bool sdp_disabled = 21;
+    // Lost bounded reservations; repeated packets can contribute repeatedly.
+    uint64 unrecorded_decisions = 22;
+    // Actual owned protected store telemetry; absent for memory-only grouping.
+    StorageStatus storage = 23;
 }
 
 // Diagnostic details are bounded to the first 32 failures per snapshot. Counts

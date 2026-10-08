@@ -124,6 +124,10 @@ const defaultReconcileOrphanPolls = 2
 // Called when a packet matches an active intercept task.
 type PacketProcessor func(task *InterceptTask, pkt *types.PacketDisplay)
 
+// PacketBatchProcessor receives one active-task snapshot after provenance checks.
+// Its caller holds no registry locks; ordinary per-task admission remains required.
+type PacketBatchProcessor func(tasks []*InterceptTask, pkt *types.PacketDisplay)
+
 // Manager coordinates all LI components.
 //
 // It aggregates:
@@ -196,8 +200,9 @@ type Manager struct {
 
 	// onPacketMatch is called when a packet matches an intercept task.
 	// This allows the processor to handle X2/X3 delivery.
-	onPacketMatch atomic.Pointer[packetProcessorHolder]
-	onRADIUSMatch atomic.Pointer[radiusProcessorHolder]
+	onPacketMatch      atomic.Pointer[packetProcessorHolder]
+	onPacketBatchMatch atomic.Pointer[packetBatchProcessorHolder]
+	onRADIUSMatch      atomic.Pointer[radiusProcessorHolder]
 
 	// onDestinationCreated is called when a new destination is created via X1.
 	// This allows the processor to bridge destinations to the delivery manager.
@@ -226,6 +231,7 @@ type Manager struct {
 }
 
 type packetProcessorHolder struct{ fn PacketProcessor }
+type packetBatchProcessorHolder struct{ fn PacketBatchProcessor }
 
 type radiusProcessorHolder struct {
 	fn func(*InterceptTask, *radius.Observation)
@@ -1091,6 +1097,16 @@ func (m *Manager) SetPacketProcessor(processor PacketProcessor) {
 	m.onPacketMatch.Store(&packetProcessorHolder{fn: processor})
 }
 
+// SetPacketBatchProcessor installs packet-scoped preparation and fan-out. When
+// unset, the legacy per-task callback remains the complete compatibility path.
+func (m *Manager) SetPacketBatchProcessor(fn PacketBatchProcessor) {
+	if fn == nil {
+		m.onPacketBatchMatch.Store(nil)
+		return
+	}
+	m.onPacketBatchMatch.Store(&packetBatchProcessorHolder{fn: fn})
+}
+
 // SetDestinationCreatedCallback sets a callback invoked when destinations are created via X1.
 func (m *Manager) SetDestinationCreatedCallback(cb func(dest *Destination)) {
 	m.callbackMu.Lock()
@@ -1163,13 +1179,14 @@ func (m *Manager) ProcessPacketWithProvenance(pkt *types.PacketDisplay, provenan
 	// Update match stats and get processor
 	m.stats.packetsMatched.Add(1)
 	holder := m.onPacketMatch.Load()
+	batch := m.onPacketBatchMatch.Load()
 
-	if holder == nil {
+	if holder == nil && batch == nil {
 		return
 	}
-	processor := holder.fn
+	var tasks []*InterceptTask
 
-	// For each matching task, invoke the packet processor
+	// Resolve the entire snapshot before packet-scoped preparation.
 	for _, match := range matches {
 		task, err := m.registry.GetTaskDetails(match.XID)
 		if err != nil {
@@ -1182,7 +1199,20 @@ func (m *Manager) ProcessPacketWithProvenance(pkt *types.PacketDisplay, provenan
 			continue
 		}
 
-		processor(task, pkt)
+		if batch == nil {
+			// Preserve legacy lookup/callback ordering when correlation is disabled.
+			// A previous callback may retire a later matching task.
+			holder.fn(task, pkt)
+		} else {
+			tasks = append(tasks, task)
+		}
+	}
+	if len(tasks) == 0 {
+		return
+	}
+	if batch != nil {
+		batch.fn(tasks, pkt)
+		return
 	}
 }
 

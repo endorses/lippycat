@@ -95,7 +95,7 @@ type RotationWorkspace struct {
 
 func OpenRotationWorkspace(d *Dir, cfg RotationWorkspaceConfig) (*RotationWorkspace, error) {
 	if d == nil || !rotationHex(cfg.Token, 64) || cfg.Token == strings.Repeat("0", 64) ||
-		(cfg.Purpose != FilterSnapshot && cfg.Purpose != AdministrativeState && cfg.Purpose != JournalState) || (cfg.Purpose == JournalState && cfg.EnvelopeBytes > 4<<20) || cfg.EnvelopeBytes <= 0 || cfg.EnvelopeBytes > MaxEnvelopeBytes || cfg.MaxWorkingBytes <= 0 ||
+		(cfg.Purpose != FilterSnapshot && cfg.Purpose != AdministrativeState && cfg.Purpose != CallCorrelationState && cfg.Purpose != JournalState) || (cfg.Purpose == JournalState && cfg.EnvelopeBytes > 4<<20) || cfg.EnvelopeBytes <= 0 || cfg.EnvelopeBytes > MaxEnvelopeBytes || cfg.MaxWorkingBytes <= 0 ||
 		len(cfg.Stages) > int(rotationStageCount) || len(cfg.Owners) < 2 || len(cfg.Owners) > 4 || len(cfg.Keyrings) > 2 || len(cfg.Protected) > 16 {
 		return nil, errors.New("securestore: invalid finite rotation workspace")
 	}

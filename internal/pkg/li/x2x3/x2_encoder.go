@@ -90,7 +90,19 @@ func (e *X2Encoder) EncodeIRIWithPolicy(pkt *types.PacketDisplay, xid uuid.UUID,
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDUWithPolicy(pkt, xid, pkt.VoIPData, policy)
+	return e.EncodeIRIWithPolicyAndCorrelationID(pkt, xid, policy, e.generateCorrelationID(pkt.VoIPData.CallID))
+}
+
+// EncodeIRIWithPolicyAndCorrelationID applies the task policy and caller-selected
+// correlation ID before allocating a sequence number. Zero is a valid explicit ID.
+func (e *X2Encoder) EncodeIRIWithPolicyAndCorrelationID(pkt *types.PacketDisplay, xid uuid.UUID, policy SIPContentPolicy, correlationID uint64) (*PDU, error) {
+	if pkt == nil || pkt.VoIPData == nil || pkt.VoIPData.IsRTP {
+		return nil, ErrNotVoIP
+	}
+	if pkt.VoIPData.CallID == "" {
+		return nil, ErrNoCallID
+	}
+	return e.buildSIPPDUWithPolicyAndCorrelationID(pkt, xid, pkt.VoIPData, policy, correlationID)
 }
 
 // NewX2SIPPDU creates an X2 PDU carrying a raw SIP message: PDU Type 1,
@@ -200,8 +212,10 @@ func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *t
 }
 
 func (e *X2Encoder) buildSIPPDUWithPolicy(pkt *types.PacketDisplay, xid uuid.UUID, voip *types.VoIPMetadata, policy SIPContentPolicy) (*PDU, error) {
-	correlationID := e.generateCorrelationID(voip.CallID)
+	return e.buildSIPPDUWithPolicyAndCorrelationID(pkt, xid, voip, policy, e.generateCorrelationID(voip.CallID))
+}
 
+func (e *X2Encoder) buildSIPPDUWithPolicyAndCorrelationID(pkt *types.PacketDisplay, xid uuid.UUID, voip *types.VoIPMetadata, policy SIPContentPolicy, correlationID uint64) (*PDU, error) {
 	pdu := NewX2SIPPDU(xid, correlationID)
 	if err := e.setSIPPayload(pdu, pkt, voip, policy); err != nil {
 		return nil, err

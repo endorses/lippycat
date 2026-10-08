@@ -99,7 +99,7 @@ type RotationIO struct {
 // allocates every next-write slot before the coordinator's first GCM seal.
 func OpenRotationIO(dir *Dir, cfg RotationIOConfig) (*RotationIO, error) {
 	if dir == nil || !rotationHex(cfg.Token, 64) || cfg.Token == strings.Repeat("0", 64) ||
-		(cfg.Purpose != FilterSnapshot && cfg.Purpose != AdministrativeState) ||
+		(cfg.Purpose != FilterSnapshot && cfg.Purpose != AdministrativeState && cfg.Purpose != CallCorrelationState) ||
 		cfg.EnvelopeBytes <= 0 || cfg.EnvelopeBytes > MaxEnvelopeBytes || cfg.MaxWorkingBytes <= 0 {
 		return nil, errors.New("securestore: invalid rotation workspace configuration")
 	}

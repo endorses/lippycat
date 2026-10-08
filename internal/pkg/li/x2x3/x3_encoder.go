@@ -114,36 +114,29 @@ func NewX3EncoderWithSequencer(sequencer *Sequencer, domainID, nfID string) *X3E
 // For high-volume streaming, the encoder uses pooled buffers and
 // efficient serialization to minimize allocations.
 func (e *X3Encoder) EncodeCC(pkt *types.PacketDisplay, xid uuid.UUID) (*PDU, error) {
-	if pkt.VoIPData == nil || !pkt.VoIPData.IsRTP {
+	if pkt == nil || pkt.VoIPData == nil || !pkt.VoIPData.IsRTP {
 		return nil, ErrNotRTP
 	}
+	return e.EncodeCCWithCorrelationID(pkt, xid, e.generateCorrelationID(pkt.VoIPData.SSRC, pkt.VoIPData.CallID))
+}
 
-	voip := pkt.VoIPData
-	if voip.SSRC == 0 {
+// EncodeCCWithCorrelationID uses the caller-selected correlation ID before
+// allocating a sequence number. Zero is a valid explicit ID.
+func (e *X3Encoder) EncodeCCWithCorrelationID(pkt *types.PacketDisplay, xid uuid.UUID, correlationID uint64) (*PDU, error) {
+	if pkt == nil || pkt.VoIPData == nil || !pkt.VoIPData.IsRTP {
+		return nil, ErrNotRTP
+	}
+	if pkt.VoIPData.SSRC == 0 {
 		return nil, ErrNoSSRC
 	}
-
-	// Generate correlation ID from SSRC (deterministic hash)
-	// This links all RTP packets from the same stream
-	correlationID := e.generateCorrelationID(voip.SSRC, voip.CallID)
-
-	// Create PDU carrying a raw RTP packet.
 	pdu := NewX3RTPPDU(xid, correlationID)
-
-	// Add standard conditional attributes (timestamp, sequence number).
 	if err := e.addCommonAttributes(pdu, pkt); err != nil {
 		return nil, err
 	}
-
-	// Add network layer attributes (5-tuple).
 	e.addNetworkAttributes(pdu, pkt)
-
-	// Set payload (raw RTP packet including header). The MDF reads SSRC /
-	// sequence / timestamp / payload-type directly from the RTP header.
 	if len(pkt.RawData) > 0 {
 		pdu.SetPayload(pkt.RawData)
 	}
-
 	return pdu, nil
 }
 
@@ -159,7 +152,17 @@ func NewX3RTPPDU(xid uuid.UUID, correlationID uint64) *PDU {
 // EncodeCCWithPayload encodes an RTP packet with an explicit payload.
 // Use this when the RTP payload is separate from RawData.
 func (e *X3Encoder) EncodeCCWithPayload(pkt *types.PacketDisplay, xid uuid.UUID, payload []byte) (*PDU, error) {
-	if pkt.VoIPData == nil || !pkt.VoIPData.IsRTP {
+	if pkt == nil || pkt.VoIPData == nil || !pkt.VoIPData.IsRTP {
+		return nil, ErrNotRTP
+	}
+
+	return e.EncodeCCWithPayloadAndCorrelationID(pkt, xid, payload, e.generateCorrelationID(pkt.VoIPData.SSRC, pkt.VoIPData.CallID))
+}
+
+// EncodeCCWithPayloadAndCorrelationID preserves an explicit RTP payload while
+// using the caller-selected ID for both the PDU and its sequence context.
+func (e *X3Encoder) EncodeCCWithPayloadAndCorrelationID(pkt *types.PacketDisplay, xid uuid.UUID, payload []byte, correlationID uint64) (*PDU, error) {
+	if pkt == nil || pkt.VoIPData == nil || !pkt.VoIPData.IsRTP {
 		return nil, ErrNotRTP
 	}
 
@@ -172,7 +175,6 @@ func (e *X3Encoder) EncodeCCWithPayload(pkt *types.PacketDisplay, xid uuid.UUID,
 		return nil, ErrNoPayload
 	}
 
-	correlationID := e.generateCorrelationID(voip.SSRC, voip.CallID)
 	pdu := NewX3RTPPDU(xid, correlationID)
 
 	if err := e.addCommonAttributes(pdu, pkt); err != nil {
@@ -301,5 +303,21 @@ func (e *X3Encoder) EncodeCCBatch(packets []*types.PacketDisplay, xid uuid.UUID)
 		pdus = append(pdus, pdu)
 	}
 
+	return pdus, errs
+}
+
+// EncodeCCBatchWithCorrelationID encodes packets sharing a caller-selected group
+// ID, preserving input order and collecting errors as EncodeCCBatch does.
+func (e *X3Encoder) EncodeCCBatchWithCorrelationID(packets []*types.PacketDisplay, xid uuid.UUID, correlationID uint64) ([]*PDU, []error) {
+	pdus := make([]*PDU, 0, len(packets))
+	var errs []error
+	for _, pkt := range packets {
+		pdu, err := e.EncodeCCWithCorrelationID(pkt, xid, correlationID)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		pdus = append(pdus, pdu)
+	}
 	return pdus, errs
 }

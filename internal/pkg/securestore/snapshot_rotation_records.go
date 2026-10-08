@@ -35,7 +35,7 @@ type snapshotRotationRequest struct {
 }
 
 func (r snapshotRotationRequest) valid() bool {
-	if (r.Purpose != FilterSnapshot && r.Purpose != AdministrativeState) ||
+	if (r.Purpose != FilterSnapshot && r.Purpose != AdministrativeState && r.Purpose != CallCorrelationState) ||
 		r.Store == [16]byte{} || r.Parent.Inode == 0 || r.Source.Inode == 0 ||
 		r.SourcePath == [32]byte{} || r.DestinationPath == [32]byte{} ||
 		r.SourceCiphertext == [32]byte{} || r.Payload == [32]byte{} || r.SourceRing == [32]byte{} ||
@@ -205,7 +205,7 @@ type snapshotRotationBootstrap struct {
 
 func (r snapshotRotationBootstrap) valid() bool {
 	return (r.Stage == snapshotRotationUninitialized || r.Stage == snapshotRotationRequired) &&
-		(r.Purpose == FilterSnapshot || r.Purpose == AdministrativeState) && r.Store != [16]byte{} && r.Token != [32]byte{}
+		(r.Purpose == FilterSnapshot || r.Purpose == AdministrativeState || r.Purpose == CallCorrelationState) && r.Store != [16]byte{} && r.Token != [32]byte{}
 }
 
 func (r snapshotRotationBootstrap) marshal(target *Keyring) ([]byte, error) {

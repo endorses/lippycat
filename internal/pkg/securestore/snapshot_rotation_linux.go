@@ -166,10 +166,10 @@ func rotationNames(purpose Purpose, destination, usage, token string) [rotationS
 func (r *snapshotRotation) prepare() error {
 	o := r.owner
 	ownerLimit := int64(16 << 20)
-	if o.Purpose == AdministrativeState {
+	if o.Purpose == AdministrativeState || o.Purpose == CallCorrelationState {
 		ownerLimit = 32 << 20
 	}
-	if (o.Purpose != FilterSnapshot && o.Purpose != AdministrativeState) || o.Object == "" || len(o.Object) > MaxObjectIDBytes || o.MaxPayloadBytes <= 0 || o.MaxPayloadBytes > ownerLimit || o.MaxPayloadBytes > MaxPlaintextBytes-bindingFixedBytes-int64(len(o.Object)) || o.Validate == nil || r.options.MaxWorkingBytes <= 0 {
+	if (o.Purpose != FilterSnapshot && o.Purpose != AdministrativeState && o.Purpose != CallCorrelationState) || o.Object == "" || len(o.Object) > MaxObjectIDBytes || o.MaxPayloadBytes <= 0 || o.MaxPayloadBytes > ownerLimit || o.MaxPayloadBytes > MaxPlaintextBytes-bindingFixedBytes-int64(len(o.Object)) || o.Validate == nil || r.options.MaxWorkingBytes <= 0 {
 		return errors.New("securestore: invalid snapshot rotation contract")
 	}
 	var err error

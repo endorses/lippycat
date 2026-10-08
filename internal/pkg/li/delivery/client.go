@@ -615,6 +615,14 @@ func (c *Client) SendX2WithMetadata(xid uuid.UUID, destIDs []uuid.UUID, data []b
 	_, err := c.enqueueWithMetadata(PDUTypeX2, xid, destIDs, data, metadata, false)
 	return err
 }
+
+// SendX2WithMetadataAndPublication reports each accepted destination even if
+// another destination rejects the same fan-out. The callback must not reenter
+// Client. It records queue/spool publication, not network transmission.
+func (c *Client) SendX2WithMetadataAndPublication(xid uuid.UUID, destIDs []uuid.UUID, data []byte, metadata DeliveryMetadata, published func()) error {
+	_, err := c.enqueueWithMetadataAndPublication(PDUTypeX2, xid, destIDs, data, metadata, false, published)
+	return err
+}
 func (c *Client) SendX3WithMetadata(xid uuid.UUID, destIDs []uuid.UUID, data []byte, metadata DeliveryMetadata) error {
 	_, err := c.enqueueWithMetadata(PDUTypeX3, xid, destIDs, data, metadata, false)
 	return err
@@ -624,6 +632,9 @@ func (c *Client) enqueue(t PDUType, xid uuid.UUID, destIDs []uuid.UUID, data []b
 	return err
 }
 func (c *Client) enqueueWithMetadata(t PDUType, xid uuid.UUID, destIDs []uuid.UUID, data []byte, metadata DeliveryMetadata, synchronous bool) ([]chan error, error) {
+	return c.enqueueWithMetadataAndPublication(t, xid, destIDs, data, metadata, synchronous, nil)
+}
+func (c *Client) enqueueWithMetadataAndPublication(t PDUType, xid uuid.UUID, destIDs []uuid.UUID, data []byte, metadata DeliveryMetadata, synchronous bool, published func()) ([]chan error, error) {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
 	if c.initErr != nil {
@@ -724,6 +735,11 @@ func (c *Client) enqueueWithMetadata(t PDUType, xid uuid.UUID, destIDs []uuid.UU
 			if err := c.persistItem(q, item); err != nil {
 				c.recordTerminalDrop(did, q, item, "journal_rejected")
 				failure = err
+				if published != nil && securestore.OutcomeOf(err) == securestore.Uncertain {
+					published()
+				}
+			} else if published != nil {
+				published()
 			}
 			continue
 		}
@@ -747,12 +763,18 @@ func (c *Client) enqueueWithMetadata(t PDUType, xid uuid.UUID, destIDs []uuid.UU
 		if c.journalFor(t) != nil {
 			if err := c.persistItem(q, item); err != nil {
 				c.removeItem(q, item, "journal_rejected")
+				if published != nil && securestore.OutcomeOf(err) == securestore.Uncertain {
+					published()
+				}
 				failure = err
 				continue
 			}
 		} else {
 			item.persisted.Store(true)
 			q.signal()
+		}
+		if published != nil {
+			published()
 		}
 		if item.completion != nil {
 			completions = append(completions, item.completion)
@@ -770,6 +792,12 @@ func (c *Client) enqueueWithMetadata(t PDUType, xid uuid.UUID, destIDs []uuid.UU
 		}
 	}
 	return completions, failure
+}
+
+// DestinationAcceptsPDU reports the existing interface routing policy, including
+// the legacy unspecified-protocol behavior, before a caller buffers product.
+func DestinationAcceptsPDU(dest *li.Destination, pduType PDUType) bool {
+	return destinationAcceptsPDU(dest, pduType)
 }
 
 func destinationAcceptsPDU(dest *li.Destination, pduType PDUType) bool {

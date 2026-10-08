@@ -365,7 +365,7 @@ func TestCallCorrelationConcurrentFirstDecision(t *testing.T) {
 func TestCallCorrelationResponseFirstAndFinalCaptureTime(t *testing.T) {
 	cfg := DefaultCallCorrelationConfig()
 	cfg.AddressChaining = true
-	t.Run("response first supplies UAS and UAC", func(t *testing.T) {
+	t.Run("response first has no proven initial transaction", func(t *testing.T) {
 		c, now := newContractCorrelator(t, cfg, nil)
 		p := contractInvite("a", 0, *now)
 		p.SrcIP, p.DstIP = p.DstIP, p.SrcIP
@@ -374,8 +374,9 @@ func TestCallCorrelationResponseFirstAndFinalCaptureTime(t *testing.T) {
 		p.VoIPData.ToTag = "early"
 		a := contractResolve(c, p)
 		b := contractResolve(c, contractInvite("b", 1, now.Add(time.Millisecond)))
-		require.Equal(t, a.CorrelationID, b.CorrelationID)
-		require.Equal(t, "R1", b.Rule)
+		require.NotEqual(t, a.CorrelationID, b.CorrelationID)
+		require.Equal(t, "not_eligible", a.Reason)
+		require.Empty(t, b.Rule)
 	})
 	for _, afterFinal := range []bool{false, true} {
 		t.Run(fmt.Sprintf("final-before-arrival-later-start-%t", afterFinal), func(t *testing.T) {

@@ -736,12 +736,17 @@ message LICallCorrelationStats {
     int64 blind_remaining_ns = 17;
     bool persistence = 18;
     uint64 uncertain_writes = 19;
+    // Pending decisions plus one when the current snapshot is uncertain.
     uint64 unresolved_writes = 20;
     bool sdp_disabled = 21;
     // Lost bounded reservations; repeated packets can contribute repeatedly.
     uint64 unrecorded_decisions = 22;
     // Actual owned protected store telemetry; absent for memory-only grouping.
     StorageStatus storage = 23;
+    // Bounded packet handoff while an immutable decision awaits storage.
+    uint64 deferred_packets = 24;
+    uint64 deferred_bytes = 25;
+    uint64 deferred_rejected = 26;
 }
 
 // Diagnostic details are bounded to the first 32 failures per snapshot. Counts

@@ -14,7 +14,7 @@ func TestCallCorrelationStatusWireAndJSON(t *testing.T) {
 		Storage: &management.StorageStatus{Mode: "encrypted", State: "ready", ActiveKeyId: "correlation-1", PriorKeyIds: []string{"correlation-0"}, Commits: 2, Uncertain: 3, KeyUsage: &management.EncryptionUsageStats{ReservedInvocations: 4, ReservedBlocks: 5}},
 		Adopted: map[string]uint64{"H": 1}, Standalone: map[string]uint64{"blind": 2}, Sdp: map[string]uint64{"unusable": 3},
 		Records: 4, Candidates: 5, Transactions: 6, Origins: 7, SuspendedOrigins: 8, GroupsTwo: 9, GroupsThree: 10, GroupsFourOrMore: 11,
-		MaxRecords: 100, MaxCandidates: 200, MaxOrigins: 300, Blind: true, BlindCause: "startup", BlindRemainingNs: 400, Persistence: true, UncertainWrites: 12, UnresolvedWrites: 13, SdpDisabled: true, UnrecordedDecisions: 15,
+		MaxRecords: 100, MaxCandidates: 200, MaxOrigins: 300, Blind: true, BlindCause: "startup", BlindRemainingNs: 400, Persistence: true, UncertainWrites: 12, UnresolvedWrites: 13, SdpDisabled: true, UnrecordedDecisions: 15, DeferredPackets: 16, DeferredBytes: 17, DeferredRejected: 18,
 	}
 	sent := &management.StatusResponse{ProcessorStats: &management.ProcessorStats{LiCallCorrelation: stats}}
 	wire, err := proto.Marshal(sent)

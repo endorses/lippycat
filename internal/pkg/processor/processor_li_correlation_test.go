@@ -329,7 +329,26 @@ func TestProcessorCallCorrelationInitialZeroCSeqThroughBatchDelivery(t *testing.
 			t.Fatal("CSeq zero initial request did not reach the TLS MDF")
 		}
 	}
+	// A valid zero CSeq response without its initiating request must reserve a
+	// standalone ID, even when a trusted header points at an existing group.
+	response := correlationIntegrationSIP("zero-cseq-response-only", dirTargetURI, time.Now())
+	_, headers, _ := strings.Cut(string(response.VoIPData.RawSIP), "\r\n")
+	raw := []byte("SIP/2.0 200 OK\r\n" + strings.Replace(strings.Replace(strings.TrimSuffix(headers, "secret"), "CSeq: 1 INVITE", "CSeq: 0 INVITE", 1), "Content-Length: 6", "Content-Length: 0", 1))
+	response.VoIPData.RawSIP = raw
+	captured := correlationBlockingCapturedSIP(t, response, filters)
+	captured.Metadata.Sip.Method = ""
+	captured.Metadata.Sip.CseqNumber = 0
+	captured.Metadata.Sip.ResponseCode = 200
+	captured.Metadata.Sip.ToTag = "response-dialog"
+	p.processBatch(source.FromProtoBatch(&data.PacketBatch{HunterId: "zero-cseq-fixture", Packets: []*data.CapturedPacket{captured}}))
+	select {
+	case product := <-products:
+		require.Equal(t, raw, product.Payload)
+		require.NotEqual(t, selected, product.Header.CorrelationID, "response-only capture cannot establish initial transaction evidence")
+	case <-time.After(5 * time.Second):
+		t.Fatal("zero CSeq response-only signaling not delivered")
+	}
 	stats := p.liStorage.correlation.Stats()
-	require.Equal(t, 2, stats.Records)
+	require.Equal(t, 3, stats.Records)
 	require.EqualValues(t, 1, stats.Adopted["H"])
 }

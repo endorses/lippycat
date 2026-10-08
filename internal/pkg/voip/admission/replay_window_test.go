@@ -76,7 +76,7 @@ func TestReplayUnrecordedRetirementExtendsFiniteDomainProtection(t *testing.T) {
 	current := &selectedCall{lifetime: callregistry.Lifetime{Session: 1, Generation: 2}, known: true}
 	b.selected["synthetic-unrelated"] = current
 	key := mediaadmission.DialogKey{CallID: "synthetic-unrelated", FromTag: "from", CSeq: 5, CSeqMethod: "INVITE", CSeqValid: true}
-	require.False(t, b.checkKeyLifetimeLocked(current, key))
+	require.False(t, b.observeSelectedRecordLocked(current, mediaadmission.MetadataRecord{Key: key, Complete: true}))
 	require.False(t, current.lifetimeAmbiguous, "capacity pressure is independently expiring")
 	current.unknown = true
 	b.expireLifetimeProofLocked(b.proofHistory.blockedUntil)

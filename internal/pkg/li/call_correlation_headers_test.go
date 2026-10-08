@@ -5,6 +5,7 @@ package li
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/stretchr/testify/require"
@@ -47,8 +48,8 @@ func TestCorrelationSessionIDInitiator(t *testing.T) {
 		{"SIP/2.0 200 OK", local, "", false},
 		{"SIP/2.0 200 OK", local + ";remote=" + strings.Repeat("0", 32), "", false},
 		{"INVITE sip:test@example.invalid SIP/2.0", strings.Repeat("0", 32), "", false},
-		{"INVITE sip:test@example.invalid SIP/2.0", "1234", "", true},
-		{"SIP/2.0 200 OK", local + ";remote=broken", "", true},
+		{"INVITE sip:test@example.invalid SIP/2.0", "1234", "", false},
+		{"SIP/2.0 200 OK", local + ";remote=broken", "", false},
 		{"SIP/2.0 200 OK", local + ";remote=" + remote + ";remote=" + remote, "", true},
 	}
 	for _, tt := range tests {
@@ -68,8 +69,8 @@ func TestCorrelationICID(t *testing.T) {
 		{"icid-value=AbC;icid-generated-at=192.0.2.1", "AbC", false},
 		{`ICID-VALUE="A;b\"C";orig-ioi=example.invalid`, `A;b"C`, false},
 		{"orig-ioi=example.invalid", "", false},
-		{"icid-value=", "", true},
-		{`icid-value="unclosed`, "", true},
+		{"icid-value=", "", false},
+		{`icid-value="unclosed`, "", false},
 		{"icid-value=a;icid-value=b", "", true},
 		{"icid-value=a;icid-value=a", "a", false},
 	}
@@ -127,4 +128,79 @@ func TestCorrelationHeaderBoundsAndFallback(t *testing.T) {
 	require.True(t, invalid)
 	_, invalid = correlationSessionKeys(pkt, nil)
 	require.False(t, invalid)
+}
+
+func TestCorrelationSessionIDGenericParameters(t *testing.T) {
+	local := "1234567890abcdef1234567890abcdef"
+	remote := "fedcba0987654321fedcba0987654321"
+	for _, generic := range []string{`;flag`, `;mode=token`, `;host=example.invalid.`, `;host=[2001:db8::1]`, `;note="quoted;separator=ok"`, `;note="escaped\";and\\slash"`, `;empty=""`, ";note=\"café\""} {
+		t.Run(generic, func(t *testing.T) {
+			for _, response := range []bool{false, true} {
+				start, want := "INVITE sip:test@example.invalid SIP/2.0", local
+				if response {
+					start, want = "SIP/2.0 200 OK", remote
+				}
+				pkt := correlationHeaderTestPacket(start, "Session-ID: "+local+generic+";remote="+remote)
+				keys, conflict := correlationSessionKeys(pkt, []string{"Session-ID"})
+				require.False(t, conflict)
+				require.Equal(t, want, keys["session-id"])
+			}
+		})
+	}
+	for _, generic := range []string{`;bad=`, `;bad=two words`, `;bad="unterminated`, `;bad="embedded"quote"`, `;bad=[not:ipv6]`, `;bad@name=value`, `;`} {
+		pkt := correlationHeaderTestPacket("INVITE sip:test@example.invalid SIP/2.0", "Session-ID: "+local+generic)
+		keys, conflict := correlationSessionKeys(pkt, []string{"Session-ID"})
+		require.False(t, conflict, generic)
+		require.Empty(t, keys, generic)
+	}
+}
+
+func TestCorrelationSessionHeaderUnusableAndAmbiguous(t *testing.T) {
+	const local = "1234567890abcdef1234567890abcdef"
+	for _, fields := range []string{
+		"Session-ID: " + local + ";remote=" + local + ";REMOTE=" + local,
+		"Session-ID: " + local + ";remote=bad;remote=" + local,
+		"Session-ID: bad\r\nSession-ID: bad",
+		"Session-ID: " + local + "\r\nSession-ID: broken",
+		"Session-ID: " + local + ";a=1\r\nSession-ID: " + local + ";a=2",
+	} {
+		_, conflict := correlationSessionKeys(correlationHeaderTestPacket("INVITE sip:test@example.invalid SIP/2.0", fields), []string{"session-id"})
+		require.True(t, conflict, fields)
+	}
+	pkt := correlationHeaderTestPacket("INVITE sip:test@example.invalid SIP/2.0", "Session-ID: broken\r\nX-Trusted: Exact;Case=Preserved")
+	keys, conflict := correlationSessionKeys(pkt, []string{"session-id", "x-trusted"})
+	require.False(t, conflict)
+	require.Equal(t, map[string]string{"x-trusted": "Exact;Case=Preserved"}, keys)
+	pkt = correlationHeaderTestPacket("INVITE sip:test@example.invalid SIP/2.0", "Session-ID: "+local+";flag\r\nSession-ID: "+local+";flag")
+	keys, conflict = correlationSessionKeys(pkt, []string{"session-id"})
+	require.False(t, conflict)
+	require.Equal(t, local, keys["session-id"])
+}
+
+func TestCorrelationUnusableTrustedHeaderAllowsWeakFallback(t *testing.T) {
+	for _, rule := range []string{"S", "R1", "R2"} {
+		t.Run(rule, func(t *testing.T) {
+			cfg := DefaultCallCorrelationConfig()
+			cfg.SessionHeaders = []string{"Session-ID", "P-Charging-Vector"}
+			cfg.SDPOriginMatching = rule == "S"
+			cfg.AddressChaining = rule == "R1"
+			cfg.NumberChaining = rule == "R2"
+			c, now := newContractCorrelator(t, cfg, nil)
+			a := contractInvite("header-root", 0, *now)
+			b := contractInvite("header-child", 1, now.Add(time.Millisecond))
+			if rule == "R2" {
+				a.SrcIP, a.DstIP, b.SrcIP, b.DstIP = "", "", "", ""
+			}
+			if rule == "S" {
+				contractSDP(a, "551")
+				contractSDP(b, "551")
+			}
+			root := contractResolve(c, a)
+			contractHeader(b, "Session-ID", "malformed")
+			contractHeader(b, "P-Charging-Vector", "icid-value=")
+			child := contractResolve(c, b)
+			require.Equal(t, root.CorrelationID, child.CorrelationID)
+			require.Equal(t, rule, child.Rule)
+		})
+	}
 }

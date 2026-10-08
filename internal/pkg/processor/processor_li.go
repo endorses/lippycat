@@ -610,9 +610,16 @@ func (p *Processor) initLIRuntime() {
 			for _, task := range tasks {
 				identities = append(identities, li.CallCorrelationTask{StateIncarnation: p.liStorage.correlationContext, XID: task.XID, Generation: task.ActivationGeneration})
 			}
-			decision := p.liStorage.correlation.Resolve(pkt, identities)
-			for _, task := range tasks {
-				processPacket(task, pkt, &decision)
+			snapshot, ok := p.snapshotLICorrelationPacket(pkt, tasks)
+			if !ok {
+				return
+			}
+			if err := p.liStorage.correlation.ResolveAsync(p.ctx, snapshot.packet, identities, snapshot.bytes, func(decision li.CallCorrelationDecision) {
+				p.deliverLICorrelationSnapshot(snapshot, decision, processPacket)
+			}); err != nil {
+				// Correlator counters retain aggregate bounded-queue rejection;
+				// never expose packet identities or key material in diagnostics.
+				logger.Debug("LI correlation packet handoff rejected")
 			}
 		})
 	}

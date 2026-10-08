@@ -3132,14 +3132,19 @@ type LICallCorrelationStats struct {
 	BlindRemainingNs int64                  `protobuf:"varint,17,opt,name=blind_remaining_ns,json=blindRemainingNs,proto3" json:"blind_remaining_ns,omitempty"`
 	Persistence      bool                   `protobuf:"varint,18,opt,name=persistence,proto3" json:"persistence,omitempty"`
 	UncertainWrites  uint64                 `protobuf:"varint,19,opt,name=uncertain_writes,json=uncertainWrites,proto3" json:"uncertain_writes,omitempty"`
-	UnresolvedWrites uint64                 `protobuf:"varint,20,opt,name=unresolved_writes,json=unresolvedWrites,proto3" json:"unresolved_writes,omitempty"`
-	SdpDisabled      bool                   `protobuf:"varint,21,opt,name=sdp_disabled,json=sdpDisabled,proto3" json:"sdp_disabled,omitempty"`
+	// Pending decisions plus one when the current snapshot is uncertain.
+	UnresolvedWrites uint64 `protobuf:"varint,20,opt,name=unresolved_writes,json=unresolvedWrites,proto3" json:"unresolved_writes,omitempty"`
+	SdpDisabled      bool   `protobuf:"varint,21,opt,name=sdp_disabled,json=sdpDisabled,proto3" json:"sdp_disabled,omitempty"`
 	// Lost bounded reservations; repeated packets can contribute repeatedly.
 	UnrecordedDecisions uint64 `protobuf:"varint,22,opt,name=unrecorded_decisions,json=unrecordedDecisions,proto3" json:"unrecorded_decisions,omitempty"`
 	// Actual owned protected store telemetry; absent for memory-only grouping.
-	Storage       *StorageStatus `protobuf:"bytes,23,opt,name=storage,proto3" json:"storage,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Storage *StorageStatus `protobuf:"bytes,23,opt,name=storage,proto3" json:"storage,omitempty"`
+	// Bounded packet handoff while an immutable decision awaits storage.
+	DeferredPackets  uint64 `protobuf:"varint,24,opt,name=deferred_packets,json=deferredPackets,proto3" json:"deferred_packets,omitempty"`
+	DeferredBytes    uint64 `protobuf:"varint,25,opt,name=deferred_bytes,json=deferredBytes,proto3" json:"deferred_bytes,omitempty"`
+	DeferredRejected uint64 `protobuf:"varint,26,opt,name=deferred_rejected,json=deferredRejected,proto3" json:"deferred_rejected,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *LICallCorrelationStats) Reset() {
@@ -3331,6 +3336,27 @@ func (x *LICallCorrelationStats) GetStorage() *StorageStatus {
 		return x.Storage
 	}
 	return nil
+}
+
+func (x *LICallCorrelationStats) GetDeferredPackets() uint64 {
+	if x != nil {
+		return x.DeferredPackets
+	}
+	return 0
+}
+
+func (x *LICallCorrelationStats) GetDeferredBytes() uint64 {
+	if x != nil {
+		return x.DeferredBytes
+	}
+	return 0
+}
+
+func (x *LICallCorrelationStats) GetDeferredRejected() uint64 {
+	if x != nil {
+		return x.DeferredRejected
+	}
+	return 0
 }
 
 // Diagnostic details are bounded to the first 32 failures per snapshot. Counts
@@ -7310,7 +7336,8 @@ const file_management_proto_rawDesc = "" +
 	"\x0fli_startup_sync\x18\x10 \x01(\v2'.lippycat.management.LIStartupSyncStatsR\rliStartupSync\x12W\n" +
 	"\x11li_reconciliation\x18\x11 \x01(\v2*.lippycat.management.LIReconciliationStatsR\x10liReconciliation\x12D\n" +
 	"\brtp_ebpf\x18\x12 \x01(\v2).lippycat.management.MediaAdmissionStatusR\artpEbpf\x12[\n" +
-	"\x13li_call_correlation\x18\x13 \x01(\v2+.lippycat.management.LICallCorrelationStatsR\x11liCallCorrelation\"\xb6\t\n" +
+	"\x13li_call_correlation\x18\x13 \x01(\v2+.lippycat.management.LICallCorrelationStatsR\x11liCallCorrelation\"\xb5\n" +
+	"\n" +
 	"\x16LICallCorrelationStats\x12R\n" +
 	"\aadopted\x18\x01 \x03(\v28.lippycat.management.LICallCorrelationStats.AdoptedEntryR\aadopted\x12[\n" +
 	"\n" +
@@ -7343,7 +7370,10 @@ const file_management_proto_rawDesc = "" +
 	"\x11unresolved_writes\x18\x14 \x01(\x04R\x10unresolvedWrites\x12!\n" +
 	"\fsdp_disabled\x18\x15 \x01(\bR\vsdpDisabled\x121\n" +
 	"\x14unrecorded_decisions\x18\x16 \x01(\x04R\x13unrecordedDecisions\x12<\n" +
-	"\astorage\x18\x17 \x01(\v2\".lippycat.management.StorageStatusR\astorage\x1a:\n" +
+	"\astorage\x18\x17 \x01(\v2\".lippycat.management.StorageStatusR\astorage\x12)\n" +
+	"\x10deferred_packets\x18\x18 \x01(\x04R\x0fdeferredPackets\x12%\n" +
+	"\x0edeferred_bytes\x18\x19 \x01(\x04R\rdeferredBytes\x12+\n" +
+	"\x11deferred_rejected\x18\x1a \x01(\x04R\x10deferredRejected\x1a:\n" +
 	"\fAdoptedEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\x1a=\n" +

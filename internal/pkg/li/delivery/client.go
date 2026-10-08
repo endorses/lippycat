@@ -617,8 +617,7 @@ func (c *Client) SendX2WithMetadata(xid uuid.UUID, destIDs []uuid.UUID, data []b
 }
 
 // SendX2WithMetadataAndPublication reports each accepted destination even if
-// another destination rejects the same fan-out. The callback must not reenter
-// Client. It records queue/spool publication, not network transmission.
+// another destination rejects the same fan-out. The callback runs after admission locks are released. It records queue/spool publication, not network transmission.
 func (c *Client) SendX2WithMetadataAndPublication(xid uuid.UUID, destIDs []uuid.UUID, data []byte, metadata DeliveryMetadata, published func()) error {
 	_, err := c.enqueueWithMetadataAndPublication(PDUTypeX2, xid, destIDs, data, metadata, false, published)
 	return err
@@ -636,7 +635,15 @@ func (c *Client) enqueueWithMetadata(t PDUType, xid uuid.UUID, destIDs []uuid.UU
 }
 func (c *Client) enqueueWithMetadataAndPublication(t PDUType, xid uuid.UUID, destIDs []uuid.UUID, data []byte, metadata DeliveryMetadata, synchronous bool, published func()) ([]chan error, error) {
 	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
+	accepted := 0
+	defer func() {
+		c.admissionMu.Unlock()
+		if published != nil {
+			for i := 0; i < accepted; i++ {
+				published()
+			}
+		}
+	}()
 	if c.initErr != nil {
 		return nil, c.initErr
 	}
@@ -736,10 +743,10 @@ func (c *Client) enqueueWithMetadataAndPublication(t PDUType, xid uuid.UUID, des
 				c.recordTerminalDrop(did, q, item, "journal_rejected")
 				failure = err
 				if published != nil && securestore.OutcomeOf(err) == securestore.Uncertain {
-					published()
+					accepted++
 				}
 			} else if published != nil {
-				published()
+				accepted++
 			}
 			continue
 		}
@@ -764,7 +771,7 @@ func (c *Client) enqueueWithMetadataAndPublication(t PDUType, xid uuid.UUID, des
 			if err := c.persistItem(q, item); err != nil {
 				c.removeItem(q, item, "journal_rejected")
 				if published != nil && securestore.OutcomeOf(err) == securestore.Uncertain {
-					published()
+					accepted++
 				}
 				failure = err
 				continue
@@ -774,7 +781,7 @@ func (c *Client) enqueueWithMetadataAndPublication(t PDUType, xid uuid.UUID, des
 			q.signal()
 		}
 		if published != nil {
-			published()
+			accepted++
 		}
 		if item.completion != nil {
 			completions = append(completions, item.completion)

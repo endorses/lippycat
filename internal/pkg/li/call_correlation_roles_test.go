@@ -133,7 +133,8 @@ func TestCorrelationSDPDelayedOfferACKAndUnknownRole(t *testing.T) {
 	unknownTx, _ := correlationTx(unknown)
 	require.False(t, c.transactions[unknownTx].requestSeen)
 	c.Resolve(unknown, []CallCorrelationTask{correlationTaskX})
-	require.Empty(t, c.transactions[unknownTx].candidate.originKeys)
+	_, retained := c.transactions[unknownTx]
+	require.False(t, retained, "response-only transaction cannot create a candidate")
 }
 func TestCorrelationSDPACKAmbiguityAndExpiredCandidate(t *testing.T) {
 	cfg := DefaultCallCorrelationConfig()
@@ -153,4 +154,77 @@ func TestCorrelationSDPACKAmbiguityAndExpiredCandidate(t *testing.T) {
 	c.removeCandidate(tcopy.candidate)
 	c.Resolve(ack, []CallCorrelationTask{correlationTaskX})
 	require.Empty(t, c.originIndex, "retained transaction cannot resurrect an expired candidate index")
+}
+
+func TestCorrelationSDPExpiredObservationCannotReviveRetainedCandidate(t *testing.T) {
+	for _, maintenance := range []bool{false, true} {
+		for _, reversedCapture := range []bool{false, true} {
+			t.Run(fmt.Sprintf("maintenance=%t/reversed=%t", maintenance, reversedCapture), func(t *testing.T) {
+				cfg := DefaultCallCorrelationConfig()
+				cfg.SDPOriginMatching = true
+				cfg.SDPOriginObservationTTL = time.Minute
+				c, now := newContractCorrelator(t, cfg, nil)
+				start := *now
+				first := contractSDP(contractInvite("old-call", 0, start), "777")
+				old := contractResolve(c, first)
+				tx, valid := correlationTx(first)
+				require.True(t, valid)
+				candidate := c.candidates[tx]
+				require.NotNil(t, candidate)
+				*now = start.Add(time.Minute)
+				if maintenance {
+					require.NoError(t, c.Maintain())
+				}
+				capture := start.Add(time.Second)
+				if reversedCapture {
+					capture = start.Add(-time.Second)
+				}
+				second := contractSDP(contractInvite("new-call", 0, capture), "777")
+				newDecision := contractResolve(c, second)
+				require.NotEqual(t, old.CorrelationID, newDecision.CorrelationID)
+				require.NotEqual(t, "S", newDecision.Rule)
+				require.Same(t, candidate, c.candidates[tx], "regression must retain old candidate")
+				// An old-call retransmission cannot rebind its original index to the
+				// new observation. A third fresh leg may join only the new group.
+				c.Resolve(first, []CallCorrelationTask{correlationTaskX})
+				third := contractResolve(c, contractSDP(contractInvite("third-call", 0, capture.Add(time.Second)), "777"))
+				require.Equal(t, "S", third.Rule)
+				require.Equal(t, newDecision.CorrelationID, third.CorrelationID)
+			})
+		}
+	}
+}
+
+func TestCorrelationSDPSuspensionReleaseCannotReviveCandidate(t *testing.T) {
+	cfg := DefaultCallCorrelationConfig()
+	cfg.SDPOriginMatching = true
+	cfg.SDPOriginSuspend = time.Second
+	cfg.SDPOriginReuseWindow = time.Second
+	c, now := newContractCorrelator(t, cfg, nil)
+	start := *now
+	first := contractSDP(contractInvite("old-call", 0, start), "778")
+	old := contractResolve(c, first)
+	*now = now.Add(time.Second)
+	conflicting := contractSDP(contractInvite("reused-call", 0, start.Add(2*time.Second)), "778")
+	require.NotEqual(t, old.CorrelationID, contractResolve(c, conflicting).CorrelationID)
+	*now = now.Add(time.Second)
+	require.NoError(t, c.Maintain())
+	fresh := contractResolve(c, contractSDP(contractInvite("fresh-call", 0, start.Add(3*time.Second)), "778"))
+	require.NotEqual(t, "S", fresh.Rule)
+	require.NotEqual(t, old.CorrelationID, fresh.CorrelationID)
+}
+
+func TestCorrelationSDPDelayedACKRejectsExpiredTransactionBetweenMaintenance(t *testing.T) {
+	cfg := DefaultCallCorrelationConfig()
+	cfg.SDPOriginMatching = true
+	c, now := newContractCorrelator(t, cfg, nil)
+	initial := contractInvite("delayed-call", 0, *now)
+	contractResolve(c, initial)
+	tx, _ := correlationTx(initial)
+	c.Resolve(roleResponse(initial, roleSDPBody("900")), []CallCorrelationTask{correlationTaskX})
+	candidate := c.transactions[tx].candidate
+	require.Len(t, candidate.originKeys, 1)
+	*now = now.Add(cfg.DecisionHorizon)
+	c.Resolve(roleACK(initial, roleSDPBody("901")), []CallCorrelationTask{correlationTaskX})
+	require.Len(t, candidate.originKeys, 1, "logical transaction deadline applies before cleanup tick")
 }

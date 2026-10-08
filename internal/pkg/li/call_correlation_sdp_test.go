@@ -3,6 +3,7 @@
 package li
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +126,115 @@ func TestSDPOriginHistoryTransactionBound(t *testing.T) {
 		require.True(t, h.Observe(origin, sdpOriginOffer, strings.Repeat("x", i+1), now, now, nil))
 	}
 	require.False(t, h.Observe(origin, sdpOriginOffer, "overflow", now, now, nil))
-	require.True(t, h.Disabled())
+	require.False(t, h.Disabled())
+	require.True(t, h.entries[sdpOriginHistoryKey{origin, sdpOriginOffer}].exhausted)
 	require.Len(t, h.entries[sdpOriginHistoryKey{origin, sdpOriginOffer}].transactions, correlationSDPMaxTransactions)
+}
+
+func TestSDPOriginExhaustionIsLocalAndBounded(t *testing.T) {
+	h := newSDPOriginHistory(sdpHistoryTestConfig())
+	now := time.Unix(1000, 0)
+	origin := sdpHistoryTestOrigin()
+	other := origin
+	other.SessionID = "200"
+	for i := 0; i < correlationSDPMaxTransactions; i++ {
+		h.Observe(origin, sdpOriginOffer, fmt.Sprintf("tx-%d", i), now, now.Add(time.Duration(i)*time.Second), nil)
+	}
+	entry := h.entries[sdpOriginHistoryKey{origin, sdpOriginOffer}]
+	require.False(t, h.Observe(origin, sdpOriginOffer, "overflow", now, now.Add(256*time.Second), nil))
+	require.False(t, h.Disabled())
+	// Neither continuous new uses nor retransmissions grow the exact set, and
+	// overloaded history cannot quietly release while traffic is still present.
+	for i := 257; i < 3000; i++ {
+		at := now.Add(time.Duration(i) * time.Second)
+		tx := fmt.Sprintf("tx-%d", i)
+		if i%2 == 0 {
+			tx = "tx-0"
+		}
+		require.False(t, h.Observe(origin, sdpOriginOffer, tx, now, at, nil))
+	}
+	require.Len(t, entry.transactions, correlationSDPMaxTransactions)
+	require.True(t, h.Observe(other, sdpOriginOffer, "unique-a", now.Add(3000*time.Second), now.Add(3000*time.Second), nil))
+	require.True(t, h.Usable(other, sdpOriginOffer, now.Add(3000*time.Second)))
+	h.Expire(entry.lastTraffic.Add(h.observationTTL - time.Nanosecond))
+	require.Same(t, entry, h.entries[sdpOriginHistoryKey{origin, sdpOriginOffer}])
+	h.Expire(entry.lastTraffic.Add(h.observationTTL))
+	require.Nil(t, h.entries[sdpOriginHistoryKey{origin, sdpOriginOffer}])
+}
+
+func TestSDPOriginGenerationChangesOnlyAfterInvalidation(t *testing.T) {
+	for _, maintenance := range []bool{false, true} {
+		t.Run(fmt.Sprint(maintenance), func(t *testing.T) {
+			h := newSDPOriginHistory(sdpHistoryTestConfig())
+			now := time.Unix(1000, 0)
+			origin := sdpHistoryTestOrigin()
+			require.True(t, h.Observe(origin, sdpOriginOffer, "a", now, now, nil))
+			old := h.Generation(origin, sdpOriginOffer, now)
+			require.NotZero(t, old)
+			require.True(t, h.Observe(origin, sdpOriginOffer, "a", now, now.Add(time.Second), nil))
+			require.Equal(t, old, h.Generation(origin, sdpOriginOffer, now.Add(time.Second)))
+			at := now.Add(h.observationTTL)
+			if maintenance {
+				h.Expire(at)
+			}
+			require.Zero(t, h.Generation(origin, sdpOriginOffer, at))
+			// Reversed capture arrival must not bring the old observation back.
+			require.True(t, h.Observe(origin, sdpOriginOffer, "b", now.Add(-time.Hour), at, nil))
+			require.NotEqual(t, old, h.Generation(origin, sdpOriginOffer, at))
+		})
+	}
+}
+
+func TestSDPOriginBoundedSuspensionPreservesRetransmissionRenewal(t *testing.T) {
+	h := newSDPOriginHistory(sdpHistoryTestConfig())
+	now := time.Unix(1000, 0)
+	origin := sdpHistoryTestOrigin()
+	h.Observe(origin, sdpOriginOffer, "a", now, now, nil)
+	old := h.Generation(origin, sdpOriginOffer, now)
+	h.Observe(origin, sdpOriginOffer, "b", now.Add(time.Minute), now.Add(time.Second), nil)
+	entry := h.entries[sdpOriginHistoryKey{origin, sdpOriginOffer}]
+	deadline := entry.suspendedUntil
+	require.False(t, h.Observe(origin, sdpOriginOffer, "c", now.Add(time.Minute), deadline.Add(-time.Nanosecond), nil))
+	require.True(t, entry.renew)
+	// Identical traffic at the renewal boundary cannot renew the next period.
+	require.False(t, h.Observe(origin, sdpOriginOffer, "c", now.Add(time.Minute), deadline, nil))
+	require.False(t, entry.renew)
+	require.Equal(t, deadline.Add(h.suspend), entry.suspendedUntil)
+	require.Zero(t, h.Generation(origin, sdpOriginOffer, deadline))
+	h.Expire(deadline.Add(h.suspend))
+	require.Nil(t, h.entries[sdpOriginHistoryKey{origin, sdpOriginOffer}])
+	require.True(t, h.Observe(origin, sdpOriginOffer, "d", now.Add(2*time.Minute), deadline.Add(h.suspend), nil))
+	require.NotEqual(t, old, h.Generation(origin, sdpOriginOffer, deadline.Add(h.suspend)))
+}
+
+func TestSDPOriginTrustedKeyExhaustionAndGlobalResetGenerations(t *testing.T) {
+	now := time.Unix(1000, 0)
+	origin := sdpHistoryTestOrigin()
+	h := newSDPOriginHistory(sdpHistoryTestConfig())
+	require.True(t, h.Observe(origin, sdpOriginOffer, "a", now, now, nil))
+	old := h.Generation(origin, sdpOriginOffer, now)
+	keys := make(map[string]string)
+	for i := 0; i <= correlationSDPMaxTrustedKeys; i++ {
+		keys[fmt.Sprintf("header-%d", i)] = "value"
+	}
+	require.False(t, h.Observe(origin, sdpOriginOffer, "b", now, now, keys))
+	require.False(t, h.Disabled())
+	entry := h.entries[sdpOriginHistoryKey{origin, sdpOriginOffer}]
+	require.Len(t, entry.trusted, correlationSDPMaxTrustedKeys)
+	require.Zero(t, h.Generation(origin, sdpOriginOffer, now))
+	release := now.Add(h.observationTTL)
+	require.True(t, h.Observe(origin, sdpOriginOffer, "fresh", now, release, nil))
+	require.NotEqual(t, old, h.Generation(origin, sdpOriginOffer, release))
+
+	config := sdpHistoryTestConfig()
+	config.SDPOriginMaxTracked = 1
+	h = newSDPOriginHistory(config)
+	require.True(t, h.Observe(origin, sdpOriginOffer, "a", now, now, nil))
+	old = h.Generation(origin, sdpOriginOffer, now)
+	other := origin
+	other.SessionID = "2"
+	require.False(t, h.Observe(other, sdpOriginOffer, "b", now, now, nil))
+	require.Zero(t, h.Generation(origin, sdpOriginOffer, now))
+	require.True(t, h.Observe(origin, sdpOriginOffer, "fresh", now, release, nil))
+	require.NotEqual(t, old, h.Generation(origin, sdpOriginOffer, release))
 }

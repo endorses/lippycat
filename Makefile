@@ -93,16 +93,10 @@ tap-li-cuda: cuda-kernels
 	@mkdir -p bin
 	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags tap,li,cuda -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-tap-li-cuda
 
-# Verify non-LI builds exclude LI implementation code
-# Types are shared, but Registry/FilterManager are excluded via dead code elimination
-verify-no-li: all
+# Verify unstripped builds, including an LI-positive reference for the predicate.
+verify-no-li:
 	@echo "Verifying non-LI build excludes LI implementation..."
-	@if go tool nm bin/$(BINARY_NAME) 2>/dev/null | grep -q 'li\..*Registry'; then \
-		echo "ERROR: LI Registry found in non-LI build!"; \
-		exit 1; \
-	else \
-		echo "OK: LI implementation code excluded from non-LI build"; \
-	fi
+	@GO="$(GO)" GOFLAGS="$(GOFLAGS)" LDFLAGS="$(LDFLAGS)" ./scripts/verify-no-li.sh
 
 # Build all binary variants
 binaries: all hunter processor cli tui tap

@@ -62,6 +62,8 @@ type Stats struct {
 }
 
 type selectedCall struct {
+	quarantine            *selectedCall
+	quarantineExpires     time.Time
 	lifetimeAmbiguous     bool
 	replayBlockedUntil    time.Time
 	replayEvidenceMissing bool
@@ -341,6 +343,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 
 	}
 	now := time.Now()
+	b.recoverPressureCallLocked(result.CallID, current, now)
 	previousDerivations := make(map[derivationSide]*derivationState, len(current.derivations))
 	current.repairRetire = nil
 	for side, state := range current.derivations {
@@ -355,10 +358,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 		}
 		record, found := b.cfg.Metadata.TakeRecord(candidate.Key, now)
 		if found {
-			if !b.checkKeyLifetimeLocked(current, record.Key) || !b.observeLifetimeKeyLocked(current, record.Key) {
-				continue
-			}
-			if !b.observeDerivation(current, record) {
+			if !b.observeSelectedRecordLocked(current, record) {
 				continue
 			}
 			promote = append(promote, record.Endpoints...)
@@ -380,7 +380,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 		}
 		// Direct selected metadata is available even if pending staging was lost.
 		directKey := b.key(result, nil)
-		if b.checkKeyLifetimeLocked(current, directKey) && b.observeLifetimeKeyLocked(current, directKey) && b.observeDerivation(current, mediaadmission.MetadataRecord{Key: directKey, Complete: parsed.Complete, Endpoints: derived}) {
+		if b.observeSelectedRecordLocked(current, mediaadmission.MetadataRecord{Key: directKey, Complete: parsed.Complete, Endpoints: derived}) {
 			known = true
 			promote = append(promote, derived...)
 		}
@@ -391,9 +391,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 		// A directly selected bodyless acknowledgment remains observable even
 		// when pending staging was unavailable; it never supplies a media body.
 		directKey := b.key(result, nil)
-		if b.checkKeyLifetimeLocked(current, directKey) && b.observeLifetimeKeyLocked(current, directKey) {
-			b.observeDerivation(current, mediaadmission.MetadataRecord{Key: directKey, Complete: true})
-		}
+		b.observeSelectedRecordLocked(current, mediaadmission.MetadataRecord{Key: directKey, Complete: true})
 	}
 	derived = uniqueEndpoints(derived, b.cfg.Limits.MaxEndpointsPerOwner+1)
 	promote = uniqueEndpoints(promote, b.cfg.Limits.MaxEndpointsPerOwner+1)
@@ -408,6 +406,20 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	retireSuperseded, retirementCSeq := false, uint64(0)
 	recoveryKey := b.key(result, nil)
 	lifetimePermitted := b.checkKeyLifetimeLocked(current, recoveryKey)
+	if lifetimePermitted && time.Now().Before(b.proofHistory.blockedUntil) && b.newMediaProofLocked(current, recoveryKey) {
+		if len(result.SDP) == 0 {
+			b.quarantineRecordLocked(current, mediaadmission.MetadataRecord{Key: recoveryKey, Complete: true})
+		}
+		if current.quarantine != nil {
+			if result.ResponseCode >= 300 {
+				b.rejectDerivation(current.quarantine, result)
+			} else {
+				b.requireRequestDerivationForResponseLocked(current.quarantine, result)
+				b.acceptDerivation(current.quarantine, result)
+			}
+		}
+		lifetimePermitted = false
+	}
 	if lifetimePermitted && result.ResponseCode >= 300 && !recoveryKey.HeaderConflict {
 		b.rejectDerivation(current, result)
 	} else if lifetimePermitted && validRecoveryCSeq(result) && !recoveryKey.HeaderConflict && result.ResponseCode > 100 && result.ResponseCode < 300 && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE") {

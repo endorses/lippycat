@@ -229,6 +229,10 @@ func (b *Bridge) removeDerivation(call *selectedCall, side derivationSide) {
 }
 
 func (b *Bridge) releaseDerivations(call *selectedCall) {
+	if call.quarantine != nil {
+		b.releaseDerivations(call.quarantine)
+		call.quarantine = nil
+	}
 	if err := b.releaseRetirementsLocked(call); err != nil {
 		logger.Error("Failed to release endpoint retirement reservation", "error", err)
 	}

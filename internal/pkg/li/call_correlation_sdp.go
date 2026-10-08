@@ -4,6 +4,7 @@ package li
 
 import (
 	"crypto/sha256"
+	"math"
 	"net/netip"
 	"strings"
 	"time"
@@ -139,6 +140,12 @@ type sdpOriginObservation struct {
 	trusted                          map[string]string
 	suspendedUntil                   time.Time
 	renew                            bool
+	generation                       uint64
+	// Exhaustion cannot safely classify new transactions after the exact set
+	// fills. Quarantine only this origin until a full traffic-free observation
+	// horizon, retaining its bounded set instead of clearing replay guards.
+	exhausted   bool
+	lastTraffic time.Time
 }
 
 // sdpOriginHistory is serialized by the caller's correlator mutex. Capture time
@@ -149,40 +156,67 @@ type sdpOriginHistory struct {
 	maxTracked                           int
 	entries                              map[sdpOriginHistoryKey]*sdpOriginObservation
 	disabledUntil                        time.Time
+	nextGeneration                       uint64
+	generationExhausted                  bool
 }
 
 func newSDPOriginHistory(config CallCorrelationConfig) *sdpOriginHistory {
 	return &sdpOriginHistory{reuseWindow: config.SDPOriginReuseWindow, observationTTL: config.SDPOriginObservationTTL, suspend: config.SDPOriginSuspend, maxTracked: config.SDPOriginMaxTracked, entries: make(map[sdpOriginHistoryKey]*sdpOriginObservation)}
 }
-func (h *sdpOriginHistory) Disabled() bool { return !h.disabledUntil.IsZero() }
+func (h *sdpOriginHistory) Disabled() bool { return h.generationExhausted || !h.disabledUntil.IsZero() }
 func (h *sdpOriginHistory) Len() int       { return len(h.entries) }
 
 // Expire processes fixed suspension deadlines before observations at the same
 // processor instant. Capacity disablement lasts a complete history horizon;
 // release discards history that could be incomplete during the disabled period.
-func (h *sdpOriginHistory) Expire(now time.Time) {
+func (h *sdpOriginHistory) expireGlobal(now time.Time) {
 	if !h.disabledUntil.IsZero() && !now.Before(h.disabledUntil) {
-		clear(h.entries)
+		h.entries = make(map[sdpOriginHistoryKey]*sdpOriginObservation)
 		h.disabledUntil = time.Time{}
 	}
-	for key, entry := range h.entries {
-		if !entry.suspendedUntil.IsZero() {
-			if !now.Before(entry.suspendedUntil) {
-				if entry.renew {
-					entry.suspendedUntil = entry.suspendedUntil.Add(h.suspend)
-					entry.renew = false
-					// A clock jump spanning the renewed period also releases quiet state.
-					if !now.Before(entry.suspendedUntil) {
-						delete(h.entries, key)
-					}
-				} else {
-					delete(h.entries, key)
-				}
-			}
-		} else if !now.Before(entry.lastSeen.Add(h.observationTTL)) {
+}
+
+// expireOrigin performs logical expiry for a single lookup. Full-map cleanup
+// belongs to maintenance; packets never scan unrelated origins.
+func (h *sdpOriginHistory) expireOrigin(key sdpOriginHistoryKey, now time.Time) {
+	entry := h.entries[key]
+	if entry == nil {
+		return
+	}
+	if entry.exhausted {
+		if !now.Before(entry.lastTraffic.Add(h.observationTTL)) {
 			delete(h.entries, key)
 		}
+		return
 	}
+	if !entry.suspendedUntil.IsZero() {
+		if !now.Before(entry.suspendedUntil) {
+			if entry.renew {
+				entry.suspendedUntil = entry.suspendedUntil.Add(h.suspend)
+				entry.renew = false
+				if !now.Before(entry.suspendedUntil) {
+					delete(h.entries, key)
+				}
+			} else {
+				delete(h.entries, key)
+			}
+		}
+	} else if !now.Before(entry.lastSeen.Add(h.observationTTL)) {
+		delete(h.entries, key)
+	}
+}
+
+func (h *sdpOriginHistory) Expire(now time.Time) {
+	h.expireGlobal(now)
+	for key := range h.entries {
+		h.expireOrigin(key, now)
+	}
+}
+
+func (h *sdpOriginHistory) exhaust(entry *sdpOriginObservation, now time.Time) bool {
+	entry.exhausted = true
+	entry.lastTraffic = now
+	return false
 }
 
 // Observe returns whether this origin may supply S evidence. The caller passes
@@ -190,7 +224,7 @@ func (h *sdpOriginHistory) Expire(now time.Time) {
 // identify retransmissions across packets and matching tasks. Trusted key names
 // must be normalized by the caller. Their differing valid values suspend S.
 func (h *sdpOriginHistory) Observe(origin sdpOrigin, role sdpOriginRole, transaction string, captureTime, now time.Time, trustedKeys map[string]string) bool {
-	h.Expire(now)
+	h.expireGlobal(now)
 	if (role != sdpOriginOffer && role != sdpOriginAnswer) || !validCorrelationSDPOrigin(origin) || transaction == "" || len(transaction) > 4096 || captureTime.IsZero() || h.maxTracked <= 0 || h.observationTTL <= h.reuseWindow || h.suspend <= 0 {
 		return false
 	}
@@ -198,21 +232,30 @@ func (h *sdpOriginHistory) Observe(origin sdpOrigin, role sdpOriginRole, transac
 		return false
 	}
 	key := sdpOriginHistoryKey{origin, role}
+	h.expireOrigin(key, now)
 	entry := h.entries[key]
 	if entry == nil {
 		if len(h.entries) >= h.maxTracked {
 			h.disabledUntil = now.Add(max(h.observationTTL, 2*h.suspend))
 			return false
 		}
-		entry = &sdpOriginObservation{firstSeen: captureTime, latestStart: captureTime, lastSeen: now, transactions: make(map[[32]byte]struct{}), trusted: make(map[string]string)}
+		if h.nextGeneration == math.MaxUint64 {
+			h.generationExhausted = true
+			return false
+		}
+		h.nextGeneration++
+		entry = &sdpOriginObservation{generation: h.nextGeneration, firstSeen: captureTime, latestStart: captureTime, lastSeen: now, transactions: make(map[[32]byte]struct{}), trusted: make(map[string]string)}
 		h.entries[key] = entry
+	}
+	if entry.exhausted {
+		entry.lastTraffic = now
+		return false
 	}
 	tx := sha256.Sum256([]byte(transaction))
 	_, duplicate := entry.transactions[tx]
 	if !duplicate {
 		if len(entry.transactions) >= correlationSDPMaxTransactions {
-			h.disabledUntil = now.Add(max(h.observationTTL, 2*h.suspend))
-			return false
+			return h.exhaust(entry, now)
 		}
 		entry.transactions[tx] = struct{}{}
 		if captureTime.Before(entry.firstSeen) {
@@ -232,15 +275,13 @@ func (h *sdpOriginHistory) Observe(origin sdpOrigin, role sdpOriginRole, transac
 			continue
 		}
 		if len(name) > correlationSDPMaxField || len(value) > correlationSDPMaxField {
-			h.disabledUntil = now.Add(max(h.observationTTL, 2*h.suspend))
-			return false
+			return h.exhaust(entry, now)
 		}
 		if previous, ok := entry.trusted[name]; ok && previous != value {
 			conflict = true
 		}
 		if _, ok := entry.trusted[name]; !ok && len(entry.trusted) >= correlationSDPMaxTrustedKeys {
-			h.disabledUntil = now.Add(max(h.observationTTL, 2*h.suspend))
-			return false
+			return h.exhaust(entry, now)
 		}
 		entry.trusted[name] = value
 	}
@@ -254,12 +295,23 @@ func (h *sdpOriginHistory) Observe(origin sdpOrigin, role sdpOriginRole, transac
 // Usable consults already gathered observations without creating or refreshing
 // evidence. Call this after Observe, under the same correlator lock.
 func (h *sdpOriginHistory) Usable(origin sdpOrigin, role sdpOriginRole, now time.Time) bool {
-	h.Expire(now)
+	return h.Generation(origin, role, now) != 0
+}
+
+// Generation binds candidate evidence to the precise observation that validated
+// it. Expiry and global resets cannot revive evidence from a previous lifetime.
+func (h *sdpOriginHistory) Generation(origin sdpOrigin, role sdpOriginRole, now time.Time) uint64 {
+	h.expireGlobal(now)
 	if h.Disabled() || (role != sdpOriginOffer && role != sdpOriginAnswer) {
-		return false
+		return 0
 	}
-	entry := h.entries[sdpOriginHistoryKey{origin, role}]
-	return entry != nil && entry.suspendedUntil.IsZero()
+	key := sdpOriginHistoryKey{origin, role}
+	h.expireOrigin(key, now)
+	entry := h.entries[key]
+	if entry == nil || entry.exhausted || !entry.suspendedUntil.IsZero() {
+		return 0
+	}
+	return entry.generation
 }
 
 type sdpOriginHistoryStats struct {
@@ -271,7 +323,7 @@ func (h *sdpOriginHistory) Stats(now time.Time) sdpOriginHistoryStats {
 	h.Expire(now)
 	stats := sdpOriginHistoryStats{Tracked: len(h.entries), Disabled: h.Disabled()}
 	for _, entry := range h.entries {
-		if !entry.suspendedUntil.IsZero() {
+		if entry.exhausted || !entry.suspendedUntil.IsZero() {
 			stats.Suspended++
 		}
 	}

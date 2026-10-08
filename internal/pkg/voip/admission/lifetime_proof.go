@@ -16,10 +16,11 @@ import (
 // guards have a separate budget; unrecordable retirements conservatively block
 // the domain until one window after the last failure, never until restart.
 type lifetimeProofHistory struct {
-	initiators   map[[32]byte]retiredInitiatorProof
-	blockedUntil time.Time
-	unrecorded   uint64
-	lastWarning  time.Time
+	initiators     map[[32]byte]retiredInitiatorProof
+	blockedUntil   time.Time
+	pressureCutoff uint64
+	unrecorded     uint64
+	lastWarning    time.Time
 }
 
 type retiredInitiatorProof struct {
@@ -105,6 +106,9 @@ func (b *Bridge) rememberLifetimeLocked(callID string, old *selectedCall) error 
 		}
 		if reservationErr != nil {
 			b.proofHistory.unrecorded++
+			if !now.Before(b.proofHistory.blockedUntil) {
+				b.proofHistory.pressureCutoff = b.nextMetadata
+			}
 			b.proofHistory.blockedUntil = now.Add(b.cfg.Limits.ReplayWindow)
 			b.needsSnapshot = true
 			capacityErr = errors.Join(mediaadmission.ErrCapacity, b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, mediaadmission.ErrCapacity))
@@ -144,19 +148,12 @@ func (b *Bridge) observeLifetimeKeyLocked(call *selectedCall, key mediaadmission
 	if call == nil {
 		return false
 	}
-	b.expireLifetimeProofLocked(time.Now())
-	if time.Now().Before(b.proofHistory.blockedUntil) {
-		call.replayBlockedUntil = b.proofHistory.blockedUntil
-		call.replayEvidenceMissing = true
-		call.replayMissingCutoff = b.nextMetadata
-		return false
-	}
 	if b.retiredCallBlockedLocked(key.CallID) {
 		call.lifetimeAmbiguous = true
 		return false
 	}
 	previous, exists := b.proofHistory.initiators[lifetimeInitiatorHash(key.CallID, key.FromTag)]
-	if !exists {
+	if !exists || !time.Now().Before(previous.expires) {
 		return true
 	}
 	if previous.blocked {
@@ -198,7 +195,7 @@ func (b *Bridge) canConfirmedLifetimeLocked(call *selectedCall, key mediaadmissi
 		return false
 	}
 	previous, exists := b.proofHistory.initiators[lifetimeInitiatorHash(key.CallID, key.FromTag)]
-	return !exists || (!previous.blocked && (previous.lifetime == call.lifetime || key.CSeq > previous.maximum))
+	return !exists || !time.Now().Before(previous.expires) || (!previous.blocked && (previous.lifetime == call.lifetime || key.CSeq > previous.maximum))
 }
 
 func (b *Bridge) releaseLifetimeProofLocked() error {
@@ -232,13 +229,8 @@ func (b *Bridge) expireLifetimeProofLocked(now time.Time) {
 	if !b.proofHistory.blockedUntil.IsZero() && !now.Before(b.proofHistory.blockedUntil) {
 		b.proofHistory.blockedUntil = time.Time{}
 	}
-	for _, call := range b.selected {
-		if !call.replayBlockedUntil.IsZero() && !now.Before(call.replayBlockedUntil) {
-			call.replayBlockedUntil = time.Time{}
-			call.known, call.unknown, call.mediaSet = b.derivationSummary(call)
-			call.retry = true
-			b.needsSnapshot = true
-		}
+	for id, call := range b.selected {
+		b.recoverPressureCallLocked(id, call, now)
 	}
 }
 
@@ -262,5 +254,5 @@ func (b *Bridge) retireLifetimeLocked(callID string, old *selectedCall) error {
 
 func (b *Bridge) retiredCallBlockedLocked(callID string) bool {
 	marker, exists := b.proofHistory.initiators[lifetimeInitiatorHash(callID, "")]
-	return exists && marker.blocked
+	return exists && marker.blocked && time.Now().Before(marker.expires)
 }

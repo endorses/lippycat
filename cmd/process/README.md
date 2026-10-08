@@ -424,6 +424,14 @@ use a separate initialized encrypted store; startup blindness and uncertain writ
 limit restart guarantees. See [call-leg correlation](../../docs/LI_INTEGRATION.md#optional-sip-call-leg-correlation)
 for the hierarchy, defaults, limits, key setup and offline initialization.
 
+Response-only legs stay standalone without observed initial-request evidence. A busy
+correlation writer leaves new adoptions standalone while retained unrelated IDs remain
+usable. Origin-history overload quarantines only that origin; stale observation
+generations cannot revive old candidates. Configured-store failures remain startup
+errors; explicitly omitting the store loses restart continuity. Activity is persisted
+at the next maintenance commit, so crash recovery uses the last durable retention
+boundary.
+
 ### Production Mode Enforcement
 
 Set `LIPPYCAT_PRODUCTION=true` to block the `--insecure` flag and require mutual authentication:

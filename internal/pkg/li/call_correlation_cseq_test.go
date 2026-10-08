@@ -49,8 +49,13 @@ func TestCallCorrelationCSeqZeroInitialAndResponse(t *testing.T) {
 			require.True(t, eligible, "explicit zero is a valid SIP transaction sequence")
 			require.NotEmpty(t, tx)
 			d := contractResolve(c, zero)
-			require.Equal(t, anchor.CorrelationID, d.CorrelationID)
-			require.Equal(t, "H", d.Rule)
+			if response {
+				require.NotEqual(t, anchor.CorrelationID, d.CorrelationID)
+				require.Equal(t, "not_eligible", d.Reason)
+			} else {
+				require.Equal(t, anchor.CorrelationID, d.CorrelationID)
+				require.Equal(t, "H", d.Rule)
+			}
 		})
 	}
 }

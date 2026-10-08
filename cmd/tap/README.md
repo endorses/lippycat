@@ -674,6 +674,14 @@ use a separate initialized encrypted store; startup blindness and uncertain writ
 limit restart guarantees. See [call-leg correlation](../../docs/LI_INTEGRATION.md#optional-sip-call-leg-correlation)
 for the hierarchy, defaults, limits, key setup and offline initialization.
 
+Response-only legs stay standalone without observed initial-request evidence. A busy
+correlation writer leaves new adoptions standalone while retained unrelated IDs remain
+usable. Origin-history overload quarantines only that origin; stale observation
+generations cannot revive old candidates. Configured-store failures remain startup
+errors; explicitly omitting the store loses restart continuity. Activity is persisted
+at the next maintenance commit, so crash recovery uses the last durable retention
+boundary.
+
 TLS is enabled by default. Use `--insecure` for local testing without TLS.
 
 ### Production Mode Enforcement
@@ -989,7 +997,7 @@ observation domains, configured under `tap.voip.rtp_ebpf` with `replay_window`
 (default `2m`), `replay_guard_capacity` (`10000`) and `replay_guard_bytes`
 (`2097152`). Unrecordable retirements cause temporary domain-wide uncertainty until
 the last failure plus the window; sustained overload may extend it. Expiry does
-not protect against arbitrary old captures with identical unbound wire identities.
+not protect against arbitrary old captures with identical unbound wire identities. Healthy proof is unaffected by proof-free INFO/OPTIONS and exact retransmissions. New pressure-time proof is quarantined within existing derivation bounds and revalidated after pressure; incomplete or exhausted evidence remains unknown until a fresh complete exchange. Quarantine expires at first observation plus `replay_window` plus `pending_ttl`; repeated pressure cannot extend it.
 
 See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
 semantics, platform/privilege requirements, observation domains, configuration,

@@ -441,14 +441,31 @@ There is no probabilistic overflow store.
 If a retirement guard cannot be recorded, all proof in that observation domain
 is conservative until the last unrecordable retirement plus `replay_window`.
 This fallback preserves existing exact guards and follows the configured open/closed
-policy; it does not permanently poison the bridge. Sustained overload may extend
-the interval. Once it expires, already-active calls reconcile their remaining
-proof and unrelated uncertainty instead of being blindly declared known. When
-replay pressure discarded observations, recovery requires a fresh complete request
-and matching answer observed after that discard; a cached pre-pressure answer
-cannot replace missing evidence. Retiring a call with such missing evidence records
-a blocked Call-ID guard for the window. Aggregate warnings are rate limited to
+policy. Sustained overload may extend the interval. Healthy retained proof is not
+marked missing by INFO, OPTIONS or exact retransmissions that add no media proof.
+New proof-bearing observations enter a quarantine bound to the authoritative active
+lifetime and charged to the existing selected-derivation context, byte and endpoint
+limits. Quarantined evidence cannot authorize media or install endpoint ownership.
+
+At the pressure deadline, recovery requires a complete accepted exact exchange entirely
+observed after pressure began, covering every quarantined obligation and revalidated
+against the current lifetime and surviving exact replay guards. A cached pre-pressure
+answer cannot substitute for missing evidence. Elapsed time alone never makes a call
+known. Explicit old lifetimes remain rejected, and both configured open and closed
+policies preserve proof uncertainty.
+
+Quarantine expires at its first observation plus `replay_window` plus `pending_ttl`;
+retransmissions and repeated pressure never extend that fixed deadline. Incomplete,
+exhausted or expired quarantine releases its reservations while the affected call
+remains unknown until a fresh complete post-pressure exchange or configured call-lifetime
+expiry. Unrelated calls are not held indefinitely. Retiring a call with missing evidence
+records a blocked Call-ID guard for the window. Aggregate warnings are rate limited to
 the retry interval and include no wire identities.
+
+Retry maintenance performs global replay-guard and quarantine expiry scans, bounded
+by configured capacities. SIP processing checks logical deadlines only for the touched
+lifetime, exact guard and call recovery; expired evidence cannot authorize media between
+maintenance ticks.
 
 The two-minute default is an engineering margin over the usual 32-second
 64-times-T1 SIP transaction horizon with T1 at 500 ms, described in

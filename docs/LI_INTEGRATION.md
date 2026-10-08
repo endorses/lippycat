@@ -42,17 +42,20 @@ matched tasks, authorization, direction and destinations remain unchanged.
 A retained first decision always wins. For a new eligible initial transaction, the order
 is trusted session headers (H) and parent Call-ID references (P), SDP origin (S),
 address chaining with the same called identity (R1), exact calling/called identity pair
-(R2), then address chaining with rewritten numbers. H/P disagreement or ambiguity leaves
-the leg separate. Unusable or ambiguous S falls through; ambiguous weaker matches leave
-the leg separate. Enable each method independently. Already published groups are never
+(R2), then address chaining with rewritten numbers. H/P disagreement, ambiguity or an exact association without a common active task leaves
+the leg separate, without trying weaker evidence. Unusable or ambiguous S falls through;
+ambiguous weaker matches leave the leg separate. Enable each method independently. Already published groups are never
 merged retrospectively.
 
 `session_headers` accepts arbitrary valid SIP header names, matched case-insensitively.
-Session-ID selects the initiating UUID: local in the initial INVITE, remote in a
-response-only observation; nil or malformed UUIDs supply no key. P-Charging-Vector
+Session-ID selects the initiating UUID: local in a request, remote in a response.
+Valid generic parameters, including quoted values and escapes, do not affect UUID
+selection. Nil or malformed UUIDs and a syntactically unusable single header supply no
+key, allowing weaker matching. P-Charging-Vector
 selects `icid-value`. Proprietary headers compare their complete nonempty values exactly
 after trimming surrounding whitespace; case and semicolons remain significant.
-Conflicting repeated values are not authoritative. `parent_call_id_headers` contains
+Repeated identical usable keys are accepted; distinct valid keys, repeated remote
+parameters and conflicting repeated headers remain terminal ambiguity. `parent_call_id_headers` contains
 trusted headers naming one exact, case-preserved retained parent Call-ID; unknown, later
 or self-referencing parents cannot regroup a published child.
 
@@ -60,7 +63,8 @@ R1 compares initial INVITE transport addresses within `address_window` and befor
 relevant final response. `node_aliases` is a list of disjoint address lists, each
 representing one node; it does not rewrite calling or called identities. Compare
 complete canonical identities, never number suffixes or deployment-specific digit
-substitutions. R2 requires the exact pair within `number_window` and no address match.
+substitutions. R2 requires the exact pair within `number_window` and no address match; its capture-time
+window is symmetric, including the boundary, so reversed arrival can match.
 Rewritten-number R1 requires one eligible address candidate and no called-number
 candidate. These heuristics can falsely group unrelated calls; missing observations and
 A,C,B arrival in an A → B → C chain can leave one call split.
@@ -71,9 +75,15 @@ an unknown role supplies no evidence. Distinct initial transactions update an
 independent bounded history before matching. Reuse spanning more than
 `sdp_origin_reuse_window`, or contradictory trusted values of the same header type,
 suspends that origin. Retransmissions neither refresh observation TTL nor renew
-suspension. Suspension deadlines are fixed; distinct use during a period renews it once
-at expiry. At cache capacity S is disabled rather than evicting history. Release starts
-fresh history and never regroups published legs.
+suspension. Ordinary suspension deadlines are fixed; distinct use during a period renews it once
+at expiry. The exact transaction set is bounded to 256 entries per origin and role.
+Exhausting that set or the per-origin trusted-key bound quarantines only that origin;
+any traffic, including retransmissions, restarts its traffic-free observation-TTL quiet
+period because distinctness can no longer be established. This overload policy is
+separate from ordinary suspension. Tracked-origin capacity exhaustion disables S
+globally instead of evicting incomplete history. Candidate evidence carries an
+observation generation: expiry, release or reset invalidates it permanently, and fresh
+history cannot revive an older candidate.
 
 Every group must retain a common active task generation across all member decisions.
 Task edits, expiry and reactivation invalidate stale eligibility. Existing decisions
@@ -182,6 +192,56 @@ Seeing the original root Call-ID again intersects that retained context rather t
 creating a broader group for the same ID. An empty intersection still preserves already
 selected IDs but cannot admit another leg through correlation. Reactivated task
 generations do not restore lost eligibility.
+
+Matching windows use packet capture timestamps; a missing timestamp falls back to
+processor time. Retention and observation expiry use processor time. Delayed batches
+must still satisfy capture-time windows and retained deadlines; arbitrary forwarding
+delay is not tolerated. Cleanup scans run during maintenance, while lookups reject
+locally expired evidence between ticks.
+
+A single store owner performs storage I/O outside the correlator decision mutex.
+Packets for the same pending Call-ID wait for its immutable outcome and can cancel
+that wait. Retained unrelated IDs remain usable; new adoption while the writer is
+occupied stays standalone. Pending group membership cannot authorize another join,
+and every pending reservation counts against the existing record limit. Snapshot
+revisions retain newer membership and retention changes for a subsequent write.
+
+The active storage operation cannot be interrupted by packet cancellation. Shutdown waits for the storage owner outside decision and delivery locks; same-leg waiters are released when shutdown begins.
+
+Processor and tap defer packets for pending decisions outside the packet pipeline,
+with at most `max_candidates` packets and 32 MiB of accounted packet data. Overflow
+rejects additional packets for that pending leg instead of publishing a different ID;
+a new leg that cannot reserve deferred capacity stays standalone. Task authorization
+and destination admission are checked again when deferred packets resume.
+
+Activity and terminal-retention changes are coalesced into the next maintenance write.
+Canonical persisted content determines whether a snapshot changed; repeated activity
+at the same timestamp does not force a write. A changed activity timestamp is persisted
+as the actual latest activity at the next commit. Restore uses the last confirmed
+durable snapshot, so a crash before the next commit can lose recent activity or
+finalization updates and shorten or lengthen restored retention. Publication bookkeeping
+runs after delivery admission locks are released and preserves partial destination acceptance.
+
+Configured storage must be available, initialized, authenticated and correctly bound
+at startup. Recover offline by restoring an authenticated backup and its required keys
+or investigating the store fault while the node is stopped. Explicitly clearing
+`store_file` selects store-free operation and loses restart continuity; startup never
+automatically downgrades to that mode or replaces a damaged store.
+
+First-time grouping requires an observed initial INVITE request or retained evidence
+for that exact transaction. A response-only leg reserves standalone even when H or S
+would otherwise match; CSeq values (including zero) and response To-tags cannot prove
+that a response belongs to an initial INVITE. Responses to re-INVITEs, unknown
+transactions and response-first capture do not change retained decisions.
+
+`unresolved_writes` is an aggregate condition count: one per pending adopted decision
+plus one when any uncertain snapshot remains unresolved. It does not count every dirty
+record or historical write attempt. `uncertain_writes` counts observed uncertain outcomes.
+
+`deferred_packets` and `deferred_bytes` report the current pending-packet handoff usage;
+`deferred_rejected` counts additional packets rejected when that bounded handoff is
+full. These additive protobuf fields are 24, 25 and 26. Outcome reason keys remain
+stable across status encoding; telemetry contains only aggregate counts.
 
 ## X2/X3 sequence-number policy
 

@@ -4,7 +4,9 @@ package li
 
 import (
 	"encoding/hex"
+	"net/netip"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
@@ -97,6 +99,10 @@ func validCorrelationHeaderValue(value string) bool {
 	return true
 }
 
+// Repeated configured fields must have identical trimmed wire values. Identical
+// usable repeats are accepted; differing or unusable repeats are ambiguous and
+// veto weaker matching. One malformed standard value provides no usable key.
+// Opaque proprietary values retain exact case and parameters.
 func correlationSessionKeys(pkt *types.PacketDisplay, names []string) (map[string]string, bool) {
 	result := make(map[string]string)
 	if len(names) == 0 {
@@ -122,15 +128,22 @@ func correlationSessionKeys(pkt *types.PacketDisplay, names []string) (map[strin
 			if pkt != nil && len(pkt.VoIPData.RawSIP) > 0 {
 				response = len(pkt.VoIPData.RawSIP) >= 8 && string(pkt.VoIPData.RawSIP[:8]) == "SIP/2.0 "
 			}
-			value, valid = correlationSessionID(value, response)
-			if !valid {
+			var conflict bool
+			value, valid, conflict = parseCorrelationSessionID(value, response)
+			if conflict || !valid && len(headers[key]) > 1 {
 				return result, true
+			}
+			if !valid {
+				continue
 			}
 		case "p-charging-vector":
 			var valid bool
 			value, valid = correlationICID(value)
 			if !valid {
-				return result, true
+				if len(headers[key]) > 1 || correlationICIDConflict(headers[key][0]) {
+					return result, true
+				}
+				continue
 			}
 		}
 		if value != "" {
@@ -193,34 +206,124 @@ func validCorrelationParentID(value string) bool {
 	return strings.Count(value, "@") <= 1 && !strings.HasPrefix(value, "@") && !strings.HasSuffix(value, "@")
 }
 
+// A single syntactically unusable value is missing evidence. Duplicate remote
+// parameters are explicit ambiguity, even if their UUIDs are identical.
 func correlationSessionID(value string, response bool) (string, bool) {
-	parts := strings.Split(value, ";")
-	local := strings.TrimSpace(parts[0])
-	if !validCorrelationUUID(local) {
-		return "", false
+	key, valid, _ := parseCorrelationSessionID(value, response)
+	return key, valid
+}
+func parseCorrelationSessionID(value string, response bool) (string, bool, bool) {
+	if len(value) > correlationHeaderValueLimit {
+		return "", false, false
 	}
-	remote := ""
+	parts, ok := correlationParameters(value)
+	if !ok {
+		return "", false, false
+	}
+	remoteCount := 0
 	for _, part := range parts[1:] {
-		name, v, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(name), "remote") || remote != "" {
-			return "", false
+		name, _, _ := strings.Cut(strings.TrimSpace(part), "=")
+		if strings.EqualFold(strings.TrimSpace(name), "remote") {
+			remoteCount++
 		}
-		remote = strings.TrimSpace(v)
-		if !validCorrelationUUID(remote) {
-			return "", false
+	}
+	if remoteCount > 1 {
+		return "", false, true
+	}
+	if !validCorrelationUUID(strings.TrimSpace(parts[0])) {
+		return "", false, false
+	}
+	local := strings.TrimSpace(parts[0])
+	remote := ""
+	seenRemote := false
+	for _, part := range parts[1:] {
+		name, v, hasValue := strings.Cut(strings.TrimSpace(part), "=")
+		name = strings.TrimSpace(name)
+		if !correlationSIPToken(name) {
+			return "", false, false
+		}
+		v = strings.TrimSpace(v)
+		if strings.EqualFold(name, "remote") {
+			if seenRemote {
+				return "", false, true
+			}
+			seenRemote = true
+			if !hasValue || !validCorrelationUUID(v) {
+				return "", false, false
+			}
+			remote = v
+		} else if hasValue && !correlationGenericValue(v) {
+			return "", false, false
 		}
 	}
 	selected := local
 	if response {
 		selected = remote
-		if selected == "" {
-			return "", true
+	}
+	if selected == "" || selected == strings.Repeat("0", 32) {
+		return "", true, false
+	}
+	return strings.ToLower(selected), true, false
+}
+
+// RFC 3261 generic-param permits a token, host, or quoted-string value. SIP
+// folding has already been unfolded by correlationHeaders; CR/LF are rejected.
+func correlationSIPToken(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-.!%*_+`'~", r)) {
+			return false
 		}
 	}
-	if selected == strings.Repeat("0", 32) {
-		return "", true
+	return true
+}
+func correlationGenericValue(value string) bool {
+	if correlationSIPToken(value) {
+		return true
 	}
-	return strings.ToLower(selected), true
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		addr, err := netip.ParseAddr(value[1 : len(value)-1])
+		return err == nil && addr.Is6() && addr.Zone() == ""
+	}
+	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' || !utf8.ValidString(value) {
+		return false
+	}
+	inside := value[1 : len(value)-1]
+	for i := 0; i < len(inside); i++ {
+		ch := inside[i]
+		if ch == '\\' {
+			i++
+			if i >= len(inside) || inside[i] >= 128 || inside[i] == '\r' || inside[i] == '\n' {
+				return false
+			}
+		} else if ch == '"' || ch < 32 && ch != '\t' || ch == 127 {
+			return false
+		}
+	}
+	return true
+}
+
+func correlationICIDConflict(value string) bool {
+	parts, ok := correlationParameters(value)
+	if !ok {
+		return false
+	}
+	seen := ""
+	for _, part := range parts {
+		name, _, found := strings.Cut(strings.TrimSpace(part), "=")
+		if found && strings.EqualFold(strings.TrimSpace(name), "icid-value") {
+			key, valid := correlationICID(part)
+			if valid && key != "" {
+				if seen != "" && seen != key {
+					return true
+				}
+				seen = key
+			}
+		}
+	}
+	return false
 }
 func validCorrelationUUID(value string) bool {
 	if len(value) != 32 {

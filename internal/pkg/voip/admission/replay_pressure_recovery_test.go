@@ -10,9 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A pressure deadline removes only the storage-pressure reason. SDP rejected
-// during pressure cannot become complete empty proof when the deadline passes.
-func TestReplayPressureExpiryRequiresFreshObservedRepair(t *testing.T) {
+// Complete pressure-only proof stays quarantined until the replay deadline.
+func TestReplayPressureExpiryPromotesQuarantinedCompleteExchange(t *testing.T) {
 	for _, mode := range []mediaadmission.Mode{mediaadmission.ModeEnforce, mediaadmission.ModeShadow} {
 		for _, policy := range []mediaadmission.FailurePolicy{mediaadmission.FailureOpen, mediaadmission.FailureClosed} {
 			for _, established := range []bool{false, true} {
@@ -68,30 +67,11 @@ func TestReplayPressureExpiryRequiresFreshObservedRepair(t *testing.T) {
 						require.True(t, time.Now().Before(deadline))
 						bridge.expireLifetimeProofLocked(deadline)
 						require.True(t, state.replayBlockedUntil.IsZero())
-						require.True(t, state.replayEvidenceMissing)
-						require.True(t, state.unknown, "discarded request/answer cannot be invented at expiry")
-					}()
-					assertState(true)
-					if established {
-						_, oldAnswer := recoveryAtSequence(invite, "caller", "INVITE", 1)
-						_ = submitDerivation(t, bridge, registry, oldAnswer)
-						func() {
-							bridge.mu.Lock()
-							defer bridge.mu.Unlock()
-							require.True(t, state.replayEvidenceMissing, "cached pre-pressure proof cannot repair discarded evidence")
-							require.True(t, state.unknown)
-						}()
-					}
-					fresh, complete := recoveryAtSequence(invite, "caller", "INVITE", 3)
-					_ = submitDerivation(t, bridge, registry, fresh)
-					require.NoError(t, submitDerivation(t, bridge, registry, complete))
-					func() {
-						bridge.mu.Lock()
-						defer bridge.mu.Unlock()
 						require.False(t, state.replayEvidenceMissing)
 						require.False(t, state.unknown)
-						require.NotEmpty(t, state.mediaSet, "fresh SDP must produce media, not known-empty proof")
+						require.NotEmpty(t, state.mediaSet)
 					}()
+					require.NoError(t, bridge.retrySelected())
 					assertState(false)
 					retirementOwns(t, registry, invite.CallID, "192.0.2.1:30000", "192.0.2.2:40000")
 				})

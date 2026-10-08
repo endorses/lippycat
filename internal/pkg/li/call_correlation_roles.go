@@ -96,6 +96,10 @@ func (c *CallCorrelator) observeRoleOrigin(v *correlationCandidate, origin sdpOr
 	}
 	c.originIndex[key][v.transaction] = v
 	v.originKeys = append(v.originKeys, key)
+	if v.originGenerations == nil {
+		v.originGenerations = make(map[sdpOriginHistoryKey]uint64)
+	}
+	v.originGenerations[key] = c.history.Generation(origin, role, now)
 }
 
 // delayedAnswerTransaction allows ACK's new branch only with one retained,
@@ -118,7 +122,7 @@ func (c *CallCorrelator) delayedAnswerTransaction(pkt *types.PacketDisplay) (str
 	found := ""
 	var result correlationTransaction
 	for key, t := range c.transactions {
-		if !t.requestSeen || !t.delayedOffer || t.candidate == nil || !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, suffix) {
+		if !c.now().Before(t.expires) || !t.requestSeen || !t.delayedOffer || t.candidate == nil || !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, suffix) {
 			continue
 		}
 		if found != "" {

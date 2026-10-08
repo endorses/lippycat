@@ -472,7 +472,7 @@ func TestNegotiationRecoveryRetiredWatermarkExhaustionExpires(t *testing.T) {
 	require.True(t, time.Now().Before(bridge.proofHistory.blockedUntil))
 	current := &selectedCall{lifetime: callregistry.Lifetime{Session: 1, Generation: 2}}
 	key := mediaadmission.DialogKey{CallID: "second-retired-call", FromTag: "from", CSeq: 9, CSeqMethod: "INVITE", CSeqValid: true}
-	require.False(t, bridge.checkKeyLifetimeLocked(current, key), "missing replay evidence cannot silently authorize reuse")
+	require.False(t, bridge.observeSelectedRecordLocked(current, mediaadmission.MetadataRecord{Key: key, Complete: true}), "missing replay evidence is quarantined without authorization")
 	require.False(t, bridge.canConfirmedLifetimeLocked(current, key), "a clean message cannot recreate exhausted provenance")
 	require.False(t, current.lifetimeAmbiguous)
 	require.False(t, current.replayBlockedUntil.IsZero())

@@ -631,7 +631,7 @@ if any of them is missing.
 | `processor.li.delivery_tls_ca`          | string   | `""`      | CA certificate for MDF verification.                                          |
 | `processor.li.delivery_tls_pinned_cert` | list     | `[]`      | Pinned certificates for MDF connections.                                      |
 
-Optional SIP call-leg grouping uses `processor.li.correlation` or `tap.li.correlation`, with every matching rule disabled by default. The [call-leg correlation reference](../part5-advanced/lawful-interception.md#sip-call-leg-correlation) lists all keys, matching precedence, bounds, restart limitations and dedicated encrypted-store setup. Configuration is independent of task authorization and source packet selection.
+Optional SIP call-leg grouping uses `processor.li.correlation` or `tap.li.correlation`, with every matching rule disabled by default. The [call-leg correlation reference](../part5-advanced/lawful-interception.md#sip-call-leg-correlation) lists all keys, matching precedence, bounds, restart limitations and dedicated encrypted-store setup. Configuration is independent of task authorization and source packet selection. Response-only legs require retained initial-request evidence; storage backlog leaves new adoptions standalone. Configured-store startup errors never trigger automatic store-free fallback.
 
 ### `tap` — Tap Node {#tap--tap-node}
 

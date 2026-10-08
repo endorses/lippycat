@@ -20,7 +20,11 @@ func TestCorrelationPublicationPartialFanout(t *testing.T) {
 	require.NoError(t, m.AddDestination(&li.Destination{DID: good, Address: "127.0.0.1", Port: 1, ProtocolType: "X2"}))
 	require.NoError(t, m.AddDestination(&li.Destination{DID: other, Address: "127.0.0.1", Port: 1, ProtocolType: "X3"}))
 	publications := 0
-	callback := func() { publications++ }
+	callback := func() {
+		require.True(t, c.admissionMu.TryLock(), "publication callback must run outside admission lock")
+		c.admissionMu.Unlock()
+		publications++
+	}
 	// Later rejection must not hide an earlier accepted destination.
 	err = c.SendX2WithMetadataAndPublication(xid, []uuid.UUID{good, missing}, []byte("synthetic-pdu"), DeliveryMetadata{}, callback)
 	require.Error(t, err)

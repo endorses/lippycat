@@ -1,6 +1,6 @@
 # LI correlation and replay recovery hardening
 
-**Status:** implemented and verified; implementation commit reference pending recording
+**Status:** implemented, verified and closed; implementation commit `2a5364f3`
 
 **Scope:** optional LI call-leg correlation in processor/tap, and replay-pressure
 recovery in the VoIP media-admission bridge.
@@ -203,7 +203,7 @@ Primary files: `internal/pkg/voip/admission/lifetime_proof.go`,
       while task admission, payloads, destinations and durable replay remain
       unchanged. Verify storage-failure and restart limitations against the final
       documentation.
-- [ ] Format changed files, record verification evidence and material limitations,
+- [x] Format changed files, record verification evidence and material limitations,
       check off only completed tasks, and commit implementation and plan updates.
 
 ## References
@@ -214,8 +214,8 @@ initial transaction identity from a fixed CSeq value.
 
 ## Completion evidence
 
-All implementation and verification tasks above are complete; the final commit
-recording task remains pending. The bounded closure
+All implementation and verification tasks above are complete and committed in
+`2a5364f3`. The bounded closure
 review found one defect in the new deferred path: packets arriving behind a
 pending write were not updating final-response and SDP role observations. The
 primary repair observes those packets before queue admission, preserving evidence

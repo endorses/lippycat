@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-08
 
-**Status:** implementation verified and closed; commit reference pending recording
+**Status:** implementation verified and closed; implemented in commit `27af16c1`
 
 **Scope:** processor and tap SIP/RTP X2/X3 delivery with `li` enabled
 
@@ -398,9 +398,9 @@ fixture-dependent required checks passed there. Protection was preserved.
 
 | Step | Commit | Validation and material limitations |
 | --- | --- | --- |
-| Framework, H and R1 | Combined implementation; reference pending | Full LI/non-LI suites, encoder and actual delivery invariants, storage and race checks passed |
-| P and S | Combined implementation; reference pending | Parent, framed SDP/roles/history/suspension/hierarchy tests and race checks passed |
-| Weaker heuristics | Combined implementation; reference pending | Exact pairs, no-address rule, rewritten fallback, independent switches and decoded delivery tests passed |
+| Framework, H and R1 | Combined implementation: `27af16c1` | Full LI/non-LI suites, encoder and actual delivery invariants, storage and race checks passed |
+| P and S | Combined implementation: `27af16c1` | Parent, framed SDP/roles/history/suspension/hierarchy tests and race checks passed |
+| Weaker heuristics | Combined implementation: `27af16c1` | Exact pairs, no-address rule, rewritten fallback, independent switches and decoded delivery tests passed |
 
 ## References
 

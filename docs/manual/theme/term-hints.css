@@ -34,6 +34,7 @@
   overflow: auto;
   border: 1px solid var(--table-border-color);
   border-radius: 0.35rem;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
   color: var(--fg);
   background: var(--bg);
   font-size: 1.4rem;

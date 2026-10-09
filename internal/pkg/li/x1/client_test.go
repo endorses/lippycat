@@ -510,11 +510,11 @@ func TestClient_IsConnected(t *testing.T) {
 		assert.False(t, client.IsConnected())
 	})
 
-	t.Run("true after keepalive loop runs", func(t *testing.T) {
+	t.Run("keepalive loop records successful completion", func(t *testing.T) {
 		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
-		defer server.Close()
+		t.Cleanup(server.Close)
 
 		client, err := NewClient(ClientConfig{
 			ADMFEndpoint:      server.URL,
@@ -524,26 +524,44 @@ func TestClient_IsConnected(t *testing.T) {
 		require.NoError(t, err)
 
 		client.Start()
-		time.Sleep(10 * time.Millisecond)
-		defer client.Stop()
+		t.Cleanup(client.Stop)
 
-		// After the keepalive loop runs, IsConnected should return true
+		// The client records success after processing the complete response,
+		// rather than when the server first receives the request.
+		require.Eventually(t, func() bool {
+			stats := client.Stats()
+			return stats.KeepalivesSent > 0 && !stats.LastKeepalive.IsZero()
+		}, time.Second, time.Millisecond)
+	})
+
+	t.Run("true when keepalive is recent", func(t *testing.T) {
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint:      "https://admf.example.com",
+			KeepaliveInterval: time.Minute,
+		})
+		require.NoError(t, err)
+
+		// Check freshness independently of asynchronous loop scheduling.
+		client.mu.Lock()
+		client.stats.LastKeepalive = time.Now()
+		client.mu.Unlock()
+
 		assert.True(t, client.IsConnected())
 	})
 
 	t.Run("false when keepalive is stale", func(t *testing.T) {
 		client, err := NewClient(ClientConfig{
 			ADMFEndpoint:      "https://admf.example.com",
-			KeepaliveInterval: 1 * time.Millisecond, // Very short interval
+			KeepaliveInterval: time.Minute,
 		})
 		require.NoError(t, err)
 
-		// Manually set LastKeepalive to a stale time (3x keepalive interval ago)
+		// Set stale state directly instead of waiting for the interval to expire.
 		client.mu.Lock()
-		client.stats.LastKeepalive = time.Now().Add(-5 * time.Millisecond)
+		client.stats.LastKeepalive = time.Now().Add(-3 * client.config.KeepaliveInterval)
 		client.mu.Unlock()
 
-		// Should be false since 5ms is more than 2x the 1ms interval
+		// Three intervals is older than the two-interval freshness threshold.
 		assert.False(t, client.IsConnected())
 	})
 }

@@ -451,14 +451,27 @@ marked missing by INFO, OPTIONS, an exact retained bodyless provisional or a
 bodyless ACK for an answered INVITE, or retransmissions that add no media proof.
 The provisional must match the retained dialog, branch and CSeq; a 2xx ACK may
 use its separate branch. Changed SDP, reliable-response obligations and malformed
-or conflicting headers remain proof-bearing or uncertain.
+or conflicting headers remain proof-bearing or uncertain. An ACK carrying SDP or a
+provisional response with changed SDP must satisfy the applicable offer/answer and
+transaction confirmation checks; SDP presence alone does not authorize media.
 New proof-bearing observations enter a quarantine bound to the authoritative active
 lifetime and charged to the existing selected-derivation context, byte and endpoint
 limits. Quarantined evidence cannot authorize media or install endpoint ownership.
 
-An observation received inside a protected retired identity's window is marked
-ineligible when received. That rejection survives delayed selection, history expiry
-and subsequent pressure intervals; promotion-time expiry cannot rehabilitate it.
+An observation is a complete SIP message first validated and handed to the admission
+observer, after any framing or TCP reassembly. This point differs from raw packet
+capture, initial TCP segment receipt and later call selection. Replay eligibility
+uses the admission observation clock; capture timestamps remain provenance and do not
+replace the authoritative replay clock. A message captured during protection but
+first reassembled and validated after expiry can obtain post-window eligibility,
+subject to the remaining lifetime and proof checks; elapsed time alone does not
+authorize media.
+
+An observation made inside a protected retired identity's window is marked ineligible
+on its immutable admission receipt. That rejection survives delayed registry handoff,
+selection, staging expiry or eviction, history expiry and subsequent pressure
+intervals; these delays cannot restamp rejected evidence as fresh, and promotion-time
+expiry cannot rehabilitate it.
 If the reserved identity history fills, that pressure generation's quarantine is
 invalidated and released, including otherwise genuine exchanges. Later observations
 during that generation are also ineligible; healthy authoritative retained proof

@@ -728,9 +728,14 @@ Synchronous callers can cancel their wait without cancelling the physical write.
 Retained unrelated IDs remain usable; new adoption while the owner is occupied stays
 standalone. Pending or unresolved uncertain membership cannot authorize another join.
 
-Processor and tap retain at most `max_candidates` deferred packets and 32 MiB of
-accounted packet data outside the packet pipeline. At the wait deadline or when that
-handoff reaches its count/byte bound, the reserved group ID is released as uncertain.
+Processor and tap retain at most `max_candidates` deferred packets (default 10,000)
+and 32 MiB of accounted packet data globally outside the packet pipeline. These
+limits apply to correlation-held handoffs, separately from capture buffers, RTP
+reorder buffers and downstream delivery queues; accounted bytes are not a process
+RSS limit. `wait_timeout` fixes the logical adoption decision deadline, not a strict
+residence-time or shutdown-loss bound: scheduling and callback draining can extend
+residence beyond it. At the wait deadline or when that handoff reaches its
+count/byte bound, the reserved group ID is released as uncertain.
 Earlier retained products drain in order; the packet causing pressure and subsequent
 packets use that same ID instead of being rejected because of correlation capacity.
 A new leg that cannot reserve deferred capacity stays standalone. Delivery still
@@ -749,9 +754,19 @@ still lose an adopted ID's restart continuity.
 wait, including maintenance and close. Both timeout settings must be positive and are
 independent of MDF socket timeouts, delivery drain deadlines, decision retention and
 X3 maximum age. These defaults are operational policy, not throughput or latency gates.
-Shutdown stops new work and suppresses cancelled handoffs before delivery components
-stop. If its budget expires, independent processor cleanup continues with an error and
-warning. The active storage operation cannot be forcibly interrupted: its owner keeps
+Processor and tap shutdown cancel the producer context before closing correlation
+and stopping delivery components. Correlation-held products can be discarded before
+reaching the downstream delivery queue or journal; they are not gracefully drained
+after cancellation. This cancellation boundary is separate from deadline/pressure
+release during live operation, which remains subject to authorization, call lifetime,
+product expiry and downstream acceptance. Standalone correlator `CloseContext` also
+stops new work and suppresses pending handoffs even when their individual caller
+contexts remain live. Graceful draining of those products would require coordinated
+shutdown ordering that preserves authorization, a delivery context and call lifetime
+through a bounded drain; allowing callbacks after close alone is insufficient.
+
+If the shutdown budget expires, independent processor cleanup continues with an error
+and warning. The active storage operation cannot be forcibly interrupted: its owner keeps
 file locks, descriptors, keys and the cryptographic usage ledger, then closes them once
 I/O finishes. A bounded caller return does not claim those resources are already freed.
 Repeated close calls share that eventual cleanup and cannot start competing writers.

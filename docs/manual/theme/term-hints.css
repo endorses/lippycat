@@ -43,6 +43,12 @@
   overflow-wrap: anywhere;
 }
 
+:is(.navy, .coal, .ayu) #manual-term-hint-popup {
+  border-color: var(--theme-popup-border);
+  background: var(--theme-hover);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 40%);
+}
+
 #manual-term-hint-popup[hidden] {
   display: none;
 }

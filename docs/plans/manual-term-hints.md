@@ -226,3 +226,7 @@ for all three editions, and all 12 updated browser checks. Keyboard scrolling,
 hover/tap dismissal, zero popup controls/Tab stops, localized definitions,
 mobile bounds, and shadow styling are verified. Final desktop and mobile
 screenshots were inspected; temporary QA artifacts are removed after review.
+
+Dark-theme hints now use the existing theme palette for a lighter surface and
+visible border, with a stronger shadow. Navy, Coal, and Ayu were checked in the
+local browser and their screenshots reviewed; all language editions rebuild.

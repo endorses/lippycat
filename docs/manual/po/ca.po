@@ -12194,8 +12194,8 @@ msgid "Term"
 msgstr "Terme"
 
 #: src/appendices/glossary.md:7
-msgid "**ADMF**"
-msgstr "**ADMF**"
+msgid "<span id=\"term-admf\" data-glossary-term=\"admf\">**ADMF**</span>"
+msgstr "<span id=\"term-admf\" data-glossary-term=\"admf\">**ADMF**</span>"
 
 #: src/appendices/glossary.md:7
 msgid ""
@@ -12210,8 +12210,12 @@ msgstr ""
 "advanced/lawful-interception.md)."
 
 #: src/appendices/glossary.md:8
-msgid "**Aho-Corasick**"
-msgstr "**Aho-Corasick**"
+msgid ""
+"<span id=\"term-aho-corasick\" data-glossary-term=\"aho-corasick\">**Aho-"
+"Corasick**</span>"
+msgstr ""
+"<span id=\"term-aho-corasick\" data-glossary-term=\"aho-corasick\">**Aho-"
+"Corasick**</span>"
 
 #: src/appendices/glossary.md:8
 msgid ""
@@ -12243,8 +12247,8 @@ msgstr ""
 "process.md)."
 
 #: src/appendices/glossary.md:10
-msgid "**BPF**"
-msgstr "**BPF**"
+msgid "<span id=\"term-bpf\" data-glossary-term=\"bpf\">**BPF**</span>"
+msgstr "<span id=\"term-bpf\" data-glossary-term=\"bpf\">**BPF**</span>"
 
 #: src/appendices/glossary.md:10
 msgid ""
@@ -12259,8 +12263,12 @@ msgstr ""
 "[referència de filtres BPF](bpf-reference.md)."
 
 #: src/appendices/glossary.md:11
-msgid "**Build Tag**"
-msgstr "**Etiqueta de compilació**"
+msgid ""
+"<span id=\"term-build-tag\" data-glossary-term=\"build-tag\">**Build Tag**</"
+"span>"
+msgstr ""
+"<span id=\"term-build-tag\" data-glossary-term=\"build-tag\">**Etiqueta de "
+"compilació**</span>"
 
 #: src/appendices/glossary.md:11
 msgid ""
@@ -12276,8 +12284,8 @@ msgstr ""
 "foundations/installation.md)."
 
 #: src/appendices/glossary.md:12
-msgid "**CA**"
-msgstr "**CA**"
+msgid "<span id=\"term-ca\" data-glossary-term=\"ca\">**CA**</span>"
+msgstr "<span id=\"term-ca\" data-glossary-term=\"ca\">**CA**</span>"
 
 #: src/appendices/glossary.md:12
 msgid ""
@@ -12293,8 +12301,10 @@ msgstr ""
 "security.md)."
 
 #: src/appendices/glossary.md:13
-msgid "**Call-ID**"
-msgstr "**Call-ID**"
+msgid ""
+"<span id=\"term-call-id\" data-glossary-term=\"call-id\">**Call-ID**</span>"
+msgstr ""
+"<span id=\"term-call-id\" data-glossary-term=\"call-id\">**Call-ID**</span>"
 
 #: src/appendices/glossary.md:13
 msgid ""
@@ -12308,8 +12318,12 @@ msgstr ""
 "part5-advanced/voip.md)."
 
 #: src/appendices/glossary.md:14
-msgid "**Capture Interface**"
-msgstr "**Interfície de captura**"
+msgid ""
+"<span id=\"term-capture-interface\" data-glossary-term=\"capture-"
+"interface\">**Capture Interface**</span>"
+msgstr ""
+"<span id=\"term-capture-interface\" data-glossary-term=\"capture-"
+"interface\">**Interfície de captura**</span>"
 
 #: src/appendices/glossary.md:14
 msgid ""
@@ -12323,8 +12337,8 @@ msgstr ""
 "sniff.md)."
 
 #: src/appendices/glossary.md:15
-msgid "**CC**"
-msgstr "**CC**"
+msgid "<span id=\"term-cc\" data-glossary-term=\"cc\">**CC**</span>"
+msgstr "<span id=\"term-cc\" data-glossary-term=\"cc\">**CC**</span>"
 
 #: src/appendices/glossary.md:15
 msgid ""
@@ -12337,8 +12351,12 @@ msgstr ""
 "Consulteu [intercepció legal](../part5-advanced/lawful-interception.md)."
 
 #: src/appendices/glossary.md:16
-msgid "**Circuit Breaker**"
-msgstr "**Disjuntor**"
+msgid ""
+"<span id=\"term-circuit-breaker\" data-glossary-term=\"circuit-"
+"breaker\">**Circuit Breaker**</span>"
+msgstr ""
+"<span id=\"term-circuit-breaker\" data-glossary-term=\"circuit-"
+"breaker\">**Disjuntor**</span>"
 
 #: src/appendices/glossary.md:16
 msgid ""
@@ -12353,8 +12371,8 @@ msgstr ""
 "distribuïda](../part3-distributed/architecture.md)."
 
 #: src/appendices/glossary.md:17
-msgid "**Codec**"
-msgstr "**Còdec**"
+msgid "<span id=\"term-codec\" data-glossary-term=\"codec\">**Codec**</span>"
+msgstr "<span id=\"term-codec\" data-glossary-term=\"codec\">**Còdec**</span>"
 
 #: src/appendices/glossary.md:17
 msgid ""
@@ -12369,8 +12387,12 @@ msgstr ""
 "anàlisi SIP i RTP](../part5-advanced/voip.md)."
 
 #: src/appendices/glossary.md:18
-msgid "**Command Hook**"
-msgstr "**Ordre associada**"
+msgid ""
+"<span id=\"term-command-hook\" data-glossary-term=\"command-hook\">**Command "
+"Hook**</span>"
+msgstr ""
+"<span id=\"term-command-hook\" data-glossary-term=\"command-hook\">**Ordre "
+"associada**</span>"
 
 #: src/appendices/glossary.md:18
 msgid ""
@@ -12400,8 +12422,12 @@ msgstr ""
 "[optimització del rendiment](../part5-advanced/performance.md)."
 
 #: src/appendices/glossary.md:20
-msgid "**Disk Overflow Buffer**"
-msgstr "**Memòria intermèdia de desbordament en disc**"
+msgid ""
+"<span id=\"term-disk-overflow-buffer\" data-glossary-term=\"disk-overflow-"
+"buffer\">**Disk Overflow Buffer**</span>"
+msgstr ""
+"<span id=\"term-disk-overflow-buffer\" data-glossary-term=\"disk-overflow-"
+"buffer\">**Memòria intermèdia de desbordament en disc**</span>"
 
 #: src/appendices/glossary.md:20
 msgid ""
@@ -12427,8 +12453,8 @@ msgstr ""
 "advanced/dns.md)."
 
 #: src/appendices/glossary.md:22
-msgid "**ETSI**"
-msgstr "**ETSI**"
+msgid "<span id=\"term-etsi\" data-glossary-term=\"etsi\">**ETSI**</span>"
+msgstr "<span id=\"term-etsi\" data-glossary-term=\"etsi\">**ETSI**</span>"
 
 #: src/appendices/glossary.md:22
 msgid ""
@@ -12442,8 +12468,10 @@ msgstr ""
 "[intercepció legal](../part5-advanced/lawful-interception.md)."
 
 #: src/appendices/glossary.md:23
-msgid "**Filter**"
-msgstr "**Filtre**"
+msgid ""
+"<span id=\"term-filter\" data-glossary-term=\"filter\">**Filter**</span>"
+msgstr ""
+"<span id=\"term-filter\" data-glossary-term=\"filter\">**Filtre**</span>"
 
 #: src/appendices/glossary.md:23
 msgid ""
@@ -12458,8 +12486,12 @@ msgstr ""
 "bàsics](../part1-foundations/core-concepts.md)."
 
 #: src/appendices/glossary.md:24
-msgid "**Flow Control**"
-msgstr "**Control de flux**"
+msgid ""
+"<span id=\"term-flow-control\" data-glossary-term=\"flow-control\">**Flow "
+"Control**</span>"
+msgstr ""
+"<span id=\"term-flow-control\" data-glossary-term=\"flow-control\">**Control "
+"de flux**</span>"
 
 #: src/appendices/glossary.md:24
 msgid ""
@@ -12474,8 +12506,8 @@ msgstr ""
 "Consulteu [arquitectura distribuïda](../part3-distributed/architecture.md)."
 
 #: src/appendices/glossary.md:25
-msgid "**gRPC**"
-msgstr "**gRPC**"
+msgid "<span id=\"term-grpc\" data-glossary-term=\"grpc\">**gRPC**</span>"
+msgstr "<span id=\"term-grpc\" data-glossary-term=\"grpc\">**gRPC**</span>"
 
 #: src/appendices/glossary.md:25
 msgid ""
@@ -12499,8 +12531,12 @@ msgstr ""
 "respostes HTTP. Consulteu [anàlisi HTTP](../part5-advanced/http.md)."
 
 #: src/appendices/glossary.md:27
-msgid "**Hub-and-Spoke**"
-msgstr "**Topologia en estrella**"
+msgid ""
+"<span id=\"term-hub-and-spoke\" data-glossary-term=\"hub-and-spoke\">**Hub-"
+"and-Spoke**</span>"
+msgstr ""
+"<span id=\"term-hub-and-spoke\" data-glossary-term=\"hub-and-"
+"spoke\">**Topologia en estrella**</span>"
 
 #: src/appendices/glossary.md:27
 msgid ""
@@ -12532,8 +12568,12 @@ msgstr ""
 "distributed/hunt.md)."
 
 #: src/appendices/glossary.md:29
-msgid "**Hierarchical Mode**"
-msgstr "**Mode jeràrquic**"
+msgid ""
+"<span id=\"term-hierarchical-mode\" data-glossary-term=\"hierarchical-"
+"mode\">**Hierarchical Mode**</span>"
+msgstr ""
+"<span id=\"term-hierarchical-mode\" data-glossary-term=\"hierarchical-"
+"mode\">**Mode jeràrquic**</span>"
 
 #: src/appendices/glossary.md:29
 msgid ""
@@ -12548,8 +12588,8 @@ msgstr ""
 "distribuïda](../part3-distributed/architecture.md)."
 
 #: src/appendices/glossary.md:30
-msgid "**IMAP**"
-msgstr "**IMAP**"
+msgid "<span id=\"term-imap\" data-glossary-term=\"imap\">**IMAP**</span>"
+msgstr "<span id=\"term-imap\" data-glossary-term=\"imap\">**IMAP**</span>"
 
 #: src/appendices/glossary.md:30
 msgid ""
@@ -12562,8 +12602,8 @@ msgstr ""
 "Consulteu [anàlisi de protocols de correu](../part5-advanced/email.md)."
 
 #: src/appendices/glossary.md:31
-msgid "**IRI**"
-msgstr "**IRI**"
+msgid "<span id=\"term-iri\" data-glossary-term=\"iri\">**IRI**</span>"
+msgstr "<span id=\"term-iri\" data-glossary-term=\"iri\">**IRI**</span>"
 
 #: src/appendices/glossary.md:31
 msgid ""
@@ -12577,8 +12617,8 @@ msgstr ""
 "[intercepció legal](../part5-advanced/lawful-interception.md)."
 
 #: src/appendices/glossary.md:32
-msgid "**JA3**"
-msgstr "**JA3**"
+msgid "<span id=\"term-ja3\" data-glossary-term=\"ja3\">**JA3**</span>"
+msgstr "<span id=\"term-ja3\" data-glossary-term=\"ja3\">**JA3**</span>"
 
 #: src/appendices/glossary.md:32
 msgid ""
@@ -12593,8 +12633,8 @@ msgstr ""
 "IP. Consulteu [inspecció TLS](../part5-advanced/tls.md)."
 
 #: src/appendices/glossary.md:33
-msgid "**JA3S**"
-msgstr "**JA3S**"
+msgid "<span id=\"term-ja3s\" data-glossary-term=\"ja3s\">**JA3S**</span>"
+msgstr "<span id=\"term-ja3s\" data-glossary-term=\"ja3s\">**JA3S**</span>"
 
 #: src/appendices/glossary.md:33
 msgid ""
@@ -12607,8 +12647,8 @@ msgstr ""
 "[inspecció TLS](../part5-advanced/tls.md)."
 
 #: src/appendices/glossary.md:34
-msgid "**JA4**"
-msgstr "**JA4**"
+msgid "<span id=\"term-ja4\" data-glossary-term=\"ja4\">**JA4**</span>"
+msgstr "<span id=\"term-ja4\" data-glossary-term=\"ja4\">**JA4**</span>"
 
 #: src/appendices/glossary.md:34
 msgid ""
@@ -12621,8 +12661,8 @@ msgstr ""
 "[inspecció TLS](../part5-advanced/tls.md)."
 
 #: src/appendices/glossary.md:35
-msgid "**LI**"
-msgstr "**LI**"
+msgid "<span id=\"term-li\" data-glossary-term=\"li\">**LI**</span>"
+msgstr "<span id=\"term-li\" data-glossary-term=\"li\">**LI**</span>"
 
 #: src/appendices/glossary.md:35
 msgid ""
@@ -12636,8 +12676,10 @@ msgstr ""
 "part5-advanced/lawful-interception.md)."
 
 #: src/appendices/glossary.md:36
-msgid "**libpcap**"
-msgstr "**libpcap**"
+msgid ""
+"<span id=\"term-libpcap\" data-glossary-term=\"libpcap\">**libpcap**</span>"
+msgstr ""
+"<span id=\"term-libpcap\" data-glossary-term=\"libpcap\">**libpcap**</span>"
 
 #: src/appendices/glossary.md:36
 msgid ""
@@ -12651,8 +12693,8 @@ msgstr ""
 "foundations/core-concepts.md)."
 
 #: src/appendices/glossary.md:37
-msgid "**MDF**"
-msgstr "**MDF**"
+msgid "<span id=\"term-mdf\" data-glossary-term=\"mdf\">**MDF**</span>"
+msgstr "<span id=\"term-mdf\" data-glossary-term=\"mdf\">**MDF**</span>"
 
 #: src/appendices/glossary.md:37
 msgid ""
@@ -12666,8 +12708,8 @@ msgstr ""
 "interception.md)."
 
 #: src/appendices/glossary.md:38
-msgid "**mDNS**"
-msgstr "**mDNS**"
+msgid "<span id=\"term-mdns\" data-glossary-term=\"mdns\">**mDNS**</span>"
+msgstr "<span id=\"term-mdns\" data-glossary-term=\"mdns\">**mDNS**</span>"
 
 #: src/appendices/glossary.md:38
 msgid ""
@@ -12680,8 +12722,8 @@ msgstr ""
 "Consulteu [anàlisi DNS](../part5-advanced/dns.md)."
 
 #: src/appendices/glossary.md:39
-msgid "**MOS**"
-msgstr "**MOS**"
+msgid "<span id=\"term-mos\" data-glossary-term=\"mos\">**MOS**</span>"
+msgstr "<span id=\"term-mos\" data-glossary-term=\"mos\">**MOS**</span>"
 
 #: src/appendices/glossary.md:39
 msgid ""
@@ -12696,8 +12738,8 @@ msgstr ""
 "de paquets. Consulteu [VoIP: anàlisi SIP i RTP](../part5-advanced/voip.md)."
 
 #: src/appendices/glossary.md:40
-msgid "**mTLS**"
-msgstr "**mTLS**"
+msgid "<span id=\"term-mtls\" data-glossary-term=\"mtls\">**mTLS**</span>"
+msgstr "<span id=\"term-mtls\" data-glossary-term=\"mtls\">**mTLS**</span>"
 
 #: src/appendices/glossary.md:40
 msgid ""
@@ -12712,8 +12754,8 @@ msgstr ""
 "producció. Consulteu [seguretat](../part5-advanced/security.md)."
 
 #: src/appendices/glossary.md:41
-msgid "**NE**"
-msgstr "**NE**"
+msgid "<span id=\"term-ne\" data-glossary-term=\"ne\">**NE**</span>"
+msgstr "<span id=\"term-ne\" data-glossary-term=\"ne\">**NE**</span>"
 
 #: src/appendices/glossary.md:41
 msgid ""
@@ -12727,8 +12769,10 @@ msgstr ""
 "interception.md)."
 
 #: src/appendices/glossary.md:42
-msgid "**OpenCL**"
-msgstr "**OpenCL**"
+msgid ""
+"<span id=\"term-opencl\" data-glossary-term=\"opencl\">**OpenCL**</span>"
+msgstr ""
+"<span id=\"term-opencl\" data-glossary-term=\"opencl\">**OpenCL**</span>"
 
 #: src/appendices/glossary.md:42
 msgid ""
@@ -12742,8 +12786,12 @@ msgstr ""
 "performance.md)."
 
 #: src/appendices/glossary.md:43
-msgid "**P-Asserted-Identity**"
-msgstr "**P-Asserted-Identity**"
+msgid ""
+"<span id=\"term-p-asserted-identity\" data-glossary-term=\"p-asserted-"
+"identity\">**P-Asserted-Identity**</span>"
+msgstr ""
+"<span id=\"term-p-asserted-identity\" data-glossary-term=\"p-asserted-"
+"identity\">**P-Asserted-Identity**</span>"
 
 #: src/appendices/glossary.md:43
 msgid ""
@@ -12757,8 +12805,8 @@ msgstr ""
 "advanced/voip.md)."
 
 #: src/appendices/glossary.md:44
-msgid "**PCAP**"
-msgstr "**PCAP**"
+msgid "<span id=\"term-pcap\" data-glossary-term=\"pcap\">**PCAP**</span>"
+msgstr "<span id=\"term-pcap\" data-glossary-term=\"pcap\">**PCAP**</span>"
 
 #: src/appendices/glossary.md:44
 msgid ""
@@ -12788,8 +12836,8 @@ msgstr ""
 "part3-distributed/process.md)."
 
 #: src/appendices/glossary.md:46
-msgid "**POP3**"
-msgstr "**POP3**"
+msgid "<span id=\"term-pop3\" data-glossary-term=\"pop3\">**POP3**</span>"
+msgstr "<span id=\"term-pop3\" data-glossary-term=\"pop3\">**POP3**</span>"
 
 #: src/appendices/glossary.md:46
 msgid ""
@@ -12819,8 +12867,12 @@ msgstr ""
 "process.md)."
 
 #: src/appendices/glossary.md:48
-msgid "**Production Mode**"
-msgstr "**Mode de producció**"
+msgid ""
+"<span id=\"term-production-mode\" data-glossary-term=\"production-"
+"mode\">**Production Mode**</span>"
+msgstr ""
+"<span id=\"term-production-mode\" data-glossary-term=\"production-"
+"mode\">**Mode de producció**</span>"
 
 #: src/appendices/glossary.md:48
 msgid ""
@@ -12846,8 +12898,12 @@ msgstr ""
 "part5-advanced/radius.md)."
 
 #: src/appendices/glossary.md:50
-msgid "**Promiscuous Mode**"
-msgstr "**Mode promiscu**"
+msgid ""
+"<span id=\"term-promiscuous-mode\" data-glossary-term=\"promiscuous-"
+"mode\">**Promiscuous Mode**</span>"
+msgstr ""
+"<span id=\"term-promiscuous-mode\" data-glossary-term=\"promiscuous-"
+"mode\">**Mode promiscu**</span>"
 
 #: src/appendices/glossary.md:50
 msgid ""
@@ -12862,8 +12918,8 @@ msgstr ""
 "local-capture/sniff.md)."
 
 #: src/appendices/glossary.md:51
-msgid "**RTP**"
-msgstr "**RTP**"
+msgid "<span id=\"term-rtp\" data-glossary-term=\"rtp\">**RTP**</span>"
+msgstr "<span id=\"term-rtp\" data-glossary-term=\"rtp\">**RTP**</span>"
 
 #: src/appendices/glossary.md:51
 msgid ""
@@ -12877,8 +12933,8 @@ msgstr ""
 "Consulteu [VoIP: anàlisi SIP i RTP](../part5-advanced/voip.md)."
 
 #: src/appendices/glossary.md:52
-msgid "**SDP**"
-msgstr "**SDP**"
+msgid "<span id=\"term-sdp\" data-glossary-term=\"sdp\">**SDP**</span>"
+msgstr "<span id=\"term-sdp\" data-glossary-term=\"sdp\">**SDP**</span>"
 
 #: src/appendices/glossary.md:52
 msgid ""
@@ -12892,8 +12948,8 @@ msgstr ""
 "(../part5-advanced/voip.md)."
 
 #: src/appendices/glossary.md:53
-msgid "**SIMD**"
-msgstr "**SIMD**"
+msgid "<span id=\"term-simd\" data-glossary-term=\"simd\">**SIMD**</span>"
+msgstr "<span id=\"term-simd\" data-glossary-term=\"simd\">**SIMD**</span>"
 
 #: src/appendices/glossary.md:53
 msgid ""
@@ -12909,8 +12965,8 @@ msgstr ""
 "performance.md)."
 
 #: src/appendices/glossary.md:54
-msgid "**SIP**"
-msgstr "**SIP**"
+msgid "<span id=\"term-sip\" data-glossary-term=\"sip\">**SIP**</span>"
+msgstr "<span id=\"term-sip\" data-glossary-term=\"sip\">**SIP**</span>"
 
 #: src/appendices/glossary.md:54
 msgid ""
@@ -12924,8 +12980,8 @@ msgstr ""
 "[VoIP: anàlisi SIP i RTP](../part5-advanced/voip.md)."
 
 #: src/appendices/glossary.md:55
-msgid "**SMTP**"
-msgstr "**SMTP**"
+msgid "<span id=\"term-smtp\" data-glossary-term=\"smtp\">**SMTP**</span>"
+msgstr "<span id=\"term-smtp\" data-glossary-term=\"smtp\">**SMTP**</span>"
 
 #: src/appendices/glossary.md:55
 msgid ""
@@ -12938,8 +12994,8 @@ msgstr ""
 "advanced/email.md)."
 
 #: src/appendices/glossary.md:56
-msgid "**SNI**"
-msgstr "**SNI**"
+msgid "<span id=\"term-sni\" data-glossary-term=\"sni\">**SNI**</span>"
+msgstr "<span id=\"term-sni\" data-glossary-term=\"sni\">**SNI**</span>"
 
 #: src/appendices/glossary.md:56
 msgid ""
@@ -12953,8 +13009,8 @@ msgstr ""
 "[inspecció TLS](../part5-advanced/tls.md)."
 
 #: src/appendices/glossary.md:57
-msgid "**SRTP**"
-msgstr "**SRTP**"
+msgid "<span id=\"term-srtp\" data-glossary-term=\"srtp\">**SRTP**</span>"
+msgstr "<span id=\"term-srtp\" data-glossary-term=\"srtp\">**SRTP**</span>"
 
 #: src/appendices/glossary.md:57
 msgid ""
@@ -12982,8 +13038,12 @@ msgstr ""
 "autònom amb `lc tap`](../part3-distributed/tap.md)."
 
 #: src/appendices/glossary.md:59
-msgid "**TCP Performance Mode**"
-msgstr "**Mode de rendiment TCP**"
+msgid ""
+"<span id=\"term-tcp-performance-mode\" data-glossary-term=\"tcp-performance-"
+"mode\">**TCP Performance Mode**</span>"
+msgstr ""
+"<span id=\"term-tcp-performance-mode\" data-glossary-term=\"tcp-performance-"
+"mode\">**Mode de rendiment TCP**</span>"
 
 #: src/appendices/glossary.md:59
 msgid ""
@@ -13011,8 +13071,8 @@ msgstr ""
 "security.md)."
 
 #: src/appendices/glossary.md:61
-msgid "**TUI**"
-msgstr "**TUI**"
+msgid "<span id=\"term-tui\" data-glossary-term=\"tui\">**TUI**</span>"
+msgstr "<span id=\"term-tui\" data-glossary-term=\"tui\">**TUI**</span>"
 
 #: src/appendices/glossary.md:61
 msgid ""
@@ -13028,8 +13088,12 @@ msgstr ""
 "`lc watch`](../part2-local-capture/watch-local.md)."
 
 #: src/appendices/glossary.md:62
-msgid "**Virtual Interface (VIF)**"
-msgstr "**Interfície virtual (VIF)**"
+msgid ""
+"<span id=\"term-vif\" data-glossary-term=\"vif\">**Virtual Interface "
+"(VIF)**</span>"
+msgstr ""
+"<span id=\"term-vif\" data-glossary-term=\"vif\">**Interfície virtual "
+"(VIF)**</span>"
 
 #: src/appendices/glossary.md:62
 msgid ""
@@ -13044,8 +13108,8 @@ msgstr ""
 "[captura CLI amb `lc sniff`](../part2-local-capture/sniff.md)."
 
 #: src/appendices/glossary.md:63
-msgid "**WAL**"
-msgstr "**WAL**"
+msgid "<span id=\"term-wal\" data-glossary-term=\"wal\">**WAL**</span>"
+msgstr "<span id=\"term-wal\" data-glossary-term=\"wal\">**WAL**</span>"
 
 #: src/appendices/glossary.md:63
 msgid ""
@@ -13428,14 +13492,19 @@ msgstr ""
 
 #: src/part1-foundations/core-concepts.md:153
 msgid ""
-"**Processors** receive, aggregate, and analyze packets from multiple hunters"
+"<span data-term=\"processor\">**Processors**</span> receive, aggregate, and "
+"analyze packets from multiple hunters"
 msgstr ""
-"Els **processadors** reben, agreguen i analitzen paquets de diversos nodes "
-"Hunter"
+"Els <span data-term=\"processor\">**processadors**</span> reben, agreguen i "
+"analitzen paquets de diversos nodes Hunter"
 
 #: src/part1-foundations/core-concepts.md:154
-msgid "**Tap** combines both roles for single-machine deployments"
-msgstr "**Tap** combina tots dos rols per a desplegaments en una sola màquina"
+msgid ""
+"<span data-term=\"tap\">**Tap**</span> combines both roles for single-"
+"machine deployments"
+msgstr ""
+"<span data-term=\"tap\">**Tap**</span> combina tots dos rols per a "
+"desplegaments en una sola màquina"
 
 #: src/part1-foundations/core-concepts.md:156
 msgid ""
@@ -13820,12 +13889,13 @@ msgstr ""
 #: src/part1-foundations/introduction.md:20
 msgid ""
 "**Distributed Capture** Deploy lightweight hunter nodes across network "
-"segments and aggregate traffic at a central processor. Monitor everything "
-"from a single TUI."
+"segments and aggregate traffic at a central <span data-"
+"term=\"processor\">processor</span>. Monitor everything from a single TUI."
 msgstr ""
 "**Captura distribuïda** Desplegueu nodes Hunter lleugers en diversos "
-"segments de xarxa i agregueu el trànsit en un processador central. "
-"Superviseu-ho tot des d'una única TUI."
+"segments de xarxa i agregueu el trànsit en un <span data-"
+"term=\"processor\">processador</span> central. Superviseu-ho tot des d'una "
+"única TUI."
 
 #: src/part1-foundations/introduction.md:23
 msgid "Comparison with Similar Tools"
@@ -33506,3 +33576,71 @@ msgstr ""
 "protobuf són el 24, el 25 i el 26. Les claus dels motius de resultat "
 "continuen estables en la codificació d’estat; la telemetria només conté "
 "recomptes agregats."
+
+#: src/appendices/glossary.md:21
+msgid "<span id=\"term-dns\" data-glossary-term=\"dns\">**DNS**</span>"
+msgstr "<span id=\"term-dns\" data-glossary-term=\"dns\">**DNS**</span>"
+
+#: src/appendices/glossary.md:60
+msgid "<span id=\"term-tls\" data-glossary-term=\"tls\">**TLS**</span>"
+msgstr "<span id=\"term-tls\" data-glossary-term=\"tls\">**TLS**</span>"
+
+#: src/appendices/glossary.md:26
+msgid "<span id=\"term-http\" data-glossary-term=\"http\">**HTTP**</span>"
+msgstr "<span id=\"term-http\" data-glossary-term=\"http\">**HTTP**</span>"
+
+#: src/appendices/glossary.md:49
+msgid ""
+"<span id=\"term-radius\" data-glossary-term=\"radius\">**RADIUS**</span>"
+msgstr ""
+"<span id=\"term-radius\" data-glossary-term=\"radius\">**RADIUS**</span>"
+
+#: src/appendices/glossary.md:9
+msgid ""
+"<span id=\"term-auto-rotating-pcap\" data-glossary-term=\"auto-rotating-"
+"pcap\">**Auto-Rotating PCAP**</span>"
+msgstr ""
+"<span id=\"term-auto-rotating-pcap\" data-glossary-term=\"auto-rotating-"
+"pcap\">**PCAP amb rotació automàtica**</span>"
+
+#: src/appendices/glossary.md:19
+msgid "<span id=\"term-cuda\" data-glossary-term=\"cuda\">**CUDA**</span>"
+msgstr "<span id=\"term-cuda\" data-glossary-term=\"cuda\">**CUDA**</span>"
+
+#: src/appendices/glossary.md:28
+msgid ""
+"<span id=\"term-hunter\" data-glossary-term=\"hunter\">**Hunter**</span>"
+msgstr ""
+"<span id=\"term-hunter\" data-glossary-term=\"hunter\">**Hunter**</span>"
+
+#: src/appendices/glossary.md:45
+msgid ""
+"<span id=\"term-per-call-pcap\" data-glossary-term=\"per-call-pcap\">**Per-"
+"Call PCAP**</span>"
+msgstr ""
+"<span id=\"term-per-call-pcap\" data-glossary-term=\"per-call-pcap\">**PCAP "
+"per trucada**</span>"
+
+#: src/appendices/glossary.md:47
+msgid ""
+"<span id=\"term-processor\" data-glossary-term=\"processor\">**Processor**</"
+"span>"
+msgstr ""
+"<span id=\"term-processor\" data-glossary-"
+"term=\"processor\">**Processador**</span>"
+
+#: src/appendices/glossary.md:58
+msgid "<span id=\"term-tap\" data-glossary-term=\"tap\">**Tap**</span>"
+msgstr "<span id=\"term-tap\" data-glossary-term=\"tap\">**Tap**</span>"
+
+#: src/appendices/glossary.md:64
+msgid "<span id=\"term-x1\" data-glossary-term=\"x1\">**X1**</span>"
+msgstr "<span id=\"term-x1\" data-glossary-term=\"x1\">**X1**</span>"
+
+#: src/appendices/glossary.md:65
+msgid "<span id=\"term-x2\" data-glossary-term=\"x2\">**X2**</span>"
+msgstr "<span id=\"term-x2\" data-glossary-term=\"x2\">**X2**</span>"
+
+#: src/appendices/glossary.md:66
+msgid "<span id=\"term-x3\" data-glossary-term=\"x3\">**X3**</span>"
+msgstr "<span id=\"term-x3\" data-glossary-term=\"x3\">**X3**</span>"

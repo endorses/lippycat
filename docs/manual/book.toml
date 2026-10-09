@@ -17,8 +17,9 @@ additional-js = [
     "mermaid.min.js",
     "mermaid-init.js",
     "theme/language-selector.js",
+    "theme/term-hints.js",
 ]
-additional-css = ["theme/language-selector.css"]
+additional-css = ["theme/language-selector.css", "theme/term-hints.css"]
 
 [preprocessor.mermaid]
 command = "mdbook-mermaid"

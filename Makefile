@@ -273,7 +273,7 @@ manual-translations:
 	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 docs/manual/tools/manual.py update
 
 manual-check:
-	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 -m unittest discover -s docs/manual/tools -p 'test_manual.py'
+	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 -m unittest discover -s docs/manual/tools -p 'test_*.py'
 	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 docs/manual/tools/manual.py check
 
 manual-clean:

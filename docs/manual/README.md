@@ -67,6 +67,81 @@ Set this up after the new Pages domain is serving successfully. Test existing
 chapter URLs separately: the basic domain-forwarding documentation does not
 guarantee the path mapping described above.
 
+## Glossary hints
+
+The assembled manual shows glossary definitions on hover or keyboard focus.
+Click, tap, Enter, or Space keeps a definition open; activate the term again,
+press Escape, use the close control, or click elsewhere to dismiss it. The popup
+includes a link to the full glossary entry. Its definition and controls use the
+current edition's language.
+
+Definitions have a single source: the glossary table in
+`src/appendices/glossary.md` and its existing translated PO entries. Each term
+cell has an inline marker with a stable identifier, for example:
+
+```html
+<span id="term-bpf" data-glossary-term="bpf">**BPF**</span>
+```
+
+Keep the identifiers and attributes identical in every translation. They provide
+glossary fragment links and connect definitions to `term-hints.json`, which stores
+matching policy without duplicating definitions. To add a term, add its glossary
+row and a corresponding policy entry, then update and review every translation:
+
+```json
+"bpf": {
+  "automatic": true,
+  "caseSensitive": true,
+  "aliases": {}
+}
+```
+
+Automatic matching uses the translated label plus any aliases for that language.
+Aliases can be configured as `"aliases": {"en": ["another name"]}`; supply other
+language aliases where needed. Matching uses complete terms, longest aliases
+first. Case-sensitive matching is appropriate for most abbreviations. Ambiguous
+words such as filter, processor, and tap use `"automatic": false`; annotate a
+particular occurrence when it needs an explanation:
+
+```html
+<span data-term="processor">processor</span>
+```
+
+Translate the visible word while retaining `data-term` and its identifier. Explicit
+annotations are always eligible; only the first automatic occurrence per term in
+a chapter is enhanced. To suppress automatic matching in a passage, use:
+
+```html
+<span data-no-term-hints>Text without automatic glossary hints.</span>
+```
+
+Existing links, headings, code, diagrams, form controls, and the glossary and print
+pages are excluded. Put annotations in ordinary prose, outside these elements.
+The build validates identifiers and cross-language annotation attributes. Missing
+definitions, duplicate identifiers, and conflicting aliases fail the build with
+context. Popup labels are configured under `termHints` in `languages.json` when
+adding another edition.
+
+`make manual` generates an edition-specific `term-hints.json` beside each edition's
+HTML after mdBook renders it. These dictionaries and the book output are ignored.
+Use `make manual-serve` to preview hints; a bare `mdbook build` does not run this
+post-build step. JavaScript-disabled readers still have the complete glossary.
+
+`make manual-check` runs Python regression checks, including dictionary validation.
+After building all editions, run the separate browser suite with an installed
+Playwright module and Chromium:
+
+```bash
+PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
+  CHROMIUM_EXECUTABLE=/usr/bin/chromium \
+  node docs/manual/tools/test_term_hints_browser.cjs
+```
+
+The browser suite serves local fixtures and the generated manual, checks mouse,
+keyboard, touch, translations, exclusions, themes, and failure behavior, and closes
+its server and browser when finished. Follow its output for screenshot artifacts
+and remove temporary QA files after review.
+
 ## Updating translations
 
 After editing the English source:

@@ -11,8 +11,8 @@ Implementation branch: `docs/manual-term-hints`.
 
 This plan covers the manual build, glossary metadata, browser interaction,
 translations, contributor documentation, and validation. It does not change the
-lippycat application. The current task creates this plan only; implementation
-tasks below remain unchecked until their results have been verified.
+lippycat application. Implementation and validation are complete. Completed tasks below are backed by
+the recorded build, translation, browser, and visual checks.
 
 ## Existing integration points
 
@@ -119,39 +119,39 @@ do not upgrade unrelated manual dependencies as part of this feature.
 
 ## Implementation checklist
 
-- [ ] Add stable glossary identifiers and matching metadata; update and review
+- [x] Add stable glossary identifiers and matching metadata; update and review
       affected German and Catalan catalog entries.
-- [ ] Implement per-edition dictionary generation and validation in the manual
+- [x] Implement per-edition dictionary generation and validation in the manual
       build, including stable glossary destinations and existing verification.
-- [ ] Implement safe automatic matching, explicit annotations, exclusions, and
+- [x] Implement safe automatic matching, explicit annotations, exclusions, and
       initialization that can run repeatedly without duplicating hints.
-- [ ] Add the accessible popup interaction and responsive styling, register assets
+- [x] Add the accessible popup interaction and responsive styling, register assets
       in `book.toml`, and localize its controls for every configured edition.
-- [ ] Document contributor usage in `docs/manual/README.md`; if reader-facing
+- [x] Document contributor usage in `docs/manual/README.md`; if reader-facing
       manual text changes, translate it in every configured language.
-- [ ] Add focused regression checks for extraction, matching boundaries, language
+- [x] Add focused regression checks for extraction, matching boundaries, language
       isolation, interaction state, and accessibility behavior.
-- [ ] Run the validation below, inspect desktop and mobile behavior, and record
+- [x] Run the validation below, inspect desktop and mobile behavior, and record
       results and any genuine limitations in this plan.
 - [ ] Format changed files, check off only verified tasks, and commit the code,
       translations, documentation, and updated plan on this branch.
 
 ## Validation and completion
 
-- [ ] Run the existing Python manual tests plus focused dictionary tests covering
+- [x] Run the existing Python manual tests plus focused dictionary tests covering
       Unicode, punctuation, missing/duplicate IDs, alias collisions, and nested
       chapter URLs in root and non-root editions.
-- [ ] Run `make manual-check` and `make manual`; verify affected translations have
+- [x] Run `make manual-check` and `make manual`; verify affected translations have
       no missing or fuzzy entries. Preserve all existing cross-edition checks.
-- [ ] Exercise browser checks for hover, movement into the popup, pinned click,
+- [x] Exercise browser checks for hover, movement into the popup, pinned click,
       repeated activation, outside dismissal, switching terms, and Escape.
-- [ ] Exercise keyboard-only use, focus restoration, accessible relationships,
+- [x] Exercise keyboard-only use, focus restoration, accessible relationships,
       touch input, and dismissal without immediate synthetic-event reopening.
-- [ ] Inspect representative English, German, and Catalan chapters, including
+- [x] Inspect representative English, German, and Catalan chapters, including
       abbreviations, translated terms, explicit annotations, and exclusions.
-- [ ] Inspect narrow screens, zoom, every mdBook theme, long definitions, nested
+- [x] Inspect narrow screens, zoom, every mdBook theme, long definitions, nested
       chapter navigation, language switching, search, and the print edition.
-- [ ] Check that code, links, diagrams, headings, and glossary definitions remain
+- [x] Check that code, links, diagrams, headings, and glossary definitions remain
       unchanged by matching; check no-JavaScript and failed-data loading behavior.
 
 Completion means the requested hover and click/tap hints work across all configured
@@ -168,3 +168,38 @@ and optional Markdown transformation in its
 [preprocessor configuration](https://rust-lang.github.io/mdBook/format/configuration/preprocessors.html).
 The proposed implementation uses existing assets and the project's build wrapper;
 it does not require modifying mdBook itself.
+
+## Verified results
+
+`make manual-check` passes all 22 Python regression checks. Both German and
+Catalan have 5,592/5,592 current messages translated, also verified with
+`python3 docs/manual/tools/manual.py check --require-complete`.
+`make manual` builds all three editions and retains the existing chapter,
+heading-ID, example, code-span, and link comparisons, with annotation checks added.
+Every edition has the same 60 unique glossary identifiers, 57 automatically
+matched terms, and three explicit-only terms (filter, processor, and tap).
+
+The standalone Playwright suite passes all 12 browser checks against the final
+rebuilt manual in Chromium. It covers Unicode and identifier boundaries, longest
+aliases, exclusions, explicit translated processor/tap annotations, repeated
+initialization, hover, pointer movement into the popup, pinned activation,
+dismissal, keyboard and focus behavior, touch and synthetic mouse suppression,
+loading failure, and no-JavaScript reading. Actual edition checks follow glossary
+fragments, switch languages, search, and verify print IDs and exclusions.
+
+Viewport checks cover 320px screens, long scrolling definitions, all five mdBook
+themes, enlarged fonts, Chromium page scaling, and a pinned popup whose trigger
+scrolls offscreen. Screenshots of all five themes and desktop/mobile Catalan,
+English, and German pages were inspected. Verification caught and fixed a long
+popup covering its trigger and a German footer link splitting inside a word;
+focused regressions verify their corrected behavior. Temporary QA screenshots
+are removed after review.
+
+The bounded closure review reached `CLOSED`: the independent review found no
+material implementation defect, and the one visual finding was fixed and verified
+with an integrated review. No numerical performance gates or dependencies were
+added. Browser verification uses Chromium with emulated touch; physical mobile
+hardware and screen-reader software were not used. The local mdBook 0.5.2 tool
+reports the existing warning that Gettext was built against 0.5.4; the installed
+version mismatch did not prevent any checks or builds, and shared tool pins remain
+unchanged.

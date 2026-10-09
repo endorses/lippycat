@@ -47,6 +47,7 @@ lc list interfaces
 Capturing packets requires elevated privileges because it means reading all traffic on an interface, not just traffic destined for your application.
 
 **Option 1: Run as root**
+
 <!-- i18n:skip -->
 
 ```bash
@@ -54,6 +55,7 @@ sudo lc sniff -i eth0
 ```
 
 **Option 2: Grant capability (recommended for production)**
+
 <!-- i18n:skip -->
 
 ```bash
@@ -150,7 +152,7 @@ graph LR
 ```
 
 - **Hunters** capture packets at the network edge and forward them via gRPC
-- **Processors** receive, aggregate, and analyze packets from multiple hunters
-- **Tap** combines both roles for single-machine deployments
+- <span data-term="processor">**Processors**</span> receive, aggregate, and analyze packets from multiple hunters
+- <span data-term="tap">**Tap**</span> combines both roles for single-machine deployments
 
 This architecture is covered in detail in [Part III: Distributed Capture](../part3-distributed/architecture.md). For now, just know that all local capture concepts (interfaces, filters, protocols) apply equally in distributed mode.

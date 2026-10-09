@@ -16,6 +16,8 @@ from functools import partial
 from html.parser import HTMLParser
 from pathlib import Path
 
+import term_hints
+
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "book"
 
@@ -66,6 +68,7 @@ class Chapter(HTMLParser):
         self.links = []
         self.examples = []
         self.code_spans = []
+        self.term_markers = term_hints.annotation_fingerprint(path.read_text())
         self.in_main = False
         self.in_pre = False
         self.in_code = False
@@ -120,20 +123,30 @@ def verify_build(editions):
             translated = Chapter(OUTPUT / edition["path"] / chapter)
             if translated.language != edition["code"]:
                 raise ValueError(f"{edition['code']}: wrong HTML language in {chapter}")
-            for field in ("heading_ids", "examples", "links", "code_spans"):
+            for field in (
+                "heading_ids",
+                "examples",
+                "links",
+                "code_spans",
+                "term_markers",
+            ):
                 before, after = getattr(original, field), getattr(translated, field)
                 if field in ("links", "code_spans"):
                     before, after = sorted(before), sorted(after)
                 if before != after:
                     raise ValueError(f"{edition['code']}: changed {field} in {chapter}")
     print(
-        "Verified chapter paths, heading IDs, examples, code spans, and links across editions",
+        "Verified chapter paths, heading IDs, examples, code spans, links, and term annotations across editions",
         flush=True,
     )
 
 
 def build():
     editions = languages()
+    policy = term_hints.load_policy(
+        ROOT / "term-hints.json", {edition["code"] for edition in editions}
+    )
+    glossary_ids = None
     # The root edition must run first: its clean build removes the output tree.
     with tempfile.TemporaryDirectory(prefix="lippycat-manual-") as directory:
         for edition in editions:
@@ -160,6 +173,10 @@ def build():
             destination = OUTPUT / edition["path"]
             run(["mdbook", "build", ROOT, "-d", destination], env=env)
             shutil.copyfile(ROOT / "languages.json", destination / "languages.json")
+            edition_ids = term_hints.generate(destination, edition, policy)
+            if glossary_ids is not None and edition_ids != glossary_ids:
+                raise ValueError(f"{edition['code']}: changed glossary identifiers")
+            glossary_ids = edition_ids
     verify_build(editions)
 
 
@@ -260,6 +277,12 @@ def check(require_complete=False):
                     raise ValueError(
                         f"{edition['code']}: changed code or link target in {source!r}"
                     )
+            if term_hints.annotation_fingerprint(
+                source
+            ) != term_hints.annotation_fingerprint(translation):
+                raise ValueError(
+                    f"{edition['code']}: changed term annotations in {source!r}"
+                )
 
 
 def serve(port):

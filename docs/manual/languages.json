@@ -21,7 +21,11 @@
       "Copy to clipboard": "Copia al porta-retalls",
       "Copied!": "Copiat!"
     },
-    "selectorLabel": "Selecciona la llengua"
+    "selectorLabel": "Selecciona la llengua",
+    "termHints": {
+      "glossary": "Llegiu l’entrada del glossari",
+      "close": "Tanca la definició"
+    }
   },
   {
     "code": "en",
@@ -29,7 +33,11 @@
     "path": "en/",
     "title": "lippycat 🫦🐱 Manual",
     "description": "Comprehensive guide to network traffic capture and analysis with lippycat",
-    "selectorLabel": "Select language"
+    "selectorLabel": "Select language",
+    "termHints": {
+      "glossary": "Read glossary entry",
+      "close": "Close definition"
+    }
   },
   {
     "code": "de",
@@ -53,6 +61,10 @@
       "Copy to clipboard": "In die Zwischenablage kopieren",
       "Copied!": "Kopiert!"
     },
-    "selectorLabel": "Sprache auswählen"
+    "selectorLabel": "Sprache auswählen",
+    "termHints": {
+      "glossary": "Glossareintrag lesen",
+      "close": "Definition schließen"
+    }
   }
 ]

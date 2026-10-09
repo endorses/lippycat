@@ -1,0 +1,310 @@
+{
+  "admf": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "aho-corasick": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "auto-rotating-pcap": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "bpf": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "build-tag": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "ca": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "call-id": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "capture-interface": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "cc": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "circuit-breaker": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "codec": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "command-hook": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "cuda": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "disk-overflow-buffer": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "dns": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "etsi": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "filter": {
+    "automatic": false,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "flow-control": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "grpc": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "http": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "hub-and-spoke": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "hunter": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {
+      "en": ["hunters"],
+      "de": ["Hunter-Knoten"],
+      "ca": ["nodes Hunter"]
+    }
+  },
+  "hierarchical-mode": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "imap": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "iri": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "ja3": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "ja3s": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "ja4": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "li": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "libpcap": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "mdf": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "mdns": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "mos": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "mtls": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "ne": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "opencl": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "p-asserted-identity": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "pcap": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "per-call-pcap": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "pop3": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "processor": {
+    "automatic": false,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "production-mode": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "radius": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "promiscuous-mode": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "rtp": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "sdp": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "simd": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "sip": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "smtp": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "sni": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "srtp": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "tap": {
+    "automatic": false,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "tcp-performance-mode": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {}
+  },
+  "tls": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "tui": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "vif": {
+    "automatic": true,
+    "caseSensitive": false,
+    "aliases": {
+      "en": ["VIF", "virtual interface"],
+      "de": ["VIF", "virtuelle Schnittstelle"],
+      "ca": ["VIF", "interfície virtual"]
+    }
+  },
+  "wal": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "x1": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "x2": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  },
+  "x3": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {}
+  }
+}

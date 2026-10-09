@@ -1,6 +1,6 @@
 # Replay admission and LI delivery reliability implementation plan
 
-**Status:** implemented and locally verified; commit and GitHub verification pending.
+**Status:** implemented, committed and locally verified; GitHub verification pending.
 **Date:** 2026-10-09
 
 ## Objective
@@ -280,7 +280,7 @@ Primary files: `.github/workflows/ci.yml`, `.github/workflows/security.yml`,
       and records successful results for the final implementation revision. Attribute
       failures to the affected configuration rather than relying on aggregate green
       status or earlier revisions.
-- [ ] Check off tasks only after their behavior is verified. Record concise test
+- [x] Check off tasks only after their behavior is verified. Record concise test
       evidence and any explicit remaining operational limits in this plan, then
       commit the implementation and updated plan. Preserve previously completed
       plans; do not relabel this new scope as work they failed to complete.
@@ -337,7 +337,7 @@ Local verification used Go 1.27.2 on the final repaired implementation.
 | Build partitions | `make build-matrix` and `make verify-no-li` pass on the repaired revision. CUDA link qualification is unchanged and remains outside this scope. |
 | Lint and workflow syntax | golangci-lint passes with `all` and `all,li`; actionlint passes for both changed workflows; generated bindings and changed Go files are formatted; whitespace checks pass. |
 | Security | gosec completes for `all` and `all,li` under the existing scan policy with unchanged source findings; govulncheck reports no reachable vulnerabilities for either configuration. |
-| Manual | `make manual-check` passes 21 checks and reports all 5,597 current messages translated in each German/Catalan catalog; `make manual` builds and validates all three language editions using the project-pinned mdBook. |
+| Manual | `make manual-check` passes all tool tests and reports full current-message coverage in both German/Catalan catalogs; `make manual` builds and validates all three language editions using the project-pinned mdBook. Both were rerun successfully on the isolated implementation branch. |
 | Compatibility and privacy | YAML/environment defaults, malformed/nonpositive timeouts, additive protobuf/status round trips, non-LI exclusion, and sanitized documentation/fixtures are verified. |
 
 One bounded closure review found loss of receipt provenance after staging expiry

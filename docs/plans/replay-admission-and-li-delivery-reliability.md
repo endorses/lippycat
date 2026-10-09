@@ -1,6 +1,6 @@
 # Replay admission and LI delivery reliability implementation plan
 
-**Status:** implemented, committed and locally verified; GitHub verification pending.
+**Status:** implemented, committed and verified locally and in GitHub.
 **Date:** 2026-10-09
 
 ## Objective
@@ -276,7 +276,7 @@ Primary files: `.github/workflows/ci.yml`, `.github/workflows/security.yml`,
       `make verify-no-li`, applicable lint, and both tagged security scans.
 - [x] Run `make manual-check` and `make manual` after documentation changes, and
       check whitespace and sanitized fixture/documentation content.
-- [ ] Verify GitHub executes the intended LI tests and both security configurations
+- [x] Verify GitHub executes the intended LI tests and both security configurations
       and records successful results for the final implementation revision. Attribute
       failures to the affected configuration rather than relying on aggregate green
       status or earlier revisions.
@@ -339,12 +339,12 @@ Local verification used Go 1.27.2 on the final repaired implementation.
 | Security | gosec completes for `all` and `all,li` under the existing scan policy with unchanged source findings; govulncheck reports no reachable vulnerabilities for either configuration. |
 | Manual | `make manual-check` passes all tool tests and reports full current-message coverage in both German/Catalan catalogs; `make manual` builds and validates all three language editions using the project-pinned mdBook. Both were rerun successfully on the isolated implementation branch. |
 | Compatibility and privacy | YAML/environment defaults, malformed/nonpositive timeouts, additive protobuf/status round trips, non-LI exclusion, and sanitized documentation/fixtures are verified. |
+| GitHub implementation revision | `82bb68eb3ee88b9603ae4a48ff71cf70c8f24279`: [CI](https://github.com/endorses/lippycat/actions/runs/37925006514), [Security](https://github.com/endorses/lippycat/actions/runs/37925006504), and [Integration Tests](https://github.com/endorses/lippycat/actions/runs/37925006516) all pass. Both full race/coverage suites executed successfully; both tagged security scans, SARIF uploads and vulnerability checks succeeded; ordinary, Docker and privileged eBPF integration all passed. |
 
 One bounded closure review found loss of receipt provenance after staging expiry
 or eviction. The production handoff now carries an immutable receipt, and bridge
 and real-orchestrator regressions retain the original counterexample. The affected
 post-fix review found no remaining material defect; required local checks pass.
-GitHub results for the implementation revision remain to be recorded.
 
 The first GitHub LI suite exposed two existing test synchronization races.
 The destination-restart test now waits for the first sender outcome and empty
@@ -355,4 +355,7 @@ journal, and no longer races a short task expiry against encrypted commits.
 Exact FIFO, delivery counts, generation revocation and persisted-product
 assertions remain intact. The restart and write-outcome regressions pass 100
 race repetitions and 30 repetitions with atomic coverage; the processor
-regression passes 20 race repetitions. Production behavior is unchanged.
+regression passes 20 race repetitions. The full LI suite also passes locally
+with race detection and atomic coverage after these fixes. Production behavior
+is unchanged. The final verification-record commit changes only this plan;
+the tested implementation and tests remain identical to the revision above.

@@ -133,7 +133,7 @@ do not upgrade unrelated manual dependencies as part of this feature.
       isolation, interaction state, and accessibility behavior.
 - [x] Run the validation below, inspect desktop and mobile behavior, and record
       results and any genuine limitations in this plan.
-- [ ] Format changed files, check off only verified tasks, and commit the code,
+- [x] Format changed files, check off only verified tasks, and commit the code,
       translations, documentation, and updated plan on this branch.
 
 ## Validation and completion
@@ -203,3 +203,6 @@ hardware and screen-reader software were not used. The local mdBook 0.5.2 tool
 reports the existing warning that Gettext was built against 0.5.4; the installed
 version mismatch did not prevent any checks or builds, and shared tool pins remain
 unchanged.
+
+Implementation and the verified plan were committed as `08d5c2ec`. This final
+plan update records the commit task after verifying that commit succeeded.

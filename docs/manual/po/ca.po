@@ -13458,8 +13458,8 @@ msgid "Requirements:"
 msgstr "Requisits:"
 
 #: src/part1-foundations/installation.md:7
-msgid "Go 1.25 or later"
-msgstr "Go 1.25 o posterior"
+msgid "Go 1.26 or later"
+msgstr "Go 1.26 o posterior"
 
 #: src/part1-foundations/installation.md:8
 msgid "Make"

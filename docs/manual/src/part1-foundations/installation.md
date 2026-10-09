@@ -4,7 +4,7 @@
 
 Requirements:
 
-- Go 1.25 or later
+- Go 1.26 or later
 - Make
 - libpcap development headers (`libpcap-dev` on Debian/Ubuntu, `libpcap-devel` on RHEL/Fedora)
 

@@ -1,7 +1,7 @@
 # lippycat 🫦🐱
 
 [![Version](https://img.shields.io/badge/version-0.12.2-blue)](CHANGELOG.md)
-[![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go)](go.mod)
+[![Go Version](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey?logo=linux)](#installation)
 
@@ -52,7 +52,7 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - libpcap (`libpcap-dev` on Ubuntu/Debian)
 - Root/sudo for live capture
 

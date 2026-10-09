@@ -2,7 +2,6 @@ package voip
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"testing"
 	"time"
@@ -253,7 +252,7 @@ func TestUserSurveillanceFilteringWithTCP(t *testing.T) {
 }
 
 func TestTCPPCAPFileCreation(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "lippycat-test")
+	tempDir, err := os.MkdirTemp("", "lippycat-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 

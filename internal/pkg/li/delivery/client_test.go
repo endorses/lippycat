@@ -819,6 +819,13 @@ func TestDeliveryBufferedAcrossDestinationRestart(t *testing.T) {
 	xid := uuid.New()
 	require.NoError(t, client.SendX2(xid, []uuid.UUID{did}, []byte("0001")))
 	assert.Equal(t, "0001", server.Receive(t, time.Second))
+	// Receiving the frame can precede the sender's deadline cleanup and
+	// outcome classification. Restart only after local success is recorded;
+	// closing during an unfinished write correctly permits an uncertain retry.
+	require.Eventually(t, func() bool {
+		stats := client.Stats()
+		return stats.X2Sent == 1 && stats.QueueDepth == 0
+	}, time.Second, time.Millisecond, "first delivery must complete before the destination restarts")
 
 	server.Stop()
 	require.Eventually(t, func() bool { return !manager.IsConnected(did) }, time.Second, 10*time.Millisecond)

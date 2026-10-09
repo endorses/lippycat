@@ -423,20 +423,28 @@ func TestProcessorPersistentX3NarrowingCommitWithoutNewPacket(t *testing.T) {
 	f.captureAndClose(t, p)
 	before, err := p.liManager.GetTaskDetails(f.xid)
 	require.NoError(t, err)
-	end := time.Now().Add(80 * time.Millisecond).UTC()
+	// Narrow the authorization window without racing its actual expiry against
+	// encrypted control commits. This test covers generation revocation; expiry
+	// has separate coverage.
+	end := time.Now().Add(time.Minute).UTC()
 	require.NoError(t, p.liManager.ModifyTask(f.xid, &li.TaskModification{EndTime: &end}))
 	current, err := p.liManager.GetTaskDetails(f.xid)
 	require.NoError(t, err)
 	require.Greater(t, current.ActivationGeneration, before.ActivationGeneration, "narrowing creates a new authorization generation")
 	// No new packet is needed to revoke buffered product from the old generation.
 	require.Eventually(t, func() bool { return liDeliveryClient.X3JournalStats().Persisted == 0 }, time.Second, 5*time.Millisecond)
-	extended := time.Now().Add(time.Minute).UTC()
+	extended := time.Now().Add(time.Hour).UTC()
 	require.NoError(t, p.liManager.ModifyTask(f.xid, &li.TaskModification{EndTime: &extended}))
 	encodedBefore := p.getLIEncodingStats().X3Encoded
 	packet := dirRTPPacket(52, dirUEAddr, dirUEPort, dirCoreAddr, dirCorePort)
 	packet.Timestamp, packet.VoIPData.CallID = time.Now().UTC(), "new-call-after-cutoff"
 	p.processLIPacketWithProvenance(packet, nil, []string{"li-" + f.xid.String() + "-0"})
 	require.Equal(t, encodedBefore+1, p.getLIEncodingStats().X3Encoded, "fresh capture reaches the immutable client gate after the metadata extension")
+	// Journal flush only waits for admitted journal work. Finalize the new call
+	// first so its accepted RTP has left the asynchronous reorder buffer.
+	result := p.callLifecycle.Finalize(packet.VoIPData.CallID, CallFinalizationProtocolComplete)
+	require.True(t, result.Finalized)
+	require.NoError(t, result.Err)
 	require.NoError(t, liDeliveryClient.FlushPersistence(context.Background()))
 	require.Equal(t, 1, liDeliveryClient.X3JournalStats().Persisted, "extension admits fresh capture in the new generation without resurrecting revoked backlog")
 	require.NoError(t, p.Shutdown())

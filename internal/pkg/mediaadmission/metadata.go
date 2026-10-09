@@ -27,6 +27,7 @@ type DialogKey struct {
 	CSeqValid                           bool
 	SDPDigest                           [32]byte
 	ReliableResponse                    bool
+	ReliableEvidence                    bool
 	RSeq                                uint32
 	RAckValid                           bool
 	RAckRSeq                            uint32
@@ -37,6 +38,10 @@ type DialogKey struct {
 	CSeqMaximum                         uint64
 	LifetimeSession, LifetimeGeneration uint64
 	CapturedAtUnixNano                  int64
+	// Observation eligibility survives delayed consumption and guard expiry.
+	ReplayRejected           bool
+	ReplayReceiptMissing     bool
+	ReplayPressureGeneration uint64
 }
 
 type MetadataStats struct {
@@ -60,16 +65,42 @@ type SelectedDerivationUsage struct{ Contexts, Bytes, Endpoints int }
 // ReserveReplayGuards accounts a separate process-wide pool, shared by domain
 // bridges. Retirement history must never take capacity from live derivations.
 func (s *MetadataStore) ReserveReplayGuards(old, next SelectedDerivationUsage) error {
+	return s.reserveReplay(old, next, false)
+}
+
+// ReserveReplayOverflow uses the reserved identity-history share of the same
+// aggregate replay budget, never an additional pool. Both entry types charge
+// 128 bytes. With fewer than two entries there is no overflow reserve.
+func (s *MetadataStore) ReserveReplayOverflow(old, next SelectedDerivationUsage) error {
+	return s.reserveReplay(old, next, true)
+}
+
+func (s *MetadataStore) reserveReplay(old, next SelectedDerivationUsage, overflow bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if old.Contexts < 0 || old.Bytes < 0 || next.Contexts < 0 || next.Bytes < 0 || old.Contexts > s.stats.ReplayContexts || old.Bytes > s.stats.ReplayBytes {
+	usage := &s.replayExact
+	if overflow {
+		usage = &s.replayOverflow
+	}
+	if old.Contexts < 0 || old.Bytes < 0 || next.Contexts < 0 || next.Bytes < 0 || old.Contexts > usage.Contexts || old.Bytes > usage.Bytes {
 		return errors.New("invalid replay guard reservation")
 	}
+	entries := min(s.config.ReplayGuardCapacity, s.config.ReplayGuardBytes/128)
+	reserve := 0
+	if entries >= 2 {
+		reserve = max(1, entries/4)
+	}
+	limit := entries - reserve
+	if overflow {
+		limit = reserve
+	}
+	classContexts, classBytes := usage.Contexts-old.Contexts+next.Contexts, usage.Bytes-old.Bytes+next.Bytes
 	contexts := s.stats.ReplayContexts - old.Contexts + next.Contexts
 	bytes := s.stats.ReplayBytes - old.Bytes + next.Bytes
-	if contexts > s.config.ReplayGuardCapacity || bytes > s.config.ReplayGuardBytes {
+	if classContexts > limit || classBytes > limit*128 || contexts > s.config.ReplayGuardCapacity || bytes > s.config.ReplayGuardBytes {
 		return ErrCapacity
 	}
+	usage.Contexts, usage.Bytes = classContexts, classBytes
 	s.stats.ReplayContexts, s.stats.ReplayBytes = contexts, bytes
 	return nil
 }
@@ -114,12 +145,13 @@ type MetadataRecord struct {
 }
 
 type MetadataStore struct {
-	byCall  map[pendingCall]map[DialogKey]struct{}
-	mu      sync.Mutex
-	config  Config
-	entries map[DialogKey]*list.Element
-	oldest  *list.List
-	stats   MetadataStats
+	replayExact, replayOverflow SelectedDerivationUsage
+	byCall                      map[pendingCall]map[DialogKey]struct{}
+	mu                          sync.Mutex
+	config                      Config
+	entries                     map[DialogKey]*list.Element
+	oldest                      *list.List
+	stats                       MetadataStats
 }
 
 func NewMetadataStore(config Config) (*MetadataStore, error) {
@@ -133,7 +165,7 @@ func NewMetadataStore(config Config) (*MetadataStore, error) {
 // retained endpoint/map storage, and per-entry/list overhead. It bounds charged
 // retained state; the Go allocator's runtime bookkeeping is not an RSS guarantee.
 func metadataBytes(key DialogKey, endpoints int) int {
-	return 328 + len(key.CallID) + len(key.FromTag) + len(key.ToTag) + len(key.Branch) + len(key.CSeqMethod) + endpoints*128
+	return 352 + len(key.CallID) + len(key.FromTag) + len(key.ToTag) + len(key.Branch) + len(key.CSeqMethod) + endpoints*128
 }
 
 func (s *MetadataStore) Observe(key DialogKey, endpoints []EndpointKey, now time.Time) error {

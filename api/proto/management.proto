@@ -747,6 +747,12 @@ message LICallCorrelationStats {
     uint64 deferred_packets = 24;
     uint64 deferred_bytes = 25;
     uint64 deferred_rejected = 26;
+    // Logical decisions released because their fixed persistence wait expired.
+    uint64 wait_timeouts = 27;
+    // Logical decisions released by bounded deferred-queue pressure.
+    uint64 pressure_releases = 28;
+    // Close attempts whose shared shutdown budget expired before owner cleanup.
+    uint64 shutdown_timeouts = 29;
 }
 
 // Diagnostic details are bounded to the first 32 failures per snapshot. Counts

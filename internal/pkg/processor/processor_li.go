@@ -133,6 +133,7 @@ var _ li.FilterPusher = (*processorFilterPusher)(nil)
 type liStoragePreparation struct {
 	correlationContext  uuid.UUID
 	correlationStop     chan struct{}
+	correlationDone     chan struct{}
 	correlationStopOnce sync.Once
 	correlation         *li.CallCorrelator
 	correlationStore    *li.CallCorrelationStore
@@ -995,9 +996,19 @@ func (p *Processor) stopLIManager() (result error) {
 				close(p.liStorage.correlationStop)
 			}
 		})
-		p.liStorage.correlationWorkers.Wait()
 		if p.liStorage.correlation != nil {
-			result = errors.Join(result, p.liStorage.correlation.Close())
+			ctx, cancel := context.WithTimeout(context.Background(), p.config.LICallCorrelation.Normalized().ShutdownTimeout)
+			// Close fences publication immediately and waits on the same physical
+			// owner as maintenance. A maintenance Save must not delay entering it.
+			result = errors.Join(result, p.liStorage.correlation.CloseContext(ctx))
+			if p.liStorage.correlationDone != nil {
+				select {
+				case <-p.liStorage.correlationDone:
+				case <-ctx.Done():
+					result = errors.Join(result, ctx.Err())
+				}
+			}
+			cancel()
 		}
 	}
 	if p.liManager == nil {

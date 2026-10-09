@@ -17,6 +17,9 @@ import (
 // the domain until one window after the last failure, never until restart.
 type lifetimeProofHistory struct {
 	initiators     map[[32]byte]retiredInitiatorProof
+	overflow       map[[32]byte]time.Time
+	generation     uint64
+	invalidThrough uint64
 	blockedUntil   time.Time
 	pressureCutoff uint64
 	unrecorded     uint64
@@ -91,7 +94,7 @@ func (b *Bridge) rememberLifetimeLocked(callID string, old *selectedCall) error 
 			candidates[hash] = candidate
 		}
 	}
-	now := time.Now()
+	now := b.now()
 	b.expireLifetimeProofLocked(now)
 	if b.proofHistory.initiators == nil {
 		b.proofHistory.initiators = make(map[[32]byte]retiredInitiatorProof)
@@ -106,10 +109,29 @@ func (b *Bridge) rememberLifetimeLocked(callID string, old *selectedCall) error 
 		}
 		if reservationErr != nil {
 			b.proofHistory.unrecorded++
+			generationExhausted := false
 			if !now.Before(b.proofHistory.blockedUntil) {
 				b.proofHistory.pressureCutoff = b.nextMetadata
+				if b.proofHistory.generation == ^uint64(0) {
+					generationExhausted = true
+				} else {
+					b.proofHistory.generation++
+				}
 			}
 			b.proofHistory.blockedUntil = now.Add(b.cfg.Limits.ReplayWindow)
+			retainedIdentity := b.rememberOverflowIdentityLocked(callID, b.proofHistory.blockedUntil)
+			if !retainedIdentity || generationExhausted {
+				b.proofHistory.invalidThrough = b.proofHistory.generation
+				// History loss invalidates every observation from this pressure
+				// generation, including metadata not yet selected. Retained healthy
+				// authoritative derivations remain independent of this quarantine.
+				for _, call := range b.selected {
+					if call.quarantine != nil {
+						b.releaseDerivations(call.quarantine)
+						call.quarantine = nil
+					}
+				}
+			}
 			b.needsSnapshot = true
 			capacityErr = errors.Join(mediaadmission.ErrCapacity, b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, mediaadmission.ErrCapacity))
 			if b.proofHistory.lastWarning.IsZero() || now.Sub(b.proofHistory.lastWarning) >= b.cfg.Limits.RetryInterval {
@@ -136,6 +158,21 @@ func (b *Bridge) checkKeyLifetimeLocked(call *selectedCall, key mediaadmission.D
 	if call == nil {
 		return false
 	}
+	if key.ReplayReceiptMissing {
+		call.replayEvidenceMissing = true
+		call.replayMissingCutoff = max(call.replayMissingCutoff, key.Generation)
+		return false
+	}
+	if key.ReplayRejected {
+		call.lifetimeAmbiguous = true
+		return false
+	}
+	if key.ReplayPressureGeneration != 0 && key.ReplayPressureGeneration <= b.proofHistory.invalidThrough && b.newMediaProofLocked(call, key) {
+		call.replayEvidenceMissing = true
+		call.replayMissingCutoff = max(call.replayMissingCutoff, key.Generation)
+		call.replayBlockedUntil = b.proofHistory.blockedUntil
+		return false
+	}
 	explicit := key.LifetimeSession != 0 || key.LifetimeGeneration != 0
 	if explicit && (key.LifetimeSession != call.lifetime.Session || key.LifetimeGeneration != call.lifetime.Generation) {
 		call.lifetimeAmbiguous = true
@@ -153,7 +190,7 @@ func (b *Bridge) observeLifetimeKeyLocked(call *selectedCall, key mediaadmission
 		return false
 	}
 	previous, exists := b.proofHistory.initiators[lifetimeInitiatorHash(key.CallID, key.FromTag)]
-	if !exists || !time.Now().Before(previous.expires) {
+	if !exists || !b.now().Before(previous.expires) {
 		return true
 	}
 	if previous.blocked {
@@ -183,7 +220,7 @@ func (b *Bridge) observeLifetimeKeyLocked(call *selectedCall, key mediaadmission
 // uncertainty untouched. A missing opposite-side watermark is not by itself
 // authority to accept an old or unconfirmed transaction.
 func (b *Bridge) canConfirmedLifetimeLocked(call *selectedCall, key mediaadmission.DialogKey) bool {
-	if call == nil || time.Now().Before(b.proofHistory.blockedUntil) || b.retiredCallBlockedLocked(key.CallID) || !key.CSeqValid || key.HeaderConflict || key.FromTag == "" || key.CallID == "" {
+	if call == nil || b.now().Before(b.proofHistory.blockedUntil) || b.retiredCallBlockedLocked(key.CallID) || !key.CSeqValid || key.HeaderConflict || key.FromTag == "" || key.CallID == "" {
 		return false
 	}
 	if key.LifetimeSession != 0 || key.LifetimeGeneration != 0 {
@@ -195,12 +232,16 @@ func (b *Bridge) canConfirmedLifetimeLocked(call *selectedCall, key mediaadmissi
 		return false
 	}
 	previous, exists := b.proofHistory.initiators[lifetimeInitiatorHash(key.CallID, key.FromTag)]
-	return !exists || !time.Now().Before(previous.expires) || (!previous.blocked && (previous.lifetime == call.lifetime || key.CSeq > previous.maximum))
+	return !exists || !b.now().Before(previous.expires) || (!previous.blocked && (previous.lifetime == call.lifetime || key.CSeq > previous.maximum))
 }
 
 func (b *Bridge) releaseLifetimeProofLocked() error {
 	count := len(b.proofHistory.initiators)
 	if err := b.cfg.Metadata.ReserveReplayGuards(mediaadmission.SelectedDerivationUsage{Contexts: count, Bytes: count * lifetimeProofEntryBytes}, mediaadmission.SelectedDerivationUsage{}); err != nil {
+		return err
+	}
+	count = len(b.proofHistory.overflow)
+	if err := b.cfg.Metadata.ReserveReplayOverflow(mediaadmission.SelectedDerivationUsage{Contexts: count, Bytes: count * lifetimeProofEntryBytes}, mediaadmission.SelectedDerivationUsage{}); err != nil {
 		return err
 	}
 	b.proofHistory = lifetimeProofHistory{}
@@ -211,6 +252,19 @@ func (b *Bridge) releaseLifetimeProofLocked() error {
 // active calls from their remaining derivations; missing proof is not invented.
 // Caller holds b.mu. A delayed worker may retain protection longer, never shorter.
 func (b *Bridge) expireLifetimeProofLocked(now time.Time) {
+	for hash, expires := range b.proofHistory.overflow {
+		if !now.Before(expires) {
+			if err := b.cfg.Metadata.ReserveReplayOverflow(mediaadmission.SelectedDerivationUsage{Contexts: 1, Bytes: lifetimeProofEntryBytes}, mediaadmission.SelectedDerivationUsage{}); err != nil {
+				b.needsSnapshot = true
+				if publicationErr := b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, err); publicationErr != nil {
+					logger.Error("Replay identity release failed", "domain", b.cfg.Domain, "error", publicationErr)
+				}
+				logger.Error("Replay identity release failed", "domain", b.cfg.Domain, "error", err)
+				continue
+			}
+			delete(b.proofHistory.overflow, hash)
+		}
+	}
 	for hash, guard := range b.proofHistory.initiators {
 		if !now.Before(guard.expires) {
 			if err := b.cfg.Metadata.ReserveReplayGuards(mediaadmission.SelectedDerivationUsage{Contexts: 1, Bytes: lifetimeProofEntryBytes}, mediaadmission.SelectedDerivationUsage{}); err != nil {
@@ -254,5 +308,44 @@ func (b *Bridge) retireLifetimeLocked(callID string, old *selectedCall) error {
 
 func (b *Bridge) retiredCallBlockedLocked(callID string) bool {
 	marker, exists := b.proofHistory.initiators[lifetimeInitiatorHash(callID, "")]
-	return exists && marker.blocked && time.Now().Before(marker.expires)
+	return exists && marker.blocked && b.now().Before(marker.expires)
+}
+
+func (b *Bridge) rememberOverflowIdentityLocked(callID string, expires time.Time) bool {
+	hash := lifetimeInitiatorHash(callID, "")
+	if _, exists := b.proofHistory.overflow[hash]; !exists {
+		if err := b.cfg.Metadata.ReserveReplayOverflow(mediaadmission.SelectedDerivationUsage{}, mediaadmission.SelectedDerivationUsage{Contexts: 1, Bytes: lifetimeProofEntryBytes}); err != nil {
+			return false
+		}
+		if b.proofHistory.overflow == nil {
+			b.proofHistory.overflow = make(map[[32]byte]time.Time)
+		}
+	}
+	b.proofHistory.overflow[hash] = expires
+	return true
+}
+
+// Stamp receipt-time rejection into metadata. Promotion-time expiry must never
+// rehabilitate an observation received inside the retired identity's window.
+func (b *Bridge) stampReplayEligibilityLocked(key *mediaadmission.DialogKey) {
+	now := b.now()
+	if now.Before(b.proofHistory.blockedUntil) {
+		key.ReplayPressureGeneration = b.proofHistory.generation
+	}
+	if expires, exists := b.proofHistory.overflow[lifetimeInitiatorHash(key.CallID, "")]; exists && now.Before(expires) {
+		key.ReplayRejected = true
+	}
+	if b.retiredCallBlockedLocked(key.CallID) {
+		key.ReplayRejected = true
+	}
+	if guard, exists := b.proofHistory.initiators[lifetimeInitiatorHash(key.CallID, key.FromTag)]; exists && now.Before(guard.expires) && (guard.lifetime.Session != key.LifetimeSession || guard.lifetime.Generation != key.LifetimeGeneration) {
+		sequence := key.CSeq
+		if strings.EqualFold(key.CSeqMethod, "PRACK") {
+			if !key.RAckValid {
+				key.ReplayRejected = true
+			}
+			sequence = uint64(key.RAckCSeq)
+		}
+		key.ReplayRejected = key.ReplayRejected || guard.blocked || sequence <= guard.maximum
+	}
 }

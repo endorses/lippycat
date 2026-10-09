@@ -28,6 +28,8 @@ type CallCorrelationConfig struct {
 	NodeAliases              [][]string            `mapstructure:"node_aliases"`
 	DecisionHorizon          time.Duration         `mapstructure:"decision_horizon"`
 	TerminalGrace            time.Duration         `mapstructure:"terminal_grace"`
+	WaitTimeout              time.Duration         `mapstructure:"wait_timeout"`
+	ShutdownTimeout          time.Duration         `mapstructure:"shutdown_timeout"`
 	StoreFile                string                `mapstructure:"store_file"`
 	MaxCandidates            int                   `mapstructure:"max_candidates"`
 	MaxRecords               int                   `mapstructure:"max_records"`
@@ -39,6 +41,7 @@ func DefaultCallCorrelationConfig() CallCorrelationConfig {
 		SDPOriginSuspend: 10 * time.Minute, SDPOriginMaxTracked: 10000,
 		AddressWindow: 2 * time.Second, NumberWindow: 500 * time.Millisecond,
 		DecisionHorizon: 5 * time.Minute, TerminalGrace: 30 * time.Second,
+		WaitTimeout: 5 * time.Second, ShutdownTimeout: 10 * time.Second,
 		MaxCandidates: 10000, MaxRecords: 100000,
 	}
 }
@@ -54,6 +57,7 @@ func (c CallCorrelationConfig) Normalized() CallCorrelationConfig {
 		{&c.SDPOriginReuseWindow, d.SDPOriginReuseWindow}, {&c.SDPOriginObservationTTL, d.SDPOriginObservationTTL},
 		{&c.SDPOriginSuspend, d.SDPOriginSuspend}, {&c.AddressWindow, d.AddressWindow},
 		{&c.NumberWindow, d.NumberWindow}, {&c.DecisionHorizon, d.DecisionHorizon}, {&c.TerminalGrace, d.TerminalGrace},
+		{&c.WaitTimeout, d.WaitTimeout}, {&c.ShutdownTimeout, d.ShutdownTimeout},
 	} {
 		if *p.v == 0 {
 			*p.v = p.d
@@ -89,7 +93,7 @@ func validCorrelationHeader(name string) bool {
 
 func (c CallCorrelationConfig) Validate() error {
 	c = c.Normalized()
-	for _, d := range []time.Duration{c.SDPOriginReuseWindow, c.SDPOriginObservationTTL, c.SDPOriginSuspend, c.AddressWindow, c.NumberWindow, c.DecisionHorizon, c.TerminalGrace} {
+	for _, d := range []time.Duration{c.SDPOriginReuseWindow, c.SDPOriginObservationTTL, c.SDPOriginSuspend, c.AddressWindow, c.NumberWindow, c.DecisionHorizon, c.TerminalGrace, c.WaitTimeout, c.ShutdownTimeout} {
 		if d <= 0 {
 			return fmt.Errorf("LI call correlation durations must be positive")
 		}

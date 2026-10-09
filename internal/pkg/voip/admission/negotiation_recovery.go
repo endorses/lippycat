@@ -2,7 +2,6 @@ package admission
 
 import (
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
-	"time"
 )
 
 func sameDialog(side derivationSide, key mediaadmission.DialogKey) bool {
@@ -92,7 +91,7 @@ func (b *Bridge) supersedeUncertainty(call *selectedCall, key mediaadmission.Dia
 		delayed := prior != nil && !prior.hasSDP && prior.method == "INVITE" && side.sender == side.initiator && !prior.rejected
 		uncertain = uncertain || delayed
 		if side.prack {
-			uncertain = !b.reliableAnswerMatches(call, side, state, time.Now())
+			uncertain = !b.reliableAnswerMatches(call, side, state, b.now())
 			initiating := call.derivations[derivationSide{side.sender, side.peer, side.initiator, false}]
 			if initiating != nil {
 				for _, established := range []*derivationState{initiating, initiating.previous} {

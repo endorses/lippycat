@@ -16,10 +16,10 @@ func TestMapLICallCorrelationStats(t *testing.T) {
 		Adopted: map[string]uint64{"H": 2}, Standalone: map[string]uint64{"blind": 3}, SDP: map[string]uint64{"suspended": 4},
 		Records: 5, Candidates: 6, Transactions: 7, Origins: 8, SuspendedOrigins: 9, GroupsTwo: 10, GroupsThree: 11, GroupsFourOrMore: 12,
 		MaxRecords: 100, MaxCandidates: 200, MaxOrigins: 300, Blind: true, BlindCause: "startup", BlindRemaining: 2 * time.Second,
-		Persistence: true, UncertainWrites: 13, UnresolvedWrites: 14, SDPDisabled: true, UnrecordedDecisions: 15, DeferredPackets: 16, DeferredBytes: 17, DeferredRejected: 18,
+		Persistence: true, UncertainWrites: 13, UnresolvedWrites: 14, SDPDisabled: true, UnrecordedDecisions: 15, DeferredPackets: 16, DeferredBytes: 17, DeferredRejected: 18, WaitTimeouts: 19, PressureReleases: 20, ShutdownTimeouts: 21,
 	}
 	got := mapLICallCorrelationStats(source)
-	require.Equal(t, &management.LICallCorrelationStats{Adopted: map[string]uint64{"H": 2}, Standalone: map[string]uint64{"blind": 3}, Sdp: map[string]uint64{"suspended": 4}, Records: 5, Candidates: 6, Transactions: 7, Origins: 8, SuspendedOrigins: 9, GroupsTwo: 10, GroupsThree: 11, GroupsFourOrMore: 12, MaxRecords: 100, MaxCandidates: 200, MaxOrigins: 300, Blind: true, BlindCause: "startup", BlindRemainingNs: int64(2 * time.Second), Persistence: true, UncertainWrites: 13, UnresolvedWrites: 14, SdpDisabled: true, UnrecordedDecisions: 15, DeferredPackets: 16, DeferredBytes: 17, DeferredRejected: 18}, got)
+	require.Equal(t, &management.LICallCorrelationStats{Adopted: map[string]uint64{"H": 2}, Standalone: map[string]uint64{"blind": 3}, Sdp: map[string]uint64{"suspended": 4}, Records: 5, Candidates: 6, Transactions: 7, Origins: 8, SuspendedOrigins: 9, GroupsTwo: 10, GroupsThree: 11, GroupsFourOrMore: 12, MaxRecords: 100, MaxCandidates: 200, MaxOrigins: 300, Blind: true, BlindCause: "startup", BlindRemainingNs: int64(2 * time.Second), Persistence: true, UncertainWrites: 13, UnresolvedWrites: 14, SdpDisabled: true, UnrecordedDecisions: 15, DeferredPackets: 16, DeferredBytes: 17, DeferredRejected: 18, WaitTimeouts: 19, PressureReleases: 20, ShutdownTimeouts: 21}, got)
 	source.Adopted["H"] = 99
 	source.Standalone["blind"] = 99
 	source.SDP["suspended"] = 99

@@ -14,104 +14,105 @@ linters:
     - staticcheck   # Disabled temporarily - 145 stylistic warnings, re-enable incrementally
     - unused        # Disabled temporarily - 69 warnings for future/platform code
 
-linters-settings:
-  errcheck:
-    # Check for unchecked errors in type assertions
-    check-type-assertions: false
-    # Check for blank assignments of errors
-    check-blank: false
-    # Exclude functions where we don't want to check errors
-    exclude-functions:
-      - (io.Closer).Close
-      - (*os.File).Close
-      - (*database/sql.DB).Close
-      - (*database/sql.Rows).Close
-      - (*database/sql.Stmt).Close
-      - fmt.Fprintf
-      - fmt.Fprintln
-      - fmt.Fprint
-      - (github.com/spf13/viper.Viper).BindPFlag
-      - (*github.com/spf13/viper.Viper).BindPFlag
+  settings:
+    errcheck:
+      # Check for unchecked errors in type assertions
+      check-type-assertions: false
+      # Check for blank assignments of errors
+      check-blank: false
+      # Exclude functions where we don't want to check errors
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+        - (github.com/spf13/viper.Viper).BindPFlag
+        - (*github.com/spf13/viper.Viper).BindPFlag
 
-  staticcheck:
-    # Disable stylistic checks
-    checks:
-      - "all"
-      - "-QF1003"  # Exclude "could use tagged switch"
-      - "-S1009"   # Exclude "should omit nil check"
-      - "-SA9003"  # Exclude "empty branch"
-      - "-SA1019"  # Exclude deprecated API warnings (lipgloss, viewport)
+    staticcheck:
+      # Disable stylistic checks
+      checks:
+        - "all"
+        - "-QF1003"  # Exclude "could use tagged switch"
+        - "-S1009"   # Exclude "should omit nil check"
+        - "-SA9003"  # Exclude "empty branch"
+        - "-SA1019"  # Exclude deprecated API warnings (lipgloss, viewport)
+
+  exclusions:
+    # Exclude some linters from running on tests files
+    rules:
+      # Exclude errcheck for defer statements (cleanup operations)
+      - linters:
+          - errcheck
+        text: "Error return value of.*defer"
+
+      # Exclude errcheck for common cleanup operations
+      - linters:
+          - errcheck
+        text: "Error return value of `.*\\.(Close|Stop|Flush|Shutdown|MarkFlagRequired)`"
+
+      # Exclude errcheck for viper configuration binding
+      - linters:
+          - errcheck
+        text: "Error return value of `viper\\.BindPFlag`"
+
+      # Exclude errcheck for fmt print functions
+      - linters:
+          - errcheck
+        text: "Error return value of `fmt\\.(Fprintf|Fprintln|Fprint)`"
+
+      # Exclude errcheck for environment operations in test files
+      - path: _test\.go
+        linters:
+          - errcheck
+        text: "Error return value of `os\\.(Remove|RemoveAll|Chmod|Setenv|Unsetenv|WriteFile)`"
+
+      # Exclude stylistic staticcheck warnings (not bugs)
+      - linters:
+          - staticcheck
+        text: "(QF1003|S1009|SA9003)" # Tagged switch, nil checks, empty branches
+
+      # Exclude deprecated API warnings for lipgloss/bubbletea (TUI dependencies)
+      - linters:
+          - staticcheck
+        text: "SA1019.*lipgloss|SA1019.*viewport"
+
+      # Exclude unused code warnings for test files
+      - path: _test\.go
+        linters:
+          - unused
+
+      # Exclude unused warnings for GPU/CUDA code (future implementation)
+      - linters:
+          - unused
+        path: "(gpu_|cuda_|opencl_)"
+
+      # Exclude unused warnings for theme definitions and test helpers
+      - linters:
+          - unused
+        path: "(themes\\.go|testing/|_test\\.go)"
+
+      # Exclude unused for XDP definitions (Linux specific, platform code)
+      - linters:
+          - unused
+        path: "xdp_"
+
+      # Exclude unused for TUI bridge helper functions (used conditionally)
+      - linters:
+          - unused
+        path: "cmd/tui/bridge\\.go"
+        text: "(parseSIPPacket|parseRTPPacket|renderBox)"
+
+      # Exclude ineffassign for test variables that are intentionally overwritten
+      - path: _test\.go
+        linters:
+          - ineffassign
 
 issues:
-  # Exclude some linters from running on tests files
-  exclude-rules:
-    # Exclude errcheck for defer statements (cleanup operations)
-    - linters:
-        - errcheck
-      text: "Error return value of.*defer"
-
-    # Exclude errcheck for common cleanup operations
-    - linters:
-        - errcheck
-      text: "Error return value of `.*\\.(Close|Stop|Flush|Shutdown|MarkFlagRequired)`"
-
-    # Exclude errcheck for viper configuration binding
-    - linters:
-        - errcheck
-      text: "Error return value of `viper\\.BindPFlag`"
-
-    # Exclude errcheck for fmt print functions
-    - linters:
-        - errcheck
-      text: "Error return value of `fmt\\.(Fprintf|Fprintln|Fprint)`"
-
-    # Exclude errcheck for environment operations in test files
-    - path: _test\.go
-      linters:
-        - errcheck
-      text: "Error return value of `os\\.(Remove|RemoveAll|Chmod|Setenv|Unsetenv|WriteFile)`"
-
-    # Exclude stylistic staticcheck warnings (not bugs)
-    - linters:
-        - staticcheck
-      text: "(QF1003|S1009|SA9003)" # Tagged switch, nil checks, empty branches
-
-    # Exclude deprecated API warnings for lipgloss/bubbletea (TUI dependencies)
-    - linters:
-        - staticcheck
-      text: "SA1019.*lipgloss|SA1019.*viewport"
-
-    # Exclude unused code warnings for test files
-    - path: _test\.go
-      linters:
-        - unused
-
-    # Exclude unused warnings for GPU/CUDA code (future implementation)
-    - linters:
-        - unused
-      path: "(gpu_|cuda_|opencl_)"
-
-    # Exclude unused warnings for theme definitions and test helpers
-    - linters:
-        - unused
-      path: "(themes\\.go|testing/|_test\\.go)"
-
-    # Exclude unused for XDP definitions (Linux specific, platform code)
-    - linters:
-        - unused
-      path: "xdp_"
-
-    # Exclude unused for TUI bridge helper functions (used conditionally)
-    - linters:
-        - unused
-      path: "cmd/tui/bridge\\.go"
-      text: "(parseSIPPacket|parseRTPPacket|renderBox)"
-
-    # Exclude ineffassign for test variables that are intentionally overwritten
-    - path: _test\.go
-      linters:
-        - ineffassign
-
   # Maximum issues count per linter
   max-issues-per-linter: 0
   # Maximum count of issues with the same text

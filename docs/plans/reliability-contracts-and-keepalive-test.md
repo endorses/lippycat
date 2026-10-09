@@ -1,7 +1,7 @@
 # Reliability Contracts and Keepalive Test Stabilization
 
 **Date:** 2026-10-09
-**Status:** implemented and locally verified; GitHub verification pending
+**Status:** complete; implemented, committed and verified locally and in GitHub
 
 ## Objective
 
@@ -142,12 +142,12 @@ Behavior reference: `internal/pkg/li/x1/client.go`.
 - [x] Format changed Go files with `gofmt`, format Markdown consistently with
       repository conventions, and check whitespace and sanitized content before
       staging. Do not modify generated manual HTML or unrelated files.
-- [ ] Record applicable existing CI results for the implementation revision,
+- [x] Record applicable existing CI results for the implementation revision,
       including the LI test configuration and manual build. Preserve both scan
       configurations and existing workflow timeouts. Separate any actual CI
       failure from speculative runtime concerns; no extra privileged local
       qualification is required solely for documentation and X1 test changes.
-- [ ] Check off tasks only after verification, record concise evidence and
+- [x] Check off tasks only after verification, record concise evidence and
       limitations in this plan, and commit the implementation and updated plan
       together. Do not reclassify previously completed plans as incomplete.
 
@@ -182,10 +182,15 @@ Production code, workflows, dependencies and configuration defaults are unchange
 | Manual | `make manual-check` passes all tool checks with 5,586/5,586 current messages translated in both catalogs. `make manual` builds and verifies English, German and Catalan chapter paths, headings, examples, code spans and links. Changed rendered contract passages were reviewed in every edition. |
 | Formatting and privacy | Go formatting and whitespace checks pass; translations preserve inline code and source keys; changes contain no private artifact references or deployment data. |
 | Bounded closure review | One independent review of this scope found no material issue. Previously completed runtime reliability work was not reopened. |
-| GitHub | Pending results for the implementation revision; local results do not substitute for this evidence. |
+| GitHub | Implementation revision `3e46aa79eb8e42fb80c0022509fb5aaa6536c416`: [CI](https://github.com/endorses/lippycat/actions/runs/37987093507), [Security](https://github.com/endorses/lippycat/actions/runs/37987093573), [Integration Tests](https://github.com/endorses/lippycat/actions/runs/37987093551), and [Deploy Manual](https://github.com/endorses/lippycat/actions/runs/37987093683) all pass. Both full race/coverage suites and the manual check executed successfully; both scan configurations remain enabled; ordinary, Docker and privileged eBPF integration passed. |
 
 The existing Mermaid preprocessor emits its mdBook 0.5.2/0.5.4 compatibility
 warning; all editions build and cross-edition verification succeeds with the
 project-pinned mdBook. No tool version or workflow policy changes were needed.
 Graceful draining of correlation-held product remains outside this plan; the
 finite observation boundary and existing cancellation behavior are now explicit.
+
+The final completion-record commit changes only this plan. The operator guides,
+manual sources/catalogs, keepalive test and workflow files remain identical to
+the verified implementation revision. The bounded closure decision is CLOSED,
+with no unresolved item in this scope.

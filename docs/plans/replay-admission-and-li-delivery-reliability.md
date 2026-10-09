@@ -345,3 +345,14 @@ or eviction. The production handoff now carries an immutable receipt, and bridge
 and real-orchestrator regressions retain the original counterexample. The affected
 post-fix review found no remaining material defect; required local checks pass.
 GitHub results for the implementation revision remain to be recorded.
+
+The first GitHub LI suite exposed two existing test synchronization races.
+The destination-restart test now waits for the first sender outcome and empty
+queue before closing the receiver; deadline-cleanup uncertainty still permits
+the existing at-least-once retry. The authorization-narrowing test drains the
+new call's accepted RTP through normal protocol completion before flushing the
+journal, and no longer races a short task expiry against encrypted commits.
+Exact FIFO, delivery counts, generation revocation and persisted-product
+assertions remain intact. The restart and write-outcome regressions pass 100
+race repetitions and 30 repetitions with atomic coverage; the processor
+regression passes 20 race repetitions. Production behavior is unchanged.

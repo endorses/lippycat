@@ -5,8 +5,10 @@ package processor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,18 +27,32 @@ type processorBlockingCorrelationStore struct {
 	entered, release  chan struct{}
 	once, releaseOnce sync.Once
 	outcome           securestore.Outcome
+	blockAt           int32
+	saves             atomic.Int32
+	closed            chan struct{}
+	closeOnce         sync.Once
 }
 
 func (s *processorBlockingCorrelationStore) Load() ([]li.StoredCallCorrelation, error) {
 	return nil, nil
 }
-func (s *processorBlockingCorrelationStore) Close() error { return nil }
+func (s *processorBlockingCorrelationStore) Close() error {
+	s.closeOnce.Do(func() {
+		if s.closed != nil {
+			close(s.closed)
+		}
+	})
+	return nil
+}
 func (s *processorBlockingCorrelationStore) Save([]li.StoredCallCorrelation) (securestore.Outcome, error) {
-	first := false
-	s.once.Do(func() { first = true; close(s.entered); <-s.release })
-	if !first {
+	blockAt := s.blockAt
+	if blockAt == 0 {
+		blockAt = 1
+	}
+	if s.saves.Add(1) != blockAt {
 		return securestore.Committed, nil
 	}
+	s.once.Do(func() { close(s.entered); <-s.release })
 	if s.outcome != securestore.Committed {
 		return s.outcome, errors.New("synthetic write failure")
 	}
@@ -51,7 +67,7 @@ func injectBlockingCorrelationStore(t *testing.T, p *Processor, outcome securest
 	p.liStorage.correlationStopOnce.Do(func() { close(p.liStorage.correlationStop) })
 	p.liStorage.correlationWorkers.Wait()
 	require.NoError(t, p.liStorage.correlation.Close())
-	store := &processorBlockingCorrelationStore{entered: make(chan struct{}), release: make(chan struct{}), outcome: outcome}
+	store := &processorBlockingCorrelationStore{entered: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{}), outcome: outcome}
 	correlator, err := li.NewCallCorrelator(p.config.LICallCorrelation, 10*time.Minute, store)
 	require.NoError(t, err)
 	p.liStorage.correlation = correlator
@@ -384,5 +400,253 @@ func TestProcessorCallCorrelationDeferredMediaRejectsReusedLifetime(t *testing.T
 	case <-products:
 		t.Fatal("old lifetime media reached TLS")
 	default:
+	}
+}
+
+func TestProcessorCallCorrelationDeadlineDeliversBeforeLateOutcome(t *testing.T) {
+	for _, pressure := range []bool{false, true} {
+		for _, outcome := range []securestore.Outcome{securestore.Committed, securestore.NotCommitted, securestore.Uncertain} {
+			t.Run(fmt.Sprintf("pressure=%t/%s", pressure, securestore.OutcomeName(outcome)), func(t *testing.T) {
+				port, products := correlationMDF(t)
+				config := storageKeyStartupConfig(t)
+				config.ProcessorID, config.ListenAddr, config.MaxHunters = "correlation-deadline", "localhost:0", 1
+				config.LICallCorrelation = li.DefaultCallCorrelationConfig()
+				config.LICallCorrelation.SessionHeaders = []string{"X-Test-Session"}
+				config.LICallCorrelation.DecisionHorizon = time.Nanosecond
+				config.LICallCorrelation.WaitTimeout = 30 * time.Millisecond
+				if pressure {
+					config.LICallCorrelation.WaitTimeout = 5 * time.Second
+					config.LICallCorrelation.MaxCandidates = 2
+				}
+				p, err := newTestProcessor(t, config)
+				require.NoError(t, err)
+				p.ctx, p.cancel = context.WithCancel(context.Background())
+				require.NoError(t, p.startLIManager())
+				store := injectBlockingCorrelationStore(t, p, outcome)
+				t.Cleanup(func() { store.unblock(); require.NoError(t, p.Shutdown()) })
+				did, xid := uuid.New(), uuid.New()
+				require.NoError(t, p.liManager.CreateDestination(&li.Destination{DID: did, Address: "127.0.0.1", Port: port, X2Enabled: true}))
+				require.NoError(t, p.liManager.ActivateTask(&li.InterceptTask{XID: xid, Targets: []li.TargetIdentity{dirTarget}, DestinationIDs: []uuid.UUID{did}, DeliveryType: li.DeliveryX2Only}))
+				filters := []string{"li-" + xid.String() + "-0"}
+				at := time.Now().UTC()
+				p.processLIPacketWithProvenance(correlationIntegrationSIP("deadline-root", dirTargetURI, at), filters, nil)
+				var id uint64
+				select {
+				case product := <-products:
+					id = product.Header.CorrelationID
+				case <-time.After(5 * time.Second):
+					t.Fatal("root was not delivered")
+				}
+				child := correlationIntegrationSIP("deadline-child", dirTargetURI, at.Add(time.Millisecond))
+				child.VoIPData.RawSIP = []byte(strings.Replace(strings.TrimSuffix(string(child.VoIPData.RawSIP), "secret"), "Content-Length: 6", "Content-Length: 0", 1))
+				child.RawData = child.VoIPData.RawSIP
+				p.processLIPacketWithProvenance(child, filters, nil)
+				awaitCorrelationBarrier(t, store.entered, "adoption did not enter held storage")
+				p.processLIPacketWithProvenance(child, filters, nil)
+				count := 2
+				if pressure {
+					p.processLIPacketWithProvenance(child, filters, nil)
+					count++
+				}
+				for range count {
+					select {
+					case product := <-products:
+						require.Equal(t, id, product.Header.CorrelationID)
+						require.Equal(t, child.VoIPData.RawSIP, product.Payload)
+					case <-time.After(5 * time.Second):
+						t.Fatal("correlation timeout did not release authorized TLS products")
+					}
+				}
+				if pressure {
+					require.Equal(t, uint64(1), p.liStorage.correlation.Stats().PressureReleases)
+					require.Zero(t, p.liStorage.correlation.Stats().WaitTimeouts)
+				} else {
+					require.Equal(t, uint64(1), p.liStorage.correlation.Stats().WaitTimeouts)
+				}
+				// Retry remains serialized after physical completion and persists the
+				// selected ID. Verify another real product after that durable fence.
+				store.unblock()
+				require.Eventually(t, func() bool {
+					if err := p.liStorage.correlation.Maintain(); err != nil {
+						return false
+					}
+					return store.saves.Load() >= 2 && p.liStorage.correlation.Stats().UnresolvedWrites == 0
+				}, 5*time.Second, time.Millisecond)
+				p.processLIPacketWithProvenance(child, filters, nil)
+				select {
+				case product := <-products:
+					require.Equal(t, id, product.Header.CorrelationID)
+				case <-time.After(5 * time.Second):
+					t.Fatal("product after late completion was not delivered")
+				}
+			})
+		}
+	}
+}
+
+func TestProcessorCallCorrelationShutdownDeadlineWithHeldStorage(t *testing.T) {
+	for _, maintenance := range []bool{false, true} {
+		t.Run(fmt.Sprint(maintenance), func(t *testing.T) {
+			config := storageKeyStartupConfig(t)
+			config.ProcessorID, config.ListenAddr, config.MaxHunters = "correlation-shutdown-deadline", "localhost:0", 1
+			config.LICallCorrelation = li.DefaultCallCorrelationConfig()
+			config.LICallCorrelation.SessionHeaders = []string{"X-Test-Session"}
+			config.LICallCorrelation.DecisionHorizon = time.Nanosecond
+			config.LICallCorrelation.ShutdownTimeout = 30 * time.Millisecond
+			p, err := New(config)
+			require.NoError(t, err)
+			p.ctx, p.cancel = context.WithCancel(context.Background())
+			require.NoError(t, p.startLIManager())
+			store := injectBlockingCorrelationStore(t, p, securestore.NotCommitted)
+			if maintenance {
+				store.blockAt = 2
+			}
+			correlator := p.liStorage.correlation
+			t.Cleanup(func() {
+				store.unblock()
+				err := p.Shutdown()
+				if err != nil {
+					require.ErrorIs(t, err, context.DeadlineExceeded)
+				}
+				require.NoError(t, correlator.Close())
+			})
+			// Directly reserve correlation under an invented task; the real
+			// Processor.Shutdown still stops its live manager and maintenance.
+			tasks := []li.CallCorrelationTask{{XID: uuid.New(), Generation: 1}}
+			root := correlationIntegrationSIP("shutdown-root", dirTargetURI, time.Now())
+			child := correlationIntegrationSIP("shutdown-child", dirTargetURI, time.Now().Add(time.Millisecond))
+			correlator.Resolve(root, tasks)
+			if maintenance {
+				decision := correlator.Resolve(child, tasks)
+				correlator.Published(decision)
+				correlator.Finalize(child.VoIPData.CallID)
+				p.liStorage.correlationStopOnce = sync.Once{}
+				p.startLICorrelationMaintenance()
+			} else {
+				require.NoError(t, correlator.ResolveAsync(p.ctx, child, tasks, 100, func(li.CallCorrelationDecision) { t.Error("shutdown published a pending product") }))
+			}
+			awaitCorrelationBarrier(t, store.entered, "storage owner did not enter held adoption or maintenance")
+			shutdown := make(chan error, 1)
+			go func() { shutdown <- p.Shutdown() }()
+			select {
+			case err := <-shutdown:
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			case <-time.After(5 * time.Second):
+				t.Fatal("held storage blocked independent processor shutdown")
+			}
+			require.Equal(t, uint64(1), correlator.Stats().ShutdownTimeouts)
+			select {
+			case <-store.closed:
+				t.Fatal("shutdown closed a store beneath its active writer")
+			default:
+			}
+			store.unblock()
+			awaitCorrelationBarrier(t, store.closed, "owner did not perform eventual cleanup")
+			require.NoError(t, correlator.Close())
+			require.ErrorIs(t, p.Shutdown(), context.DeadlineExceeded, "repeated shutdown retains its terminal result")
+		})
+	}
+}
+
+func TestProcessorCallCorrelationReleaseDeliversX3WhileStoreHeld(t *testing.T) {
+	for _, persistent := range []bool{false, true} {
+		for _, pressure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("persistent=%t/pressure=%t", persistent, pressure), func(t *testing.T) {
+				var config Config
+				var fixture *persistentProcessorFixture
+				var products <-chan *x2x3.PDU
+				var xid uuid.UUID
+				target := dirTargetURI
+				if persistent {
+					fixture = newPersistentProcessorFixture(t)
+					config, xid, target = fixture.config, fixture.xid, fixture.target
+				} else {
+					config = storageKeyStartupConfig(t)
+				}
+				config.ProcessorID, config.ListenAddr, config.MaxHunters = "correlation-x3-release", "localhost:0", 1
+				config.LICallCorrelation = li.DefaultCallCorrelationConfig()
+				config.LICallCorrelation.SessionHeaders = []string{"X-Test-Session"}
+				config.LICallCorrelation.DecisionHorizon = time.Nanosecond
+				config.LICallCorrelation.WaitTimeout = 30 * time.Millisecond
+				if pressure {
+					config.LICallCorrelation.WaitTimeout = 5 * time.Second
+					config.LICallCorrelation.MaxCandidates = 2
+				}
+				p, err := newTestProcessor(t, config)
+				require.NoError(t, err)
+				p.ctx, p.cancel = context.WithCancel(context.Background())
+				require.NoError(t, p.startLIManager())
+				// The late definite failure is the strongest ID-reversion case.
+				store := injectBlockingCorrelationStore(t, p, securestore.NotCommitted)
+				t.Cleanup(func() { store.unblock(); require.NoError(t, p.Shutdown()) })
+				if !persistent {
+					var port int
+					port, products = correlationMDF(t)
+					xid = uuid.New()
+					did := uuid.New()
+					require.NoError(t, p.liManager.CreateDestination(&li.Destination{DID: did, Address: "127.0.0.1", Port: port, X3Enabled: true}))
+					require.NoError(t, p.liManager.ActivateTask(&li.InterceptTask{XID: xid, Targets: []li.TargetIdentity{dirTarget}, DestinationIDs: []uuid.UUID{did}, DeliveryType: li.DeliveryX3Only}))
+				}
+				filters := []string{"li-" + xid.String() + "-0"}
+				// Historical capture time is preserved independently of the current
+				// delivery admission age; correlation never refreshes either clock.
+				at := time.Now().UTC().Add(-time.Hour)
+				root := correlationIntegrationSIP("x3-release-root", target, at)
+				p.processLIPacketWithProvenance(root, filters, nil)
+				rootID := p.liStorage.correlation.Resolve(root, nil).CorrelationID
+				rootRTP := correlationIntegrationRTP("x3-release-root", 0, at)
+				p.processLIPacketWithProvenance(rootRTP, nil, filters)
+				child := correlationIntegrationSIP("x3-release-child", target, at.Add(time.Millisecond))
+				p.processLIPacketWithProvenance(child, filters, nil)
+				awaitCorrelationBarrier(t, store.entered, "X3 adoption did not reach held storage")
+				for marker := byte(1); marker <= 2; marker++ {
+					p.processLIPacketWithProvenance(correlationIntegrationRTP("x3-release-child", marker, at.Add(time.Duration(marker)*time.Millisecond)), nil, filters)
+				}
+				if persistent {
+					// Reorder must forward all three accepted products into the real
+					// durable journal while the MDF and correlation store are held.
+					require.Eventually(t, func() bool {
+						if err := liDeliveryClient.FlushPersistence(context.Background()); err != nil {
+							return false
+						}
+						return liDeliveryClient.X3JournalStats().Persisted == 3
+					}, 5*time.Second, time.Millisecond)
+					products = fixture.listenMDF(t)
+				}
+				got := make(map[byte]bool)
+				parser := x2x3.NewAttributeParser()
+				for range 3 {
+					select {
+					case product := <-products:
+						require.Equal(t, x2x3.PDUTypeX3, product.Header.Type)
+						require.Equal(t, xid, product.Header.XID)
+						require.Equal(t, rootID, product.Header.CorrelationID)
+						marker := product.Payload[len(product.Payload)-1]
+						require.False(t, got[marker], "correlation duplicated a media handoff")
+						got[marker] = true
+						attribute := x2x3.FindAttribute(product.Attributes, x2x3.AttrTimestamp)
+						require.NotNil(t, attribute)
+						captured, err := parser.ParseTimestamp(attribute)
+						require.NoError(t, err)
+						require.Equal(t, at.Add(time.Duration(marker)*time.Millisecond).UnixNano(), captured.UnixNano())
+					case <-time.After(5 * time.Second):
+						t.Fatal("adopted RTP did not reach real X3 delivery before storage release")
+					}
+				}
+				require.Len(t, got, 3)
+				if pressure {
+					require.Equal(t, uint64(1), p.liStorage.correlation.Stats().PressureReleases)
+					require.Zero(t, p.liStorage.correlation.Stats().WaitTimeouts)
+				} else {
+					require.Equal(t, uint64(1), p.liStorage.correlation.Stats().WaitTimeouts)
+				}
+				select {
+				case <-store.release:
+					t.Fatal("test released physical storage before X3 proof")
+				default:
+				}
+				store.unblock()
+			})
+		}
 	}
 }

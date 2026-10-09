@@ -52,6 +52,8 @@ func TestLICallCorrelationYAMLAndEnvironment(t *testing.T) {
       node_aliases: [[192.0.2.1, 192.0.2.2], ['2001:db8::1', '2001:db8::2']]
       decision_horizon: 6m
       terminal_grace: 40s
+      wait_timeout: 2s
+      shutdown_timeout: 7s
       store_file: /protected/correlation.store
       store_key_id: correlation-v2
       store_key_file: /protected/correlation.key
@@ -68,6 +70,7 @@ func TestLICallCorrelationYAMLAndEnvironment(t *testing.T) {
 		AddressWindow: 1500 * time.Millisecond, NumberWindow: 750 * time.Millisecond,
 		NodeAliases:     [][]string{{"192.0.2.1", "192.0.2.2"}, {"2001:db8::1", "2001:db8::2"}},
 		DecisionHorizon: 6 * time.Minute, TerminalGrace: 40 * time.Second,
+		WaitTimeout: 2 * time.Second, ShutdownTimeout: 7 * time.Second,
 		StoreFile: "/protected/correlation.store",
 		StoreKeys: securestore.KeyConfig{Active: securestore.KeyRef{ID: "correlation-v2", File: "/protected/correlation.key"}, Prior: []securestore.KeyRef{{ID: "correlation-v1", File: "/protected/old.key"}}}, MaxCandidates: 300, MaxRecords: 400,
 	}
@@ -83,6 +86,8 @@ func TestLICallCorrelationYAMLAndEnvironment(t *testing.T) {
 	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_NODE_ALIASES", `[["192.0.2.3","192.0.2.4"]]`)
 	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_SDP_ORIGIN_MATCHING", "false")
 	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_ADDRESS_WINDOW", "0.8s")
+	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_WAIT_TIMEOUT", "3s")
+	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_SHUTDOWN_TIMEOUT", "8s")
 	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_MAX_RECORDS", "500")
 	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_STORE_FILE", "/protected/env.store")
 	expected.SessionHeaders = []string{"Session-ID", "X-Session"}
@@ -90,6 +95,8 @@ func TestLICallCorrelationYAMLAndEnvironment(t *testing.T) {
 	expected.NodeAliases = [][]string{{"192.0.2.3", "192.0.2.4"}}
 	expected.SDPOriginMatching = false
 	expected.AddressWindow = 800 * time.Millisecond
+	expected.WaitTimeout = 3 * time.Second
+	expected.ShutdownTimeout = 8 * time.Second
 	expected.MaxRecords = 500
 	expected.StoreFile = "/protected/env.store"
 	actual, err = readLICallCorrelationConfig()
@@ -117,6 +124,12 @@ func TestLICallCorrelationRejectsInvalidConfiguration(t *testing.T) {
 		value     any
 	}{
 		{"duration", "address_window", "soon"},
+		{"wait duration", "wait_timeout", "soon"},
+		{"negative wait", "wait_timeout", "-1s"},
+		{"zero wait", "wait_timeout", "0s"},
+		{"shutdown duration", "shutdown_timeout", "soon"},
+		{"negative shutdown", "shutdown_timeout", "-1s"},
+		{"zero shutdown", "shutdown_timeout", "0s"},
 		{"negative duration", "decision_horizon", "-1s"},
 		{"integer", "max_records", "many"},
 		{"fractional integer", "max_candidates", 1.5},

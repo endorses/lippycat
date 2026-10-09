@@ -633,6 +633,11 @@ if any of them is missing.
 
 Optional SIP call-leg grouping uses `processor.li.correlation` or `tap.li.correlation`, with every matching rule disabled by default. The [call-leg correlation reference](../part5-advanced/lawful-interception.md#sip-call-leg-correlation) lists all keys, matching precedence, bounds, restart limitations and dedicated encrypted-store setup. Configuration is independent of task authorization and source packet selection. Response-only legs require retained initial-request evidence; storage backlog leaves new adoptions standalone. Configured-store startup errors never trigger automatic store-free fallback.
 
+The correlation `wait_timeout` (default `5s`) and `shutdown_timeout` (default `10s`)
+are positive durations under either prefix. They bound a fixed reservation wait
+and one shared correlation shutdown budget, independently of delivery socket
+timeouts and queue flushing.
+
 ### `tap` — Tap Node {#tap--tap-node}
 
 Tap combines local capture with processor capabilities. See [Standalone Mode with `lc tap`](../part3-distributed/tap.md) for usage. Tap shares many settings with both `hunter` and `processor`.

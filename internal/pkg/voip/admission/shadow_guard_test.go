@@ -33,7 +33,7 @@ func TestBridgeSamplingGuardSeparatesMediaPressureFromEligiblePacketLoss(t *test
 			bridge, registry, _ := fixture(t)
 			message := offer("sampling-pressure")
 			registry.Upsert(callregistry.Call{CallID: message.CallID})
-			check(t, bridge.Selected(message))
+			check(t, selectedReceiptFixture(bridge, message))
 			call, exists := registry.Call(message.CallID)
 			require.True(t, exists)
 			owner := bridge.selected[message.CallID].owner

@@ -98,11 +98,11 @@ func TestReliableRetirementReuseAndWrongDomainCannotBorrowProof(t *testing.T) {
 	bridge.cfg.Limits.InterfaceDomains = map[string]mediaadmission.DomainID{"eth0": 0, "another-interface": 1}
 	foreign := response
 	foreign.Packet = &pipeline.PacketEnvelope{Source: pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, InterfaceName: "another-interface"}}
-	require.NoError(t, bridge.ObserveValidated(foreign))
+	require.NoError(t, bridge.ObserveValidatedReceipt(&foreign))
 	require.NoError(t, bridge.Selected(foreign))
 	assertDerivationState(t, bridge, controller, mediaadmission.FailureClosed, true)
 	foreign.Packet.Source.Kind, foreign.Packet.Source.InterfaceName = pipeline.SourcePCAPReplay, "eth0"
-	require.NoError(t, bridge.ObserveValidated(foreign))
+	require.NoError(t, bridge.ObserveValidatedReceipt(&foreign))
 	assertDerivationState(t, bridge, controller, mediaadmission.FailureClosed, true)
 }
 
@@ -261,8 +261,8 @@ func TestReliablePendingProofExpiryAndEvictionCannotSupplyMissingResponse(t *tes
 		t.Run(loss, func(t *testing.T) {
 			bridge, registry, _, controller := recoveryFixture(t, mediaadmission.FailureClosed, nil)
 			invite, response, prack := reliableSequence("lost-pending-" + loss)
-			require.NoError(t, bridge.ObserveValidated(invite))
-			require.NoError(t, bridge.ObserveValidated(response))
+			require.NoError(t, bridge.ObserveValidatedReceipt(&invite))
+			require.NoError(t, bridge.ObserveValidatedReceipt(&response))
 			if loss == "expiry" {
 				bridge.cfg.Metadata.Expire(time.Now().Add(bridge.cfg.Limits.PendingTTL + time.Second))
 			} else {
@@ -271,7 +271,7 @@ func TestReliablePendingProofExpiryAndEvictionCannotSupplyMissingResponse(t *tes
 				for index := 0; index <= bridge.cfg.Limits.PendingDialogCapacity; index++ {
 					other := offer(fmt.Sprintf("pending-pressure-%d", index))
 					other.SDP = nil
-					require.NoError(t, bridge.ObserveValidated(other))
+					require.NoError(t, bridge.ObserveValidatedReceipt(&other))
 				}
 				require.NotZero(t, bridge.cfg.Metadata.Stats().Evicted)
 			}

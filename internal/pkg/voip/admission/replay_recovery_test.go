@@ -14,11 +14,11 @@ func pressureFixture(t *testing.T, policy mediaadmission.FailurePolicy) (*Bridge
 	t.Helper()
 	b, r, c := retirementFixture(t, mediaadmission.ModeEnforce, policy)
 	cfg := b.cfg.Limits
-	cfg.ReplayGuardCapacity = 1
+	cfg.ReplayGuardCapacity = 2
 	store, err := mediaadmission.NewMetadataStore(cfg)
 	require.NoError(t, err)
 	b.cfg.Metadata = store
-	b.cfg.Limits.ReplayGuardCapacity = 1
+	b.cfg.Limits.ReplayGuardCapacity = 2
 	return b, r, c
 }
 func exhaustReplay(t *testing.T, b *Bridge, r *callregistry.Core) {

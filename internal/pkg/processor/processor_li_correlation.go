@@ -95,9 +95,11 @@ func (p *Processor) startLICorrelationMaintenance() {
 		return
 	}
 	p.liStorage.correlationStop = make(chan struct{})
+	p.liStorage.correlationDone = make(chan struct{})
 	p.liStorage.correlationWorkers.Add(1)
 	go func() {
 		defer p.liStorage.correlationWorkers.Done()
+		defer close(p.liStorage.correlationDone)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		var lastWarning time.Time

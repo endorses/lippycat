@@ -48,13 +48,17 @@ type CallCorrelationPersistence interface {
 }
 
 type correlationRecord struct {
-	decision  CallCorrelationDecision
-	last      time.Time
-	terminal  time.Time
-	published bool
-	group     *correlationGroup
-	ready     chan struct{}
-	deferred  []correlationDeferred
+	dispatchMu sync.Mutex // direct handoffs follow the pressure-triggering caller
+	decision   CallCorrelationDecision
+	last       time.Time
+	terminal   time.Time
+	published  bool
+	group      *correlationGroup
+	ready      chan struct{}
+	deferred   []correlationDeferred
+	pinned     bool          // logical release forbids a later NotCommitted ID change
+	released   chan struct{} // closed exactly once under mu
+	deadline   time.Time
 }
 type correlationDeferred struct {
 	ctx    context.Context
@@ -64,15 +68,17 @@ type correlationDeferred struct {
 }
 
 type correlationGroup struct {
-	id      uint64
-	tasks   map[CallCorrelationTask]bool
-	members int
-	pending bool
+	id        uint64
+	tasks     map[CallCorrelationTask]bool
+	members   int
+	pending   bool
+	uncertain bool
 }
 type correlationCandidate struct {
 	transaction, callID, source, destination, calling, called string
 	started, expires                                          time.Time
 	group                                                     *correlationGroup
+	recordToken                                               uint64
 	headers                                                   map[string]string
 	final                                                     bool
 	finalAt                                                   time.Time
@@ -106,6 +112,7 @@ type CallCorrelationStats struct {
 	SDPDisabled                                                  bool
 	DeferredPackets, DeferredBytes                               int
 	DeferredRejected                                             uint64
+	WaitTimeouts, PressureReleases, ShutdownTimeouts             uint64
 }
 
 // CallCorrelator serializes decisions, indexes and group intersections under one
@@ -117,6 +124,9 @@ type CallCorrelator struct {
 	persistedDigest                [32]byte
 	stop                           chan struct{}
 	stopOnce                       sync.Once
+	closeTimeoutOnce               sync.Once
+	closeDone                      chan struct{}
+	closeErr                       error
 	asyncWG                        sync.WaitGroup
 	deferredPackets, deferredBytes int
 	config                         CallCorrelationConfig
@@ -153,7 +163,7 @@ func NewCallCorrelator(config CallCorrelationConfig, lifetime time.Duration, sto
 	c := &CallCorrelator{config: config, lifetime: lifetime, now: time.Now, store: store,
 		groups: map[uint64]*correlationGroup{}, records: map[string]*correlationRecord{}, candidates: map[string]*correlationCandidate{}, transactions: map[string]correlationTransaction{},
 		headerIndex: map[string]map[string]*correlationCandidate{}, addressIndex: map[string]map[string]*correlationCandidate{}, numberIndex: map[string]map[string]*correlationCandidate{}, originIndex: map[sdpOriginHistoryKey]map[string]*correlationCandidate{}, aliases: map[string]string{}, history: newSDPOriginHistory(config),
-		stop: make(chan struct{}), stats: CallCorrelationStats{Adopted: map[string]uint64{}, Standalone: map[string]uint64{}, SDP: map[string]uint64{}}}
+		stop: make(chan struct{}), closeDone: make(chan struct{}), stats: CallCorrelationStats{Adopted: map[string]uint64{}, Standalone: map[string]uint64{}, SDP: map[string]uint64{}}}
 	for i, set := range config.NodeAliases {
 		for _, value := range set {
 			addr, _ := netip.ParseAddr(value)
@@ -382,6 +392,24 @@ func (c *CallCorrelator) ResolveContext(ctx context.Context, pkt *types.PacketDi
 			}
 		}
 		decision := c.resolveLocked(pkt, tasks, nil)
+		c.mu.Lock()
+		r := c.records[decision.CallID]
+		var ready <-chan struct{}
+		if r != nil && r.decision.token == decision.token {
+			decision = r.decision
+			ready = r.ready
+		}
+		c.mu.Unlock()
+		if ready != nil {
+			select {
+			case <-ready:
+				continue
+			case <-ctx.Done():
+				return CallCorrelationDecision{}, ctx.Err()
+			case <-c.stop:
+				return CallCorrelationDecision{}, errors.New("LI correlation closed")
+			}
+		}
 		if err := ctx.Err(); err != nil {
 			return CallCorrelationDecision{}, err
 		}
@@ -396,36 +424,128 @@ func (c *CallCorrelator) ResolveAsync(ctx context.Context, pkt *types.PacketDisp
 	if fn == nil || bytes < 0 {
 		return errors.New("invalid LI correlation deferred packet")
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	if c.closing {
-		c.mu.Unlock()
-		return errors.New("LI correlation closed")
-	}
-
-	deferred := correlationDeferred{ctx: ctx, fn: fn, bytes: bytes}
-	if pkt != nil && pkt.VoIPData != nil {
-		if r := c.records[pkt.VoIPData.CallID]; r != nil && r.ready != nil {
-			// Retain signaling evidence at arrival even when publication waits or
-			// the bounded delivery handoff rejects this packet. Never reselect ID.
-			c.observeKnown(pkt, r, c.now())
-			if !c.deferredCapacity(bytes) {
-				c.stats.DeferredRejected++
-				c.mu.Unlock()
-				return errors.New("LI correlation deferred packet capacity exhausted")
-			}
-			c.enqueueDeferred(r, deferred)
-			c.mu.Unlock()
-			return nil
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		c.mu.Lock()
+		if c.closing {
+			c.mu.Unlock()
+			return errors.New("LI correlation closed")
+		}
+		deferred := correlationDeferred{ctx: ctx, fn: fn, bytes: bytes}
+		if pkt != nil && pkt.VoIPData != nil {
+			if r := c.records[pkt.VoIPData.CallID]; r != nil && r.ready != nil {
+				c.observeKnown(pkt, r, c.now())
+				ownsDispatch := false
+				select {
+				case <-r.released:
+					// Draining owns the earlier FIFO. Do not allocate another retained
+					// product while its selected-ID handoffs complete.
+				default:
+					if c.deferredCapacity(bytes) {
+						c.enqueueDeferred(r, deferred)
+						c.mu.Unlock()
+						return nil
+					}
+					// Before logical release no direct handoff exists. Reserve the
+					// gate before waking the FIFO; never block under mu.
+					ownsDispatch = r.dispatchMu.TryLock()
+					c.releaseUncertainLocked(r, "pressure")
+				}
+				ready := r.ready
+				c.mu.Unlock()
+				select {
+				case <-ready:
+					c.deliverDirect(ctx, r, fn, ownsDispatch)
+					return nil
+				case <-ctx.Done():
+					if ownsDispatch {
+						r.dispatchMu.Unlock()
+					}
+					return ctx.Err()
+				case <-c.stop:
+					if ownsDispatch {
+						r.dispatchMu.Unlock()
+					}
+					return errors.New("LI correlation closed")
+				}
+			}
+		}
+		decision := c.resolveLocked(pkt, tasks, &deferred)
+		if !deferred.queued && ctx.Err() == nil {
+			c.mu.Lock()
+			r := c.records[decision.CallID]
+			if r != nil && r.decision.token != decision.token {
+				r = nil
+			}
+			c.mu.Unlock()
+			if r != nil {
+				c.deliverDirect(ctx, r, fn, false)
+			} else {
+				fn(decision)
+			}
+		}
+		return nil
 	}
-	decision := c.resolveLocked(pkt, tasks, &deferred)
-	if !deferred.queued && ctx.Err() == nil {
+}
+
+// deliverDirect serializes callers with a pressure-triggered handoff after the
+// retained FIFO. Storage never owns this gate; callbacks run without mu.
+func (c *CallCorrelator) deliverDirect(ctx context.Context, r *correlationRecord, fn func(CallCorrelationDecision), owns bool) {
+	if !owns {
+		r.dispatchMu.Lock()
+	}
+	defer r.dispatchMu.Unlock()
+	c.mu.Lock()
+	decision, closing := r.decision, c.closing
+	c.mu.Unlock()
+	if !closing && ctx.Err() == nil {
 		fn(decision)
 	}
-	return nil
+}
+
+// releaseUncertainLocked ends the logical wait without releasing physical store
+// ownership. The single reservation worker drains the retained FIFO.
+func (c *CallCorrelator) releaseUncertainLocked(r *correlationRecord, cause string) {
+	select {
+	case <-r.released:
+		return
+	default:
+	}
+	r.pinned = true
+	r.group.uncertain = true
+	c.uncertain = true
+	c.markDirty()
+	switch cause {
+	case "timeout":
+		c.stats.WaitTimeouts++
+	case "pressure":
+		c.stats.PressureReleases++
+	}
+	if cause != "shutdown" && (c.lastStorageWarning.IsZero() || c.now().Sub(c.lastStorageWarning) >= time.Minute) {
+		logger.Warn("LI call correlation persistence wait released with uncertain outcome", "cause", cause)
+		c.lastStorageWarning = c.now()
+	}
+	close(r.released)
+}
+
+func (c *CallCorrelator) awaitReservation(r *correlationRecord) {
+	defer c.asyncWG.Done()
+	timer := time.NewTimer(time.Until(r.deadline))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		c.mu.Lock()
+		c.releaseUncertainLocked(r, "timeout")
+		c.mu.Unlock()
+	case <-c.stop:
+		c.mu.Lock()
+		c.releaseUncertainLocked(r, "shutdown")
+		c.mu.Unlock()
+	case <-r.released:
+	}
+	c.drainDeferred(r)
 }
 func (c *CallCorrelator) deferredCapacity(bytes int) bool {
 	return bytes <= maxCallCorrelationStoreBytes && c.deferredPackets < c.config.MaxCandidates && c.deferredBytes <= maxCallCorrelationStoreBytes-bytes
@@ -574,14 +694,18 @@ func (c *CallCorrelator) resolveLocked(pkt *types.PacketDisplay, tasks []CallCor
 	c.records[callID] = r
 	if eligible && len(c.candidates) < c.config.MaxCandidates {
 		v.group = group
+		v.recordToken = r.decision.token
 		c.addCandidate(v)
 		c.transactions[tx] = correlationTransaction{expires: now.Add(c.config.DecisionHorizon), candidate: v, offer: v.role == sdpOriginOffer, requestSeen: pkt.VoIPData.Status == 0}
 	}
 	if persist {
 		r.ready = make(chan struct{})
+		r.released = make(chan struct{})
+		r.deadline = time.Now().Add(c.config.WaitTimeout)
 		c.markDirty()
 		snapshot, revision, uncertain := c.stored(), c.revision, c.uncertain
 		write := func() CallCorrelationDecision {
+			result := result // immutable caller result; completion owns its local copy
 			out, err := securestore.NotCommitted, error(nil)
 			if uncertain {
 				if owner, ok := c.store.(interface{ Reconcile() error }); ok {
@@ -593,7 +717,16 @@ func (c *CallCorrelator) resolveLocked(pkt *types.PacketDisplay, tasks []CallCor
 			}
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			if out == securestore.NotCommitted {
+			if c.records[callID] != r || r.decision.token != result.token {
+				// A replacement lifetime must never inherit this completion.
+				group.pending = false
+				group.uncertain = true
+				c.uncertain = true
+				c.markDirty()
+				c.writeMu.Unlock()
+				return result
+			}
+			if out == securestore.NotCommitted && !r.pinned {
 				group.tasks = intersectCorrelationTasks(oldTasks, group.tasks)
 				group.members--
 				if group.members == 0 {
@@ -610,25 +743,39 @@ func (c *CallCorrelator) resolveLocked(pkt *types.PacketDisplay, tasks []CallCor
 				r.decision = result
 				v.group = standalone
 				c.markDirty()
-			} else if out == securestore.Uncertain || err != nil {
+			} else if out != securestore.Committed || err != nil {
+				group.uncertain = true
 				c.uncertain = true
 				c.markDirty()
-				c.stats.UncertainWrites++
+				if out != securestore.NotCommitted {
+					c.stats.UncertainWrites++
+				}
 			} else {
 				c.persistedDigest = correlationSnapshotDigest(snapshot)
 				if revision == c.revision {
 					c.dirty = false
 				}
-				c.uncertain = false
+				// A logical release or a newer revision still requires the current
+				// snapshot, even if the old physical write eventually committed.
+				c.uncertain = (r.pinned || uncertain) && revision != c.revision
+				group.uncertain = c.uncertain
+				if revision == c.revision {
+					for _, g := range c.groups {
+						g.uncertain = false
+					}
+				}
 			}
 			group.pending = false
-			r.last = c.now()
+			if !r.pinned {
+				r.last = c.now()
+			}
 			if r.decision.CorrelationID != own {
 				c.markDirty()
 			}
-			if deferred == nil {
-				close(r.ready)
-				r.ready = nil
+			select {
+			case <-r.released:
+			default:
+				close(r.released)
 			}
 			c.writeMu.Unlock()
 			if err != nil || out != securestore.Committed {
@@ -642,21 +789,15 @@ func (c *CallCorrelator) resolveLocked(pkt *types.PacketDisplay, tasks []CallCor
 		if deferred != nil {
 			deferred.queued = true
 			c.enqueueDeferred(r, *deferred)
-			c.asyncWG.Add(1)
-			go func() {
-				defer c.asyncWG.Done()
-				c.mu.Lock()
-				c.mu.Unlock()
-				// The reservation snapshot was captured before the decision mutex releases.
-				write()
-				c.drainDeferred(r)
-			}()
-			return result
 		}
-		c.mu.Unlock()
-		result = write()
-		c.mu.Lock()
-
+		// One physical owner and one logical deadline per adoption, never per
+		// packet. Sync callers wait on ready just like async handoffs.
+		c.asyncWG.Add(2)
+		go func() {
+			defer c.asyncWG.Done()
+			write()
+		}()
+		go c.awaitReservation(r)
 	}
 
 	return result
@@ -806,7 +947,7 @@ func (c *CallCorrelator) match(pkt *types.PacketDisplay, v *correlationCandidate
 	for n, k := range v.headers {
 		for _, candidate := range c.headerIndex[headerCorrelationKey(n, k)] {
 			if c.candidateLive(candidate, now) && candidate.callID != v.callID && candidate.group != nil {
-				if candidate.group.pending {
+				if candidate.group.pending || candidate.group.uncertain {
 					return nil, "", "persistence_busy"
 				}
 				if len(intersectCorrelationTasks(candidate.group.tasks, tasks)) == 0 {
@@ -828,7 +969,7 @@ func (c *CallCorrelator) match(pkt *types.PacketDisplay, v *correlationCandidate
 		if r == nil || !c.recordLive(r, now) {
 			return nil, "", "unresolved_parent"
 		}
-		if r.group.pending {
+		if r.group.pending || r.group.uncertain {
 			return nil, "", "persistence_busy"
 		}
 		if len(intersectCorrelationTasks(r.group.tasks, tasks)) == 0 {
@@ -945,7 +1086,7 @@ func correlationHeaderConflict(a, b map[string]string) bool {
 	return false
 }
 func (c *CallCorrelator) allowed(p, v *correlationCandidate, tasks map[CallCorrelationTask]bool) bool {
-	return c.candidateLive(p, c.now()) && p.callID != v.callID && p.group != nil && !p.group.pending && len(intersectCorrelationTasks(p.group.tasks, tasks)) > 0 && !correlationHeaderConflict(p.headers, v.headers)
+	return c.candidateLive(p, c.now()) && p.callID != v.callID && p.group != nil && !p.group.pending && !p.group.uncertain && len(intersectCorrelationTasks(p.group.tasks, tasks)) > 0 && !correlationHeaderConflict(p.headers, v.headers)
 }
 
 // Published records entry into any deliverable queue/reorder/spool. A rejected
@@ -987,8 +1128,14 @@ func (c *CallCorrelator) Maintain() error {
 		return nil
 	}
 	defer c.writeMu.Unlock()
+	return c.maintainOwned(false)
+}
+
+// maintainOwned runs only while the physical owner holds writeMu. Closing uses
+// the same owner so its final snapshot and resource cleanup cannot overlap I/O.
+func (c *CallCorrelator) maintainOwned(closing bool) error {
 	c.mu.Lock()
-	if c.closed {
+	if c.closed || c.closing && !closing {
 		c.mu.Unlock()
 		return nil
 	}
@@ -1020,6 +1167,9 @@ func (c *CallCorrelator) Maintain() error {
 			c.dirty = false
 		}
 		c.uncertain = false
+		for _, group := range c.groups {
+			group.uncertain = false
+		}
 		return nil
 	}
 	if out == securestore.Uncertain {
@@ -1028,27 +1178,64 @@ func (c *CallCorrelator) Maintain() error {
 	}
 	return fmt.Errorf("persist LI correlation maintenance: %w", errors.Join(err, errors.New("correlation state not confirmed committed")))
 }
+
+// Close uses the correlation shutdown policy independently of delivery timeouts.
 func (c *CallCorrelator) Close() error {
+	return c.CloseContext(context.Background())
+}
+
+// CloseContext bounds caller waiting. An in-flight filesystem operation remains
+// the exclusive owner and eventually performs cleanup; its resources are never
+// closed or unlocked beneath it. Repeated calls share the same cleanup worker.
+func (c *CallCorrelator) CloseContext(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, c.config.ShutdownTimeout)
+	defer cancel()
 	c.stopOnce.Do(func() {
 		c.mu.Lock()
 		c.closing = true
 		close(c.stop)
 		c.mu.Unlock()
+		go func() {
+			c.writeMu.Lock()
+			defer c.writeMu.Unlock()
+			c.asyncWG.Wait()
+			err := c.maintainOwned(true)
+			if c.store != nil {
+				err = errors.Join(err, c.store.Close())
+			}
+			c.mu.Lock()
+			c.closed = true
+			c.closeErr = err
+			close(c.closeDone)
+			c.mu.Unlock()
+		}()
 	})
-	// Wait only for the storage owner, never with the decision mutex held.
-	c.writeMu.Lock()
-	c.writeMu.Unlock()
-	c.asyncWG.Wait()
-	err := c.Maintain()
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	c.mu.Lock()
-	c.closed = true
-	c.mu.Unlock()
-	if c.store != nil {
-		return errors.Join(err, c.store.Close())
+	select {
+	case <-c.closeDone:
+		c.mu.Lock()
+		err := c.closeErr
+		c.mu.Unlock()
+		return err
+	case <-ctx.Done():
+		// Prefer a completed cleanup when the deadline and completion race.
+		select {
+		case <-c.closeDone:
+			c.mu.Lock()
+			err := c.closeErr
+			c.mu.Unlock()
+			return err
+		default:
+		}
+		c.closeTimeoutOnce.Do(func() {
+			c.mu.Lock()
+			c.stats.ShutdownTimeouts++
+			c.uncertain = true
+			c.markDirty()
+			c.mu.Unlock()
+			logger.Warn("LI call correlation shutdown budget exhausted; storage owner retains unresolved work")
+		})
+		return fmt.Errorf("close LI call correlation: %w", ctx.Err())
 	}
-	return err
 }
 func (c *CallCorrelator) markDirty() { c.revision++; c.dirty = true }
 func (c *CallCorrelator) recordLive(r *correlationRecord, now time.Time) bool {
@@ -1056,7 +1243,7 @@ func (c *CallCorrelator) recordLive(r *correlationRecord, now time.Time) bool {
 }
 func (c *CallCorrelator) candidateLive(v *correlationCandidate, now time.Time) bool {
 	r := c.records[v.callID]
-	return now.Before(v.expires) && r != nil && c.recordLive(r, now)
+	return now.Before(v.expires) && r != nil && r.decision.token == v.recordToken && c.recordLive(r, now)
 }
 func (c *CallCorrelator) expireRecord(id string, now time.Time) {
 	r := c.records[id]

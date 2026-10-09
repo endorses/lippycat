@@ -196,7 +196,8 @@ func TestCallCorrelationAsyncBoundedOrderedPublication(t *testing.T) {
 	canceled, cancel := context.WithCancel(context.Background())
 	require.NoError(t, c.ResolveAsync(canceled, child, []CallCorrelationTask{correlationTaskX}, 100, callback(2)))
 	cancel()
-	require.Error(t, c.ResolveAsync(context.Background(), child, []CallCorrelationTask{correlationTaskX}, 100, callback(3)))
+	require.NoError(t, c.ResolveAsync(context.Background(), child, []CallCorrelationTask{correlationTaskX}, 100, callback(3)))
+	require.Equal(t, uint64(1), c.Stats().PressureReleases)
 	// Queue exhaustion must not suppress unrelated standalone publication.
 	unrelated := 0
 	require.NoError(t, c.ResolveAsync(context.Background(), contractInvite("unrelated", 8, *now), []CallCorrelationTask{correlationTaskX}, 100, func(d CallCorrelationDecision) {
@@ -207,6 +208,7 @@ func TestCallCorrelationAsyncBoundedOrderedPublication(t *testing.T) {
 	close(store.release)
 	require.Equal(t, 0, <-products)
 	require.Equal(t, 1, <-products)
+	require.Equal(t, 3, <-products)
 	c.asyncWG.Wait()
 	require.Empty(t, products)
 	require.Zero(t, c.deferredPackets)
@@ -321,11 +323,7 @@ func TestCallCorrelationPendingFinalResponseClosesSetup(t *testing.T) {
 			final.VoIPData.Status = 200
 			final.VoIPData.ToTag = "final"
 			err := c.ResolveAsync(context.Background(), final, []CallCorrelationTask{correlationTaskX}, 100, func(CallCorrelationDecision) {})
-			if reject {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
+			require.NoError(t, err)
 			c.mu.Lock()
 			tx, _ := correlationTx(child)
 			at := c.transactions[tx].candidate.finalAt

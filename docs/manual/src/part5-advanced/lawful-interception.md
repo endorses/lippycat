@@ -635,6 +635,19 @@ explicitly enable chosen rules. `sdp_origin_observation_ttl` must exceed
 `sdp_origin_reuse_window`; durations and capacities must be positive. Configure the same
 keys under `tap.li.correlation` for tap.
 
+`wait_timeout` defaults to `5s` and fixes the wait deadline when an adoption is
+reserved; later packets do not renew it. Deadline expiry or deferred-queue
+pressure releases the reserved group ID as uncertain so correlation does not
+discard the leg's product. Released IDs remain stable through late write outcomes;
+authorization, cancellation and original product expiry still apply.
+
+`shutdown_timeout` defaults to `10s` and supplies one shared correlation shutdown
+budget for maintenance, pending decisions and close. It is independent of the
+delivery-queue shutdown timeout. If filesystem I/O outlasts that budget, the
+storage owner retains its file lock, descriptors and cryptographic usage ledger
+until I/O finishes and it can close safely. Bounded shutdown does not cancel the
+write or guarantee durability.
+
 <!-- i18n:skip -->
 ```yaml
 processor:
@@ -655,6 +668,8 @@ processor:
       node_aliases: []
       decision_horizon: 5m
       terminal_grace: 30s
+      wait_timeout: 5s
+      shutdown_timeout: 10s
       max_candidates: 10000
       max_records: 100000
       store_file: ""
@@ -707,19 +722,39 @@ delay is not tolerated. Cleanup scans run during maintenance, while lookups reje
 locally expired evidence between ticks.
 
 A single store owner performs storage I/O outside the correlator decision mutex.
-Packets for the same pending Call-ID wait for its immutable outcome and can cancel
-that wait. Retained unrelated IDs remain usable; new adoption while the writer is
-occupied stays standalone. Pending group membership cannot authorize another join,
-and every pending reservation counts against the existing record limit. Snapshot
-revisions retain newer membership and retention changes for a subsequent write.
+Each adoption has one fixed `wait_timeout` deadline, starting when its decision is
+reserved. Its default is 5 seconds; additional SIP/RTP packets do not renew it.
+Synchronous callers can cancel their wait without cancelling the physical write.
+Retained unrelated IDs remain usable; new adoption while the owner is occupied stays
+standalone. Pending or unresolved uncertain membership cannot authorize another join.
 
-The active storage operation cannot be interrupted by packet cancellation. Shutdown waits for the storage owner outside decision and delivery locks; same-leg waiters are released when shutdown begins.
+Processor and tap retain at most `max_candidates` deferred packets and 32 MiB of
+accounted packet data outside the packet pipeline. At the wait deadline or when that
+handoff reaches its count/byte bound, the reserved group ID is released as uncertain.
+Earlier retained products drain in order; the packet causing pressure and subsequent
+packets use that same ID instead of being rejected because of correlation capacity.
+A new leg that cannot reserve deferred capacity stays standalone. Delivery still
+rechecks authorization, call lifetime, destinations and product expiry using the
+original admission time. Independent cancellation or downstream rejection can prevent
+delivery; correlation does not extend product lifetime.
 
-Processor and tap defer packets for pending decisions outside the packet pipeline,
-with at most `max_candidates` packets and 32 MiB of accounted packet data. Overflow
-rejects additional packets for that pending leg instead of publishing a different ID;
-a new leg that cannot reserve deferred capacity stays standalone. Task authorization
-and destination admission are checked again when deferred packets resume.
+Once released, the selected ID cannot change even if the delayed write reports
+NotCommitted. The physical owner remains exclusive until I/O returns; only then can
+maintenance reconcile and retry the latest snapshot. Late completion cannot revive an
+expired record, replace a newer decision or erase newer membership/retention changes.
+Timeout does not imply a durable commit: a crash before uncertainty is resolved can
+still lose an adopted ID's restart continuity.
+
+`shutdown_timeout` defaults to 10 seconds and bounds the shared correlation shutdown
+wait, including maintenance and close. Both timeout settings must be positive and are
+independent of MDF socket timeouts, delivery drain deadlines, decision retention and
+X3 maximum age. These defaults are operational policy, not throughput or latency gates.
+Shutdown stops new work and suppresses cancelled handoffs before delivery components
+stop. If its budget expires, independent processor cleanup continues with an error and
+warning. The active storage operation cannot be forcibly interrupted: its owner keeps
+file locks, descriptors, keys and the cryptographic usage ledger, then closes them once
+I/O finishes. A bounded caller return does not claim those resources are already freed.
+Repeated close calls share that eventual cleanup and cannot start competing writers.
 
 Activity and terminal-retention changes are coalesced into the next maintenance write.
 Canonical persisted content determines whether a snapshot changed; repeated activity
@@ -746,9 +781,13 @@ plus one when any uncertain snapshot remains unresolved. It does not count every
 record or historical write attempt. `uncertain_writes` counts observed uncertain outcomes.
 
 `deferred_packets` and `deferred_bytes` report the current pending-packet handoff usage;
-`deferred_rejected` counts additional packets rejected when that bounded handoff is
-full. These additive protobuf fields are 24, 25 and 26. Outcome reason keys remain
-stable across status encoding; telemetry contains only aggregate counts.
+`deferred_rejected` is retained for status compatibility; count/byte pressure now
+releases eligible products instead of incrementing it. `wait_timeouts` counts logical
+adoption deadlines, `pressure_releases` counts early capacity releases and
+`shutdown_timeouts` counts owners whose caller shutdown budget was exhausted.
+These counts are separate from physical `uncertain_writes`; a timed-out write might
+later report a definite outcome. Outcome reason keys remain stable across status
+encoding; telemetry contains only aggregate counts.
 
 ### X2 IRI Delivery {#x2-iri-delivery}
 

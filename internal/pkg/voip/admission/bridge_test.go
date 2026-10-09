@@ -84,6 +84,14 @@ func fixture(t *testing.T) (*Bridge, *callregistry.Core, *backend) {
 	})
 	return bridge, registry, maps
 }
+
+// selectedReceiptFixture models a newly validated local observation, including
+// the receipt carried by production sipflow before direct selection.
+func selectedReceiptFixture(bridge *Bridge, message pipeline.SIPResult) error {
+	observed := bridge.ObserveValidatedReceipt(&message)
+	return errors.Join(observed, bridge.Selected(message))
+}
+
 func offer(callID string) pipeline.SIPResult {
 	return pipeline.SIPResult{CallID: callID, Method: "INVITE", CSeqMethod: "INVITE", CSeqNumber: 1, FromTag: "from", ViaBranch: "branch", SDP: []byte("v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 10000 RTP/AVP 0\r\n"), Packet: &pipeline.PacketEnvelope{Source: pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, InterfaceName: "eth0"}}}
 }
@@ -97,7 +105,7 @@ func check(t *testing.T, err error) {
 func TestLateSelectionPromotesOfferWithoutPrematchMedia(t *testing.T) {
 	bridge, registry, maps := fixture(t)
 	invite := offer("call")
-	check(t, bridge.ObserveValidated(invite))
+	check(t, bridge.ObserveValidatedReceipt(&invite))
 	if maps.count() != 0 || registry.ActiveCallCount() != 0 {
 		t.Fatal("unselected SDP caused admission")
 	}
@@ -106,9 +114,9 @@ func TestLateSelectionPromotesOfferWithoutPrematchMedia(t *testing.T) {
 	answer.ResponseCode = 200
 	answer.ToTag = "to"
 	answer.SDP = nil
-	check(t, bridge.ObserveValidated(answer))
+	check(t, bridge.ObserveValidatedReceipt(&answer))
 	registry.Upsert(callregistry.Call{CallID: "call"})
-	check(t, bridge.Selected(answer))
+	check(t, selectedReceiptFixture(bridge, answer))
 	if maps.count() != 2 || registry.EndpointAssociationCount() != 2 {
 		t.Fatal("late selection did not promote RTP and RTCP")
 	}
@@ -120,12 +128,12 @@ func TestLateSelectionPromotesOfferWithoutPrematchMedia(t *testing.T) {
 func TestEstablishedDialogAliasAllowsLaterReverseDirectionSelection(t *testing.T) {
 	bridge, registry, maps := fixture(t)
 	invite := offer("call")
-	check(t, bridge.ObserveValidated(invite))
+	check(t, bridge.ObserveValidatedReceipt(&invite))
 	response := invite
 	response.SDP = nil
 	response.ResponseCode = 183
 	response.ToTag = "to"
-	check(t, bridge.ObserveValidated(response))
+	check(t, bridge.ObserveValidatedReceipt(&response))
 	later := response
 	later.ResponseCode = 0
 	later.Method = "INFO"
@@ -134,9 +142,9 @@ func TestEstablishedDialogAliasAllowsLaterReverseDirectionSelection(t *testing.T
 	later.ViaBranch = "later"
 	later.FromTag = "to"
 	later.ToTag = "from"
-	check(t, bridge.ObserveValidated(later))
+	check(t, bridge.ObserveValidatedReceipt(&later))
 	registry.Upsert(callregistry.Call{CallID: "call"})
-	check(t, bridge.Selected(later))
+	check(t, selectedReceiptFixture(bridge, later))
 	if maps.count() != 2 {
 		t.Fatal("known dialog tags did not promote earlier offer")
 	}
@@ -149,7 +157,7 @@ func TestUnrelatedForkOrTransactionCannotPromote(t *testing.T) {
 			if which == "fork" {
 				original.ToTag = "fork-a"
 			}
-			check(t, bridge.ObserveValidated(original))
+			check(t, bridge.ObserveValidatedReceipt(&original))
 			selected := original
 			selected.SDP = nil
 			if which == "fork" {
@@ -159,7 +167,7 @@ func TestUnrelatedForkOrTransactionCannotPromote(t *testing.T) {
 				selected.ViaBranch = "other"
 			}
 			registry.Upsert(callregistry.Call{CallID: "same-call"})
-			if bridge.Selected(selected) == nil {
+			if selectedReceiptFixture(bridge, selected) == nil {
 				t.Fatal("missing compatible offer was acknowledged as complete empty media")
 			}
 			if maps.count() != 0 {
@@ -172,8 +180,8 @@ func TestStaleEndpointAndCompletionCallbacksCannotChangeReusedCall(t *testing.T)
 	bridge, registry, maps := fixture(t)
 	message := offer("reused")
 	registry.Upsert(callregistry.Call{CallID: "reused"})
-	check(t, bridge.ObserveValidated(message))
-	check(t, bridge.Selected(message))
+	check(t, bridge.ObserveValidatedReceipt(&message))
+	check(t, selectedReceiptFixture(bridge, message))
 	old, _ := registry.EndpointSnapshot("reused")
 	registry.Remove("reused", callregistry.EndCompleted)
 	registry.Upsert(callregistry.Call{CallID: "reused"})
@@ -181,8 +189,8 @@ func TestStaleEndpointAndCompletionCallbacksCannotChangeReusedCall(t *testing.T)
 	fresh.FromTag = "new"
 	fresh.ViaBranch = "new"
 	fresh.SDP = []byte("v=0\r\nc=IN IP4 192.0.2.2\r\nm=audio 20000 RTP/AVP 0\r\n")
-	check(t, bridge.ObserveValidated(fresh))
-	check(t, bridge.Selected(fresh))
+	check(t, bridge.ObserveValidatedReceipt(&fresh))
+	check(t, selectedReceiptFixture(bridge, fresh))
 	bridge.OnEndpointsChanged(old)
 	bridge.OnCallEnded(old.Call, callregistry.EndCompleted)
 	if maps.count() != 2 {
@@ -199,15 +207,15 @@ func TestOnlySelectedLocalAcceptedAssociationsArePublished(t *testing.T) {
 	message := offer("local")
 	remote := message
 	remote.Packet = &pipeline.PacketEnvelope{Source: pipeline.SourceProvenance{Kind: pipeline.SourceGRPC}}
-	check(t, bridge.ObserveValidated(remote))
+	check(t, bridge.ObserveValidatedReceipt(&remote))
 	registry.Upsert(callregistry.Call{CallID: "local"})
-	check(t, bridge.Selected(remote))
+	check(t, selectedReceiptFixture(bridge, remote))
 	registry.TryAssociateEndpoint("local", "192.0.2.1:10000")
 	if maps.count() != 0 {
 		t.Fatal("remote or merely existing registry call installed local admission")
 	}
 	message.SDP = []byte("m=audio 0 RTP/AVP 0")
-	check(t, bridge.Selected(message))
+	check(t, selectedReceiptFixture(bridge, message))
 	if maps.count() != 1 {
 		t.Fatal("accepted local registry association missing")
 	}
@@ -220,8 +228,8 @@ func TestOutOfOrderEndpointRevisionCannotResurrectRemovedEndpoint(t *testing.T) 
 	bridge, registry, maps := fixture(t)
 	message := offer("call")
 	registry.Upsert(callregistry.Call{CallID: "call"})
-	check(t, bridge.ObserveValidated(message))
-	check(t, bridge.Selected(message))
+	check(t, bridge.ObserveValidatedReceipt(&message))
+	check(t, selectedReceiptFixture(bridge, message))
 	old, _ := registry.EndpointSnapshot("call")
 	registry.DissociateEndpoints("call")
 	bridge.OnEndpointsChanged(old)
@@ -240,10 +248,10 @@ func TestConcurrentObserverReentryAndFinalization(t *testing.T) {
 				id := fmt.Sprintf("%d-%d", n, i)
 				message := offer(id)
 				registry.Upsert(callregistry.Call{CallID: id})
-				if err := bridge.ObserveValidated(message); err != nil {
+				if err := bridge.ObserveValidatedReceipt(&message); err != nil {
 					t.Error(err)
 				}
-				if err := bridge.Selected(message); err != nil {
+				if err := selectedReceiptFixture(bridge, message); err != nil {
 					t.Error(err)
 				}
 				registry.Remove(id, callregistry.EndCompleted)
@@ -278,13 +286,13 @@ func TestDiagnosticAnswerAndHoldStateSurvivesAbsentSDP(t *testing.T) {
 	bridge.cfg.Diagnostics = recorder
 	message := offer("call")
 	registry.Upsert(callregistry.Call{CallID: "call"})
-	check(t, bridge.ObserveValidated(message))
-	check(t, bridge.Selected(message))
+	check(t, bridge.ObserveValidatedReceipt(&message))
+	check(t, selectedReceiptFixture(bridge, message))
 	answer := message
 	answer.SDP = nil
 	answer.ResponseCode = 200
 	answer.ToTag = "to"
-	check(t, bridge.Selected(answer))
+	check(t, selectedReceiptFixture(bridge, answer))
 	var selectedAt time.Time
 	for _, state := range recorder.selections {
 		if !state.answered || !state.active {
@@ -296,7 +304,7 @@ func TestDiagnosticAnswerAndHoldStateSurvivesAbsentSDP(t *testing.T) {
 	later.ResponseCode = 0
 	later.Method = "BYE"
 	later.CSeqMethod = "BYE"
-	check(t, bridge.Selected(later))
+	check(t, selectedReceiptFixture(bridge, later))
 	for _, state := range recorder.selections {
 		if !state.answered || !state.active || state.at != selectedAt {
 			t.Fatal("SDP-absent message reset diagnostic state")
@@ -307,7 +315,7 @@ func TestDiagnosticAnswerAndHoldStateSurvivesAbsentSDP(t *testing.T) {
 	hold.CSeqNumber = 2
 	hold.ViaBranch = "hold-branch"
 	hold.SDP = []byte("v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 0 RTP/AVP 0\r\n")
-	check(t, bridge.Selected(hold))
+	check(t, selectedReceiptFixture(bridge, hold))
 	for _, state := range recorder.selections {
 		if state.active {
 			t.Fatal("explicit disabled SDP did not update hold diagnostic")
@@ -332,13 +340,13 @@ func TestRetryCurrentEligibleSnapshotAfterCapacityFrees(t *testing.T) {
 			bridge, registry, maps, controller := retryFixture(t, owners, 10, nil)
 			first := offer("first")
 			registry.Upsert(callregistry.Call{CallID: first.CallID})
-			check(t, bridge.ObserveValidated(first))
-			check(t, bridge.Selected(first))
+			check(t, bridge.ObserveValidatedReceipt(&first))
+			check(t, selectedReceiptFixture(bridge, first))
 			second := offer("second")
 			second.SDP = []byte("v=0\r\nc=IN IP4 192.0.2.2\r\nm=audio 20000 RTP/AVP 0\r\n")
 			registry.Upsert(callregistry.Call{CallID: second.CallID})
-			check(t, bridge.ObserveValidated(second))
-			if bridge.Selected(second) == nil {
+			check(t, bridge.ObserveValidatedReceipt(&second))
+			if selectedReceiptFixture(bridge, second) == nil {
 				t.Fatal("capacity exceeded without error")
 			}
 			registry.Remove(first.CallID, callregistry.EndCompleted)
@@ -416,8 +424,8 @@ func TestRetryCannotRestoreSnapshotOlderThanConcurrentRegistryMutation(t *testin
 			msg.SDP = []byte("v=0\r\nc=IN IP4 192.0.2.2\r\nm=audio 20000 RTP/AVP 0\r\n")
 		}
 		registry.Upsert(callregistry.Call{CallID: id})
-		check(t, bridge.ObserveValidated(msg))
-		err := bridge.Selected(msg)
+		check(t, bridge.ObserveValidatedReceipt(&msg))
+		err := selectedReceiptFixture(bridge, msg)
 		if id == "first" {
 			check(t, err)
 		} else if err == nil {
@@ -448,7 +456,7 @@ func TestPendingPoolOverflowNeverCreatesZeroOwnerOrClearsLostSelection(t *testin
 	bridge, registry, _, controller := retryFixture(t, 1, 1, nil)
 	for _, id := range []string{"active", "pending", "lost"} {
 		registry.Upsert(callregistry.Call{CallID: id})
-		err := bridge.Selected(offer(id))
+		err := selectedReceiptFixture(bridge, offer(id))
 		if id == "active" {
 			check(t, err)
 		} else if err == nil {
@@ -486,12 +494,12 @@ func TestPendingPoolOverflowNeverCreatesZeroOwnerOrClearsLostSelection(t *testin
 func TestForegroundErrorCallbackCanCloseRetryWorker(t *testing.T) {
 	bridge, registry, _, _ := retryFixture(t, 1, 2, nil)
 	registry.Upsert(callregistry.Call{CallID: "active"})
-	check(t, bridge.Selected(offer("active")))
+	check(t, selectedReceiptFixture(bridge, offer("active")))
 	closed := make(chan error, 1)
 	bridge.cfg.OnError = func(error) { closed <- bridge.Close() }
 	registry.Upsert(callregistry.Call{CallID: "pending"})
 	returned := make(chan error, 1)
-	go func() { returned <- bridge.Selected(offer("pending")) }()
+	go func() { returned <- selectedReceiptFixture(bridge, offer("pending")) }()
 	select {
 	case err := <-closed:
 		check(t, err)
@@ -508,7 +516,7 @@ func TestRetryFailureDoesNotReenterErrorCallback(t *testing.T) {
 	bridge, registry, _, _ := retryFixture(t, 1, 1, nil)
 	for _, id := range []string{"active", "pending"} {
 		registry.Upsert(callregistry.Call{CallID: id})
-		err := bridge.Selected(offer(id))
+		err := selectedReceiptFixture(bridge, offer(id))
 		if id == "active" {
 			check(t, err)
 		} else if err == nil {
@@ -533,8 +541,8 @@ func TestBackgroundRetryRecoversWithoutMoreSIPAndStopsOnClose(t *testing.T) {
 			message.SDP = []byte("v=0\r\nc=IN IP4 192.0.2.2\r\nm=audio 20000 RTP/AVP 0\r\n")
 		}
 		registry.Upsert(callregistry.Call{CallID: id})
-		check(t, bridge.ObserveValidated(message))
-		err := bridge.Selected(message)
+		check(t, bridge.ObserveValidatedReceipt(&message))
+		err := selectedReceiptFixture(bridge, message)
 		if id == "active" {
 			check(t, err)
 		} else if err == nil {
@@ -589,7 +597,7 @@ func TestUnrelatedCallMutationCannotLoseSelectedEndpointPublication(t *testing.T
 	registry.Upsert(callregistry.Call{CallID: "unrelated-b"})
 	selected := offer("selected-a")
 	selected.SDP = []byte("m=audio 0 RTP/AVP 0")
-	check(t, bridge.Selected(selected))
+	check(t, selectedReceiptFixture(bridge, selected))
 	if maps.count() != 0 {
 		t.Fatal("fixture unexpectedly installed endpoints before association")
 	}
@@ -659,11 +667,11 @@ func TestIncompleteSelectedDerivationRetainsSafeAttributionAndRequiresCompleteRe
 			bridge, registry, maps, controller := recoveryFixture(t, policy, nil)
 			message := offer("partial")
 			message.SDP = append(message.SDP, []byte("m=video invalid RTP/AVP 96\r\n")...)
-			if bridge.ObserveValidated(message) == nil {
+			if bridge.ObserveValidatedReceipt(&message) == nil {
 				t.Fatal("partial SDP accepted as complete")
 			}
 			registry.Upsert(callregistry.Call{CallID: message.CallID})
-			if bridge.Selected(message) == nil {
+			if selectedReceiptFixture(bridge, message) == nil {
 				t.Fatal("unknown selected media was not reported")
 			}
 			if bridge.Stats().UnknownDerivations != 1 || registry.EndpointAssociationCount() != 2 || maps.count() != 2 {
@@ -686,22 +694,22 @@ func TestIncompleteSelectedDerivationRetainsSafeAttributionAndRequiresCompleteRe
 			binding.SDP = nil
 			binding.ResponseCode = 200
 			binding.ToTag = "destination"
-			if bridge.Selected(binding) == nil {
+			if selectedReceiptFixture(bridge, binding) == nil {
 				t.Fatal("opposite response cleared unresolved offer")
 			}
 			repaired := offer(message.CallID)
 			repaired.ToTag = "destination"
 			repaired.ViaBranch = "repair-branch"
 			repaired.CSeqNumber++
-			check(t, bridge.ObserveValidated(repaired))
-			if bridge.Selected(repaired) == nil {
+			check(t, bridge.ObserveValidatedReceipt(&repaired))
+			if selectedReceiptFixture(bridge, repaired) == nil {
 				t.Fatal("unconfirmed request cleared uncertainty")
 			}
 			confirmed := repaired
 			confirmed.Method, confirmed.ResponseCode = "200", 200
 			confirmed.SDP = derivationSDP("192.0.2.2", 20000, false)
-			check(t, bridge.ObserveValidated(confirmed))
-			check(t, bridge.Selected(confirmed))
+			check(t, bridge.ObserveValidatedReceipt(&confirmed))
+			check(t, selectedReceiptFixture(bridge, confirmed))
 			status := controller.Status()[0]
 			if status.State != mediaadmission.StateEnforcing || status.PendingUpdates != 0 || bridge.Stats().UnknownDerivations != 0 {
 				t.Fatalf("complete SDP did not recover: %+v", status)
@@ -714,16 +722,16 @@ func TestUnknownPendingSDPDoesNotDisappearWhenLateSelectionHasNoBody(t *testing.
 	bridge, registry, _, controller := recoveryFixture(t, mediaadmission.FailureOpen, nil)
 	bad := offer("pending")
 	bad.SDP = []byte("m=audio invalid RTP/AVP 0\r\n")
-	if bridge.ObserveValidated(bad) == nil {
+	if bridge.ObserveValidatedReceipt(&bad) == nil {
 		t.Fatal("missing pending parse error")
 	}
 	answer := bad
 	answer.SDP = nil
 	answer.ToTag = "to"
 	answer.ResponseCode = 200
-	check(t, bridge.ObserveValidated(answer))
+	check(t, bridge.ObserveValidatedReceipt(&answer))
 	registry.Upsert(callregistry.Call{CallID: answer.CallID})
-	if bridge.Selected(answer) == nil || bridge.Stats().UnknownDerivations != 1 {
+	if selectedReceiptFixture(bridge, answer) == nil || bridge.Stats().UnknownDerivations != 1 {
 		t.Fatal("empty unknown staging disappeared")
 	}
 	if controller.Status()[0].State != mediaadmission.StateDegradedOpen {
@@ -738,8 +746,8 @@ func TestUnknownPendingSDPDoesNotDisappearWhenLateSelectionHasNoBody(t *testing.
 	reused := offer(answer.CallID)
 	reused.FromTag, reused.ViaBranch = "replacement", "replacement"
 	reused.SDP = []byte("c=IN IP4 192.0.2.2\r\nm=audio 0 RTP/AVP 0\r\n")
-	check(t, bridge.ObserveValidated(reused))
-	check(t, bridge.Selected(reused))
+	check(t, bridge.ObserveValidatedReceipt(&reused))
+	check(t, selectedReceiptFixture(bridge, reused))
 	if bridge.Stats().UnknownDerivations != 0 {
 		t.Fatal("intentional empty replacement inherited unknown derivation")
 	}
@@ -750,7 +758,7 @@ func TestFailedControlRemainsUncertainUntilConfirmedSnapshotRecovery(t *testing.
 	message := offer("control")
 	message.ToTag = "destination"
 	registry.Upsert(callregistry.Call{CallID: message.CallID})
-	check(t, bridge.Selected(message))
+	check(t, selectedReceiptFixture(bridge, message))
 	maps.mu.Lock()
 	maps.failControl = true
 	maps.mu.Unlock()
@@ -758,7 +766,7 @@ func TestFailedControlRemainsUncertainUntilConfirmedSnapshotRecovery(t *testing.
 	bad.CSeqNumber = 2
 	bad.ViaBranch = "failed-branch"
 	bad.SDP = []byte("m=audio invalid RTP/AVP 0")
-	if bridge.Selected(bad) == nil {
+	if selectedReceiptFixture(bridge, bad) == nil {
 		t.Fatal("failed control was not reported")
 	}
 	status := controller.Status()[0]
@@ -768,13 +776,13 @@ func TestFailedControlRemainsUncertainUntilConfirmedSnapshotRecovery(t *testing.
 	repair := message
 	repair.CSeqNumber = 3
 	repair.ViaBranch = "repair-branch"
-	if bridge.Selected(repair) == nil {
+	if selectedReceiptFixture(bridge, repair) == nil {
 		t.Fatal("repair ignored failed control operation")
 	}
 	confirmed := repair
 	confirmed.Method, confirmed.ResponseCode = "200", 200
 	confirmed.SDP = derivationSDP("192.0.2.2", 20000, false)
-	if bridge.Selected(confirmed) == nil {
+	if selectedReceiptFixture(bridge, confirmed) == nil {
 		t.Fatal("confirmed exchange ignored failed control operation")
 	}
 	maps.mu.Lock()
@@ -813,7 +821,7 @@ func TestSelectedAssociationLossRetriesButRetirementIsNotSynchronizationLoss(t *
 	message := offer("rejected")
 	registry.Upsert(callregistry.Call{CallID: message.CallID})
 	source.reject.Store(true)
-	if bridge.Selected(message) == nil || controller.Status()[0].State != mediaadmission.StateDegradedOpen {
+	if selectedReceiptFixture(bridge, message) == nil || controller.Status()[0].State != mediaadmission.StateDegradedOpen {
 		t.Fatal("live selected association loss did not apply failure policy")
 	}
 	source.reject.Store(false)
@@ -825,7 +833,7 @@ func TestSelectedAssociationLossRetriesButRetirementIsNotSynchronizationLoss(t *
 	registry.Upsert(callregistry.Call{CallID: "retiring"})
 	message = offer("retiring")
 	source.retire.Store(true)
-	_ = bridge.Selected(message) // finalization legitimately races promotion
+	_ = selectedReceiptFixture(bridge, message) // finalization legitimately races promotion
 	if controller.Status()[0].State != mediaadmission.StateEnforcing || bridge.Stats().SelectedLifetimes != 0 {
 		t.Fatal("stale promotion changed failure policy or retained lifetime")
 	}
@@ -854,7 +862,7 @@ func TestLifecycleDiagnosticsReceiveSelectionBeforeAuthoritativeLifetimeBoundary
 	bridge.mu.Unlock()
 	message := offer("synthetic-lifetime")
 	registry.Upsert(callregistry.Call{CallID: message.CallID})
-	check(t, bridge.Selected(message))
+	check(t, selectedReceiptFixture(bridge, message))
 	call, ok := registry.Call(message.CallID)
 	if !ok || !diagnostics.selectionBeforeLifetime || diagnostics.created != call.Created || diagnostics.selected.IsZero() || diagnostics.selected.Before(diagnostics.created) {
 		t.Fatal("diagnostic lifetime boundary was unavailable or preceded selection registration")
@@ -867,20 +875,20 @@ func TestLifecycleDiagnosticsReceiveSelectionBeforeAuthoritativeLifetimeBoundary
 func TestExpiredPendingOfferKeepsInitialSelectedInviteUnknownUntilCompleteSDP(t *testing.T) {
 	bridge, registry, _, controller := recoveryFixture(t, mediaadmission.FailureOpen, nil)
 	message := offer("expired-offer")
-	check(t, bridge.ObserveValidated(message))
+	check(t, bridge.ObserveValidatedReceipt(&message))
 	bridge.cfg.Metadata.Expire(time.Now().Add(bridge.cfg.Limits.PendingTTL))
 	selected := message
 	selected.SDP = nil
 	selected.ResponseCode = 200
 	selected.ToTag = "destination"
 	registry.Upsert(callregistry.Call{CallID: selected.CallID})
-	if bridge.Selected(selected) == nil || bridge.Stats().UnknownDerivations != 1 || controller.Status()[0].State != mediaadmission.StateDegradedOpen {
+	if selectedReceiptFixture(bridge, selected) == nil || bridge.Stats().UnknownDerivations != 1 || controller.Status()[0].State != mediaadmission.StateDegradedOpen {
 		t.Fatal("lost offer was synchronized as empty media")
 	}
 	if bridge.retrySelected() == nil {
 		t.Fatal("empty accepted registry snapshot cleared missing derivation")
 	}
-	check(t, bridge.Selected(message))
+	check(t, selectedReceiptFixture(bridge, message))
 	if controller.Status()[0].State != mediaadmission.StateEnforcing {
 		t.Fatal("complete selected SDP did not recover missing offer")
 	}
@@ -904,7 +912,7 @@ func TestAttributionDiagnosticsReturnImmediatelyWhenReconciliationOwnsBridge(t *
 	bridge.mu.Unlock()
 	message := offer("synthetic-attribution")
 	registry.Upsert(callregistry.Call{CallID: message.CallID})
-	check(t, bridge.Selected(message))
+	check(t, selectedReceiptFixture(bridge, message))
 	call, ok := registry.Call(message.CallID)
 	if !ok {
 		t.Fatal("selected lifetime missing")

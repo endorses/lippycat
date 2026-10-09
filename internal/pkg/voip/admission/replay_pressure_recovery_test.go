@@ -31,7 +31,7 @@ func TestReplayPressureExpiryPromotesQuarantinedCompleteExchange(t *testing.T) {
 						require.Equal(t, mediaadmission.StateShadow, controller.Status()[0].State)
 					}
 					cfg := bridge.cfg.Limits
-					cfg.ReplayGuardCapacity = 1
+					cfg.ReplayGuardCapacity = 2
 					store, err := mediaadmission.NewMetadataStore(cfg)
 					require.NoError(t, err)
 					bridge.cfg.Metadata = store
@@ -52,7 +52,7 @@ func TestReplayPressureExpiryPromotesQuarantinedCompleteExchange(t *testing.T) {
 						require.NoError(t, submitDerivation(t, bridge, registry, answer))
 						require.True(t, registry.Remove(id, callregistry.EndCompleted))
 					}
-					require.Equal(t, 1, store.Stats().ReplayContexts)
+					require.Equal(t, 2, store.Stats().ReplayContexts)
 					rejected, answer := recoveryAtSequence(invite, "caller", "INVITE", 2)
 					_ = submitDerivation(t, bridge, registry, rejected)
 					_ = submitDerivation(t, bridge, registry, answer)

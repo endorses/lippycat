@@ -390,6 +390,8 @@ func liCallCorrelationFields(config *li.CallCorrelationConfig) map[string]any {
 		"node_aliases":               &config.NodeAliases,
 		"decision_horizon":           &config.DecisionHorizon,
 		"terminal_grace":             &config.TerminalGrace,
+		"wait_timeout":               &config.WaitTimeout,
+		"shutdown_timeout":           &config.ShutdownTimeout,
 		"store_key_file":             &config.StoreKeys.Active.File,
 		"store_key_id":               &config.StoreKeys.Active.ID,
 		"store_read_keys":            &config.StoreKeys.Prior,
@@ -429,6 +431,9 @@ func readLICallCorrelationConfig() (li.CallCorrelationConfig, error) {
 			*field, err = strconv.Atoi(fmt.Sprint(raw))
 		case *time.Duration:
 			*field, err = time.ParseDuration(fmt.Sprint(raw))
+			if err == nil && (name == "wait_timeout" || name == "shutdown_timeout") && *field <= 0 {
+				err = fmt.Errorf("must be a positive duration")
+			}
 		case *string:
 			var ok bool
 			*field, ok = raw.(string)

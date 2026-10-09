@@ -69,6 +69,7 @@ func TestHunterAdmissionDiagnosticsRequireSelectedCurrentResolution(t *testing.T
 			selected := pipeline.SIPResult{SDP: []byte("m=audio 0 RTP/AVP 0"), CallID: "selected-call", Method: "INVITE", FromTag: "from", ViaBranch: "branch", CSeqMethod: "INVITE", CSeqNumber: 1, Packet: &pipeline.PacketEnvelope{Source: pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, InterfaceName: "eth-test"}}}
 			registry.Upsert(callregistry.Call{CallID: selected.CallID})
 			if scenario != "unselected" {
+				require.NoError(t, bridge.ObserveValidatedReceipt(&selected))
 				require.NoError(t, bridge.Selected(selected))
 			}
 			if scenario != "unresolved" {
@@ -89,6 +90,7 @@ func TestHunterAdmissionDiagnosticsRequireSelectedCurrentResolution(t *testing.T
 					registry.Upsert(callregistry.Call{CallID: selected.CallID})
 					replacement := selected
 					replacement.FromTag, replacement.ViaBranch = "replacement-origin", "replacement-transaction"
+					require.NoError(t, bridge.ObserveValidatedReceipt(&replacement))
 					require.NoError(t, bridge.Selected(replacement))
 				}})
 			}

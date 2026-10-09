@@ -23,8 +23,22 @@ func (b *Bridge) newMediaProofLocked(call *selectedCall, key mediaadmission.Dial
 		return !key.DescriptorOnly || key.CSeqMethod == "INVITE" || key.CSeqMethod == "UPDATE" || key.CSeqMethod == "PRACK"
 	}
 	state := call.derivations[side]
+	if key.DescriptorOnly && key.CSeqValid && !key.ReliableEvidence && !key.ReliableResponse && key.FromTag != "" && key.ToTag != "" && key.Branch != "" {
+		request := call.derivations[derivationSide{key.FromTag, key.ToTag, key.FromTag, false}]
+		response := call.derivations[derivationSide{key.ToTag, key.FromTag, key.FromTag, false}]
+		if request != nil && response != nil && request.cseq == key.CSeq && response.cseq == key.CSeq && request.method == "INVITE" && response.method == "INVITE" && request.accepted && response.accepted && response.responseCode >= 200 && response.responseCode < 300 && !request.missing && !response.missing && !request.conflict && !response.conflict {
+			// ACK to a final 2xx INVITE has its own branch. A bodyless ACK
+			// cannot answer a delayed offer or alter retained media proof.
+			if key.CSeqMethod == "ACK" && key.ResponseCode == 0 {
+				return false
+			}
+			if key.CSeqMethod == "INVITE" && key.ResponseCode > 100 && key.ResponseCode < 200 && key.Branch == request.branch && key.Branch == response.branch {
+				return false
+			}
+		}
+	}
 	if state == nil {
-		return key.CSeqMethod != "ACK" || !key.DescriptorOnly
+		return true
 	}
 	if key.CSeq < state.cseq {
 		return false
@@ -39,10 +53,29 @@ func (b *Bridge) newMediaProofLocked(call *selectedCall, key mediaadmission.Dial
 }
 
 func (b *Bridge) observeSelectedRecordLocked(call *selectedCall, record mediaadmission.MetadataRecord) bool {
+	if record.Key.Generation == 0 {
+		b.stampReplayEligibilityLocked(&record.Key)
+	}
 	if !b.checkKeyLifetimeLocked(call, record.Key) {
+		b.observeRejectedConflictLocked(call, record)
 		return false
 	}
-	if time.Now().Before(b.proofHistory.blockedUntil) && b.newMediaProofLocked(call, record.Key) {
+	if !b.now().Before(b.proofHistory.blockedUntil) && call.quarantine != nil && record.Key.ResponseCode == 0 && (record.Key.CSeqMethod == "INVITE" || record.Key.CSeqMethod == "UPDATE") && !record.Key.HeaderConflict && record.Key.CSeqValid && !call.quarantine.contextLost && !call.quarantine.forkAmbiguous {
+		// A fresh higher transaction may replace incomplete pressure-only
+		// evidence. Preserve conflicting or independently unresolved obligations.
+		replaces := len(call.quarantine.derivations) > 0
+		for side, state := range call.quarantine.derivations {
+			if side.initiator != record.Key.FromTag || state.cseq >= record.Key.CSeq || state.conflict || state.missing || unresolvedState(state.previous) {
+				replaces = false
+			}
+		}
+		if replaces {
+			b.releaseDerivations(call.quarantine)
+			call.quarantine = nil
+			call.replayBlockedUntil = time.Time{}
+		}
+	}
+	if (b.now().Before(b.proofHistory.blockedUntil) || call.quarantine != nil) && b.newMediaProofLocked(call, record.Key) {
 		if record.Key.HeaderConflict || !record.Key.CSeqValid {
 			// Storage pressure must not hide independent malformed/conflicting
 			// evidence behind a quarantine that will later be discarded.
@@ -54,6 +87,21 @@ func (b *Bridge) observeSelectedRecordLocked(call *selectedCall, record mediaadm
 	return b.observeDerivation(call, record)
 }
 
+func (b *Bridge) observeRejectedConflictLocked(call *selectedCall, record mediaadmission.MetadataRecord) {
+	key := record.Key
+	if key.LifetimeSession != 0 || key.LifetimeGeneration != 0 {
+		if key.LifetimeSession != call.lifetime.Session || key.LifetimeGeneration != call.lifetime.Generation {
+			return
+		}
+	}
+	if key.HeaderConflict || !key.CSeqValid {
+		// Storage loss cannot erase independent malformed evidence. This path
+		// supplies uncertainty only, never endpoints from a rejected observation.
+		record.Endpoints = nil
+		b.observeDerivation(call, record)
+	}
+}
+
 // Quarantine uses the same charged descriptor/endpoint pool as selected proof.
 // It cannot promote registry endpoints. Its lifetime is fixed on first evidence,
 // bounded by one replay window plus PendingTTL; later pressure never renews it.
@@ -63,15 +111,18 @@ func (b *Bridge) quarantineRecordLocked(call *selectedCall, record mediaadmissio
 		call.replayMissingCutoff = b.proofHistory.pressureCutoff
 		call.quarantineExpires = time.Time{}
 	}
-	call.replayBlockedUntil = b.proofHistory.blockedUntil
-	if call.quarantine == nil && !call.quarantineExpires.IsZero() && !time.Now().Before(call.quarantineExpires) {
+	if !b.proofHistory.blockedUntil.IsZero() {
+		call.replayBlockedUntil = b.proofHistory.blockedUntil
+	}
+	if call.quarantine == nil && !call.quarantineExpires.IsZero() && !b.now().Before(call.quarantineExpires) {
 		return
 	}
 	if call.quarantine == nil {
 		call.quarantine = &selectedCall{lifetime: call.lifetime, owner: call.owner, replayMissingCutoff: call.replayMissingCutoff}
-		call.quarantineExpires = time.Now().Add(b.cfg.Limits.ReplayWindow + b.cfg.Limits.PendingTTL)
+		call.quarantineGeneration = record.Key.ReplayPressureGeneration
+		call.quarantineExpires = b.now().Add(b.cfg.Limits.ReplayWindow + b.cfg.Limits.PendingTTL)
 	}
-	if !time.Now().Before(call.quarantineExpires) {
+	if !b.now().Before(call.quarantineExpires) {
 		return
 	}
 	b.observeDerivation(call.quarantine, record)
@@ -101,9 +152,13 @@ func (b *Bridge) recoverPressureCallLocked(id string, call *selectedCall, now ti
 		call.replayBlockedUntil = b.proofHistory.blockedUntil
 		return
 	}
-	call.replayBlockedUntil = time.Time{}
 	active, ok := b.cfg.Registry.Call(id)
 	q := call.quarantine
+	if q != nil && call.quarantineGeneration != 0 && call.quarantineGeneration <= b.proofHistory.invalidThrough {
+		b.releaseDerivations(q)
+		call.quarantine = nil
+		q = nil
+	}
 	if ok && active.Lifetime == call.lifetime && q != nil {
 		keys, valid := b.validQuarantineLocked(id, call, q)
 		if valid {
@@ -148,6 +203,12 @@ func (b *Bridge) recoverPressureCallLocked(id string, call *selectedCall, now ti
 			}
 		}
 	}
+	// Keep the recovery marker while eligible incomplete quarantine may still
+	// receive its exact response after pressure ends. Expiry/fresh authoritative
+	// proof are the other ways to discharge it.
+	if call.quarantine == nil {
+		call.replayBlockedUntil = time.Time{}
+	}
 	call.known, call.unknown, call.mediaSet = b.derivationSummary(call)
 	call.mediaRevision++
 	call.activeMedia = len(call.mediaSet) > 0
@@ -184,7 +245,7 @@ func (b *Bridge) validQuarantineLocked(id string, call, q *selectedCall) ([]medi
 		covered[side], covered[responseSide] = true, true
 		ackSide := side
 		ackSide.prack = true
-		if answer := q.derivations[ackSide]; answer != nil && b.reliableAnswerMatches(q, ackSide, answer, time.Now()) {
+		if answer := q.derivations[ackSide]; answer != nil && b.reliableAnswerMatches(q, ackSide, answer, b.now()) {
 			covered[ackSide] = true
 		}
 	}

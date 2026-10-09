@@ -13,6 +13,9 @@ type DomainResult interface {
 }
 
 type SIPResult struct {
+	// ObservationReceipt is bounded observer-owned provenance carried across
+	// selection and registry handoff. It is independent of pending staging TTL.
+	ObservationReceipt             SIPObservationReceipt
 	Timestamp                      time.Time
 	CallID, Method, CSeqMethod     string
 	CSeqNumber                     uint64
@@ -31,6 +34,12 @@ type SIPResult struct {
 	Packet                         *PacketEnvelope
 	MatchedFilterIDs               []string
 	Lifecycle                      []CallLifecycleObservation
+}
+
+// SIPObservationReceipt is opaque to the pipeline; the issuing observer checks
+// its own scope and evidence before using it. Receipts never contain payloads.
+type SIPObservationReceipt interface {
+	SIPObservationReceipt()
 }
 
 func (r SIPResult) CapturedAt() time.Time { return r.Timestamp }

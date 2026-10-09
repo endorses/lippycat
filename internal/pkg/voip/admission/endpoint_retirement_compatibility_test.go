@@ -17,13 +17,18 @@ func retirementFixture(t *testing.T, mode mediaadmission.Mode, policy mediaadmis
 	t.Helper()
 	cfg := mediaadmission.DefaultConfig()
 	cfg.Enabled, cfg.Mode, cfg.FailurePolicy, cfg.RetryInterval = true, mode, policy, time.Hour
+	return retirementConfiguredFixture(t, cfg, nil)
+}
+
+func retirementConfiguredFixture(t *testing.T, cfg mediaadmission.Config, now func() time.Time) (*Bridge, *callregistry.Core, *mediaadmission.Controller) {
+	t.Helper()
 	maps := &backend{keys: make(map[mediaadmission.EndpointKey]bool)}
 	controller, err := mediaadmission.NewController(context.Background(), cfg, maps)
 	require.NoError(t, err)
 	store, err := mediaadmission.NewMetadataStore(cfg)
 	require.NoError(t, err)
 	registry := callregistry.New(callregistry.Config{MaxCalls: 10, MaxEndpointsPerCall: 64, MaxEndpointAssociations: 256})
-	bridge, err := New(Config{Limits: cfg, Registry: registry, Controller: controller, Metadata: store})
+	bridge, err := New(Config{Now: now, Limits: cfg, Registry: registry, Controller: controller, Metadata: store})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		registry.Close()

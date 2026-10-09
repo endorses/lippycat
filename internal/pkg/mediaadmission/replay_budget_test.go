@@ -33,3 +33,45 @@ func TestReplayBudgetIsSeparateAndShared(t *testing.T) {
 		})
 	}
 }
+
+func TestReplayOverflowReservationPartitionsAggregateBudget(t *testing.T) {
+	for _, bound := range []string{"count", "bytes"} {
+		t.Run(bound, func(t *testing.T) {
+			cfg := DefaultConfig()
+			if bound == "count" {
+				cfg.ReplayGuardCapacity = 4
+			} else {
+				cfg.ReplayGuardBytes = 512
+			}
+			store, err := NewMetadataStore(cfg)
+			require.NoError(t, err)
+			entry := SelectedDerivationUsage{Contexts: 1, Bytes: 128}
+			for range 3 {
+				require.NoError(t, store.ReserveReplayGuards(SelectedDerivationUsage{}, entry))
+			}
+			require.ErrorIs(t, store.ReserveReplayGuards(SelectedDerivationUsage{}, entry), ErrCapacity)
+			// Another domain's overflow identity uses the shared reserved final entry.
+			require.NoError(t, store.ReserveReplayOverflow(SelectedDerivationUsage{}, entry))
+			require.ErrorIs(t, store.ReserveReplayOverflow(SelectedDerivationUsage{}, entry), ErrCapacity)
+			require.Equal(t, 4, store.Stats().ReplayContexts)
+			require.Equal(t, 512, store.Stats().ReplayBytes)
+			require.NoError(t, store.ReserveReplayOverflow(entry, SelectedDerivationUsage{}))
+			require.Error(t, store.ReserveReplayOverflow(entry, SelectedDerivationUsage{}))
+			require.NoError(t, store.ReserveReplayGuards(SelectedDerivationUsage{Contexts: 3, Bytes: 384}, SelectedDerivationUsage{}))
+			require.Zero(t, store.Stats().ReplayContexts)
+			require.Zero(t, store.Stats().ReplayBytes)
+		})
+	}
+}
+
+func TestReplayBudgetCannotFitOneEntry(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.ReplayGuardBytes = 127
+	store, err := NewMetadataStore(cfg)
+	require.NoError(t, err)
+	entry := SelectedDerivationUsage{Contexts: 1, Bytes: 128}
+	require.ErrorIs(t, store.ReserveReplayGuards(SelectedDerivationUsage{}, entry), ErrCapacity)
+	require.ErrorIs(t, store.ReserveReplayOverflow(SelectedDerivationUsage{}, entry), ErrCapacity)
+	require.Zero(t, store.Stats().ReplayContexts)
+	require.Zero(t, store.Stats().ReplayBytes)
+}

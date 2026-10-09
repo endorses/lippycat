@@ -140,7 +140,7 @@ func TestOrdinaryDelayedACKRetainsOwnedBranchStorage(t *testing.T) {
 	parsed, err := sip.Parse([]byte(wire), sip.ParseOptions{})
 	require.NoError(t, err)
 	ack.Headers, ack.ViaBranch = parsed.Headers, parsed.ViaBranch
-	require.NoError(t, bridge.Selected(ack), "direct validated metadata must own the branch even without pending staging")
+	require.NoError(t, selectedReceiptFixture(bridge, ack), "direct validated metadata must own the branch even without pending staging")
 	bridge.mu.Lock()
 	defer bridge.mu.Unlock()
 	stored := bridge.selected[initial.CallID].derivations[derivationSide{ack.FromTag, ack.ToTag, ack.FromTag, false}]

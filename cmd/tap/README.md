@@ -674,6 +674,16 @@ use a separate initialized encrypted store; startup blindness and uncertain writ
 limit restart guarantees. See [call-leg correlation](../../docs/LI_INTEGRATION.md#optional-sip-call-leg-correlation)
 for the hierarchy, defaults, limits, key setup and offline initialization.
 
+`wait_timeout` (default `5s`) bounds a pending correlation decision; reaching
+that deadline or deferred-queue capacity releases the reserved ID as uncertain
+without discarding packets because of correlation. `shutdown_timeout` (default
+`10s`) bounds correlation cleanup separately from delivery shutdown. Both keys
+accept positive durations through YAML or the corresponding
+`LIPPYCAT_TAP_LI_CORRELATION_*`
+environment variables. A still-running storage operation retains its file lock
+and resources until it finishes; a timeout does not cancel filesystem I/O or
+guarantee restart continuity for a decision that never became durable.
+
 Response-only legs stay standalone without observed initial-request evidence. A busy
 correlation writer leaves new adoptions standalone while retained unrelated IDs remain
 usable. Origin-history overload quarantines only that origin; stale observation

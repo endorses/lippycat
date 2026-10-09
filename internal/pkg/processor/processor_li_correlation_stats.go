@@ -24,6 +24,7 @@ func mapLICallCorrelationStats(s li.CallCorrelationStats) *management.LICallCorr
 		MaxRecords: uint64(max(0, s.MaxRecords)), MaxCandidates: uint64(max(0, s.MaxCandidates)), MaxOrigins: uint64(max(0, s.MaxOrigins)),
 		Blind: s.Blind, BlindCause: s.BlindCause, BlindRemainingNs: int64(s.BlindRemaining), Persistence: s.Persistence, UncertainWrites: s.UncertainWrites, UnresolvedWrites: s.UnresolvedWrites, SdpDisabled: s.SDPDisabled, UnrecordedDecisions: s.UnrecordedDecisions,
 		DeferredPackets: uint64(max(0, s.DeferredPackets)), DeferredBytes: uint64(max(0, s.DeferredBytes)), DeferredRejected: s.DeferredRejected,
+		WaitTimeouts: s.WaitTimeouts, PressureReleases: s.PressureReleases, ShutdownTimeouts: s.ShutdownTimeouts,
 	}
 }
 func copyLICorrelationStatsMap(source map[string]uint64) map[string]uint64 {

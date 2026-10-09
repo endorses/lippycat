@@ -99,12 +99,23 @@ func TestLifecycleCancellationAfterCompletedWriteRecordsSuccess(t *testing.T) {
 	}
 	require.NoError(t, <-read)
 	require.Equal(t, payload, received)
+	client.queuesMu.RLock()
+	queue := client.queues[did]
+	client.queuesMu.RUnlock()
+	require.NotNil(t, queue)
+	queue.mu.Lock()
+	claim := queue.claims[queueIndex(PDUTypeX3)]
+	queue.mu.Unlock()
+	require.NotNil(t, claim)
 	client.CancelTask(xid, 1)
 	releaseWrite()
-	require.Eventually(t, func() bool {
-		stats := client.Stats()
-		return stats.X3Sent+stats.X3Dropped == 1
-	}, time.Second, time.Millisecond)
+	// Sent accounting precedes payload release. Join the transport owner rather
+	// than treating a visible outcome counter as completed resource cleanup.
+	select {
+	case <-claim.done:
+	case <-time.After(time.Second):
+		t.Fatal("transport owner did not finish outcome and payload accounting")
+	}
 	stats := client.Stats()
 	require.Equal(t, uint64(1), stats.X3Sent)
 	require.Zero(t, stats.X3Dropped, "lifecycle cancellation cannot undo a completed local write")

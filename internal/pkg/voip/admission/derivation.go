@@ -360,7 +360,7 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 	old := call.derivations[side]
 	delayedACK := old != nil && b.delayedOfferAnswer(call, side, old, key)
 	ackRetransmission := old != nil && old.delayedAckAnswered && key.ResponseCode == 0 && key.CSeqMethod == "ACK" && old.cseq == key.CSeq && old.delayedAckBranch == key.Branch
-	next := &derivationState{cseq: key.CSeq, branch: key.Branch, method: key.CSeqMethod, complete: record.Complete, hasSDP: !key.DescriptorOnly, endpoints: record.Endpoints, digest: key.SDPDigest, responseCode: key.ResponseCode, reliable: key.ReliableResponse, rseq: key.RSeq, observed: key.Generation, proofExpires: time.Now().Add(b.cfg.Limits.PendingTTL)}
+	next := &derivationState{cseq: key.CSeq, branch: key.Branch, method: key.CSeqMethod, complete: record.Complete, hasSDP: !key.DescriptorOnly, endpoints: record.Endpoints, digest: key.SDPDigest, responseCode: key.ResponseCode, reliable: key.ReliableResponse, rseq: key.RSeq, observed: key.Generation, proofExpires: b.now().Add(b.cfg.Limits.PendingTTL)}
 	if old != nil {
 		next.dialogConfirmed = old.dialogConfirmed
 		next.recoveryEligible = old.recoveryEligible
@@ -428,7 +428,7 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 			if old.method == "INVITE" && (!old.hasSDP || old.reliableAnswered) && !old.missing {
 				answerSide := side
 				answerSide.prack = true
-				if b.bodylessReliablyAnswered(call, side, old, time.Now()) {
+				if b.bodylessReliablyAnswered(call, side, old, b.now()) {
 					b.removeDerivation(call, answerSide)
 				} else if response := call.derivations[derivationSide{side.peer, side.sender, side.initiator, false}]; !old.dialogConfirmed && response != nil && response.hasSDP && response.cseq == old.cseq {
 					// A new UPDATE offer cannot answer the outstanding response.
@@ -746,7 +746,7 @@ func (b *Bridge) confirmedDelayedACKKey(call *selectedCall, key mediaadmission.D
 }
 
 func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadmission.EndpointKey]struct{}) {
-	known, unknown := call.known, call.contextLost || call.replayEvidenceMissing || call.lifetimeAmbiguous || call.forkAmbiguous || time.Now().Before(call.replayBlockedUntil)
+	known, unknown := call.known, call.contextLost || call.replayEvidenceMissing || call.lifetimeAmbiguous || call.forkAmbiguous || b.now().Before(call.replayBlockedUntil)
 	media := make(map[mediaadmission.EndpointKey]struct{})
 	for side, state := range call.derivations {
 		if side.initiator == "" {
@@ -765,7 +765,7 @@ func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadm
 		if side.prack {
 			// PRACK is an answer only with its exact observed reliable offer.
 			known = known || state.hasSDP
-			matches := b.reliableAnswerMatches(call, side, state, time.Now())
+			matches := b.reliableAnswerMatches(call, side, state, b.now())
 			unknown = unknown || !matches
 		}
 		if state.rejected {
@@ -783,7 +783,7 @@ func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadm
 			// unresolved, even though the responder's endpoints are safe.
 			response := call.derivations[derivationSide{side.peer, side.sender, side.initiator, false}]
 			if response != nil && response.hasSDP && !response.rejected && response.cseq == state.cseq {
-				matches := b.bodylessReliablyAnswered(call, side, state, time.Now())
+				matches := b.bodylessReliablyAnswered(call, side, state, b.now())
 				unknown = unknown || !matches
 			}
 		}

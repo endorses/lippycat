@@ -409,7 +409,7 @@ func TestNegotiationRecoveryPendingOldProofCannotBeAdoptedAfterReuse(t *testing.
 	_ = submitDerivation(t, bridge, registry, invite)
 	_ = submitDerivation(t, bridge, registry, response)
 	old, _ := registry.Call(invite.CallID)
-	require.NoError(t, bridge.ObserveValidated(prack))
+	require.NoError(t, bridge.ObserveValidatedReceipt(&prack))
 	registry.Remove(invite.CallID, callregistry.EndCompleted)
 	// No selection consumed the old pending PRACK. A later selection with the
 	// same tags and reliable transaction must not adopt its released reservation.

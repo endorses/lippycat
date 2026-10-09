@@ -24,7 +24,7 @@ func derivationSDP(address string, port int, partial bool) []byte {
 
 func submitDerivation(t *testing.T, bridge *Bridge, registry *callregistry.Core, message pipeline.SIPResult) error {
 	t.Helper()
-	observed := bridge.ObserveValidated(message)
+	observed := bridge.ObserveValidatedReceipt(&message)
 	if _, exists := registry.Call(message.CallID); !exists {
 		registry.Upsert(callregistry.Call{CallID: message.CallID})
 	}

@@ -104,6 +104,12 @@ type MetadataObserver interface {
 	Selected(pipeline.SIPResult) error
 }
 
+// ReceiptMetadataObserver attaches bounded receipt-time provenance to the
+// validated result before selection or registry callbacks can delay it.
+type ReceiptMetadataObserver interface {
+	ObserveValidatedReceipt(*pipeline.SIPResult) error
+}
+
 type Config struct {
 	MetadataObserver MetadataObserver
 	SelectionPolicy  callregistry.SelectionPolicy
@@ -261,7 +267,11 @@ func (o *Orchestrator) Analyze(message Message) ProcessResult {
 	}
 	var metadataErr error
 	if o.cfg.MetadataObserver != nil {
-		metadataErr = o.cfg.MetadataObserver.ObserveValidated(result)
+		if observer, ok := o.cfg.MetadataObserver.(ReceiptMetadataObserver); ok {
+			metadataErr = observer.ObserveValidatedReceipt(&result)
+		} else {
+			metadataErr = o.cfg.MetadataObserver.ObserveValidated(result)
+		}
 	}
 	previouslySelected := o.cfg.SelectionStore.Selected(event.CallID)
 	directMatch := message.DirectMatch

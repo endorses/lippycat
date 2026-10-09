@@ -283,8 +283,13 @@ within the window.
 Replay history has a separate exact-only pool shared across observation domains:
 `replay_guard_capacity` (default `10000`) and `replay_guard_bytes` (default
 `2097152`), with 128 accounted bytes per entry. Both bounds apply; history does
-not consume live selected-derivation capacity. Unexpired guards are never evicted
-for new entries. Expiry maintenance in the existing worker scans the exact map,
+not consume live selected-derivation capacity. Effective entry capacity is the
+smaller of the count limit and the byte limit divided by 128. When at least two
+entries fit, one quarter of that capacity (rounded down, minimum one entry) is
+reserved for hashed Call-ID identities whose ordinary initiator guards could not
+be recorded; ordinary guards use the remainder. Both shares are process-wide.
+With fewer than two entries there is no overflow reserve. Unexpired guards are
+never evicted for new entries. Expiry maintenance scans both exact maps,
 with work bounded by the configured capacity. Close releases the accounting.
 There is no probabilistic overflow store.
 
@@ -292,14 +297,31 @@ If a retirement guard cannot be recorded, all proof in that observation domain
 is conservative until the last unrecordable retirement plus `replay_window`.
 This fallback preserves existing exact guards and follows the configured open/closed
 policy. Sustained overload may extend the interval. Healthy retained proof is not
-marked missing by INFO, OPTIONS or exact retransmissions that add no media proof.
+marked missing by INFO, OPTIONS, an exact retained bodyless provisional or a
+bodyless ACK for an answered INVITE, or retransmissions that add no media proof.
+The provisional must match the retained dialog, branch and CSeq; a 2xx ACK may
+use its separate branch. Changed SDP, reliable-response obligations and malformed
+or conflicting headers remain proof-bearing or uncertain.
 New proof-bearing observations enter a quarantine bound to the authoritative active
 lifetime and charged to the existing selected-derivation context, byte and endpoint
 limits. Quarantined evidence cannot authorize media or install endpoint ownership.
 
-At the pressure deadline, recovery requires a complete accepted exact exchange entirely
-observed after pressure began, covering every quarantined obligation and revalidated
-against the current lifetime and surviving exact replay guards. A cached pre-pressure
+An observation received inside a protected retired identity's window is marked
+ineligible when received. That rejection survives delayed selection, history expiry
+and subsequent pressure intervals; promotion-time expiry cannot rehabilitate it.
+If the reserved identity history fills, that pressure generation's quarantine is
+invalidated and released, including otherwise genuine exchanges. Later observations
+during that generation are also ineligible; healthy authoritative retained proof
+is preserved. Counter exhaustion conservatively disables quarantine recovery for
+subsequent pressure intervals instead of wrapping generations.
+
+At the pressure deadline, recovery requires a complete accepted eligible exact
+exchange entirely observed after pressure began, covering every quarantined
+obligation and revalidated against the current lifetime and surviving exact replay
+guards. An eligible request received during pressure can complete with its exact
+response after the deadline, including applicable reliable or delayed-offer answers.
+Incomplete eligible quarantine remains bounded while awaiting that response.
+A cached pre-pressure
 answer cannot substitute for missing evidence. Elapsed time alone never makes a call
 known. Explicit old lifetimes remain rejected, and both configured open and closed
 policies preserve proof uncertainty.
@@ -307,15 +329,20 @@ policies preserve proof uncertainty.
 Quarantine expires at its first observation plus `replay_window` plus `pending_ttl`;
 retransmissions and repeated pressure never extend that fixed deadline. Incomplete,
 exhausted or expired quarantine releases its reservations while the affected call
-remains unknown until a fresh complete post-pressure exchange or configured call-lifetime
-expiry. Unrelated calls are not held indefinitely. Retiring a call with missing evidence
+remains unknown until a fresh complete eligible post-pressure exchange or configured
+call-lifetime expiry. Identity-history loss has the same genuine-call recovery cost.
+Identical wire evidence newly received after its protection expires remains the
+finite-window ambiguity boundary; explicitly bound old lifetimes remain rejected.
+Unrelated calls are not held indefinitely. Retiring a call with missing evidence
 records a blocked Call-ID guard for the window. Aggregate warnings are rate limited to
 the retry interval and include no wire identities.
 
 Retry maintenance performs global replay-guard and quarantine expiry scans, bounded
-by configured capacities. SIP processing checks logical deadlines only for the touched
-lifetime, exact guard and call recovery; expired evidence cannot authorize media between
-maintenance ticks.
+by configured capacities. Ordinary SIP processing checks deadlines for the touched
+lifetime, exact guard and call recovery. SIP-triggered lifetime retirement also
+performs global guard and selected-call expiry scans; uncertainty publication scans
+selected calls. These paths do not promise constant work per message. Expired or
+observation-time rejected evidence cannot authorize media between maintenance ticks.
 
 The two-minute default is an engineering margin over the usual 32-second
 64-times-T1 SIP transaction horizon with T1 at 500 ms, described in

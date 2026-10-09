@@ -13,7 +13,7 @@ env:
 
 jobs:
   unit-tests:
-    name: Unit Tests
+    name: Unit Tests (all)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -43,6 +43,38 @@ jobs:
           files: ./coverage.txt
           flags: unittests
           name: codecov-umbrella
+
+  li-unit-tests:
+    name: Unit Tests (all li)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcap-dev libxml2-utils
+
+      - name: Run LI unit tests
+        run: |
+          go test -v -race -tags='all li' -coverprofile=coverage-li.txt -covermode=atomic ./...
+
+      - name: Upload LI coverage to Codecov
+        uses: codecov/codecov-action@v5
+        continue-on-error: true
+        with:
+          files: ./coverage-li.txt
+          flags: unittests-li
+          name: codecov-li
 
   lint:
     name: Lint and Format Check

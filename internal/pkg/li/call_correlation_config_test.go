@@ -22,6 +22,8 @@ func TestCallCorrelationConfigDefaultsAndIndependentSwitches(t *testing.T) {
 }
 func TestCallCorrelationConfigRejectsInvalidBoundsAndNames(t *testing.T) {
 	tests := map[string]func(*CallCorrelationConfig){
+		"wait timeout":      func(c *CallCorrelationConfig) { c.WaitTimeout = -time.Second },
+		"shutdown timeout":  func(c *CallCorrelationConfig) { c.ShutdownTimeout = -time.Second },
 		"duration":          func(c *CallCorrelationConfig) { c.AddressWindow = -time.Second },
 		"records":           func(c *CallCorrelationConfig) { c.MaxRecords = -1 },
 		"candidate ceiling": func(c *CallCorrelationConfig) { c.MaxCandidates = 1_000_001 },

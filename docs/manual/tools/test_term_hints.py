@@ -20,7 +20,7 @@ def glossary(*rows):
 
 
 def edition(code="en"):
-    return {"code": code, "termHints": {"glossary": "Glossary", "close": "Close"}}
+    return {"code": code}
 
 
 def rule(automatic=True, sensitive=True, aliases=None):
@@ -54,7 +54,6 @@ class DictionaryTests(unittest.TestCase):
         html = glossary(row("flow", "Flusssteuerung", "Steuert den Fluss."))
         data = term_hints.dictionary(html, edition("de"), policy)
         self.assertEqual(data["terms"][0]["aliases"], ["Flusssteuerung", "Fluss"])
-        self.assertEqual(data["terms"][0]["href"], "appendices/glossary.html#term-flow")
         self.assertFalse(data["terms"][0]["caseSensitive"])
 
     def test_explicit_only_terms_have_no_automatic_aliases(self):
@@ -127,10 +126,6 @@ class DictionaryTests(unittest.TestCase):
                 html, edition(), {"one": rule(sensitive=False), "two": rule()}
             )
 
-    def test_missing_localized_controls_are_rejected(self):
-        with self.assertRaisesRegex(ValueError, "configure termHints"):
-            term_hints.dictionary(glossary(), {"code": "de"}, {})
-
     def test_generation_writes_into_root_or_nested_edition(self):
         with tempfile.TemporaryDirectory(prefix="lippycat-term-hints-") as directory:
             for language, prefix in [("ca", ""), ("en", "en")]:
@@ -149,8 +144,10 @@ class DictionaryTests(unittest.TestCase):
                 self.assertEqual(ids, {"pcap"})
                 data = json.loads((destination / "term-hints.json").read_text())
                 self.assertEqual(data["language"], language)
+                self.assertEqual(set(data), {"language", "terms"})
                 self.assertEqual(
-                    data["terms"][0]["href"], "appendices/glossary.html#term-pcap"
+                    set(data["terms"][0]),
+                    {"id", "label", "definition", "aliases", "caseSensitive"},
                 )
 
     def test_unknown_explicit_id_rejected_with_chapter_context(self):

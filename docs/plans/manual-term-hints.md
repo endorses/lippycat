@@ -5,7 +5,7 @@
 Extend the mdBook manual with definitions for unfamiliar abbreviations and terms.
 Readers can preview a definition on hover or keyboard focus and keep it open by
 clicking or tapping. Definitions come from the appendix glossary in the reader's
-language, with a link to the corresponding glossary entry.
+language. The popup contains only the term and definition.
 
 Implementation branch: `docs/manual-term-hints`.
 
@@ -37,8 +37,8 @@ the same identifiers and that each appears exactly once.
 
 Extend the existing Python build workflow to read each edition's rendered
 glossary and generate its own dictionary after mdBook has run. Each entry contains
-its identifier, localized label, plain-text definition, permitted matching aliases,
-and glossary fragment destination. Use the full existing definition initially;
+its identifier, localized label, plain-text definition, and permitted matching
+aliases. Use the full existing definition initially;
 keep the popup readable with wrapping and scrolling rather than duplicating or
 automatically truncating technical explanations. The full glossary retains its
 formatted text and reference links.
@@ -81,16 +81,17 @@ Use a keyboard-operable trigger and one reusable popup. Hover and focus show a
 preview without moving focus; click, tap, Enter, or Space pins it open. Pointer
 movement from the term into the popup must not dismiss it.
 
-The popup includes the localized term, definition, a glossary link, and a close
-control. Because it contains interactive controls, use an appropriate non-modal
-popover/dialog pattern rather than placing links inside an ARIA tooltip. Associate
-the trigger and definition for assistive technology and expose open/closed state.
-Keyboard users must be able to reach the glossary link and close control. Escape
-closes the popup and returns focus when it was moved into the popup; do not trap
-focus or intercept mdBook shortcuts outside the active interaction.
+The popup includes only the localized term and definition. Following the user's
+simplification request, it uses a descriptive ARIA tooltip rather than a dialog.
+The trigger references its definition with `aria-describedby` and exposes
+open/closed state. The tooltip has no links, buttons, or Tab stops. Focus stays on
+the triggering term; Escape dismisses it, and Tab proceeds through the chapter.
+Overflowing definitions can be scrolled with arrow keys, Page Up/Down, or Home/End
+while the term has focus. Do not intercept mdBook shortcuts outside the active
+interaction.
 
 Only one popup may be open. A second activation of its trigger, outside click or
-tap, close control, or Escape dismisses it. Switching terms updates the popup.
+tap, or Escape dismisses it. Switching terms updates the popup.
 An unpinned preview closes after hover and focus leave both trigger and popup.
 Avoid synthetic mouse events reopening a dismissed touch popup.
 
@@ -103,8 +104,9 @@ glossary must remain readable. Report loading failures without breaking the page
 ### Localization and compatibility
 
 Read languages from `languages.json`; do not hard-code the three current editions
-into matching or URL resolution. Localize popup controls through the existing
-language UI metadata. Update every affected PO catalog when adding glossary
+into matching or URL resolution. Definitions use the existing translated glossary;
+no separate control-label translations are needed. Update every affected PO
+catalog when adding glossary
 markers or annotations, and review affected fuzzy entries in the same task.
 
 Preserve existing examples, code spans, links, and heading IDs. Extend build
@@ -122,11 +124,11 @@ do not upgrade unrelated manual dependencies as part of this feature.
 - [x] Add stable glossary identifiers and matching metadata; update and review
       affected German and Catalan catalog entries.
 - [x] Implement per-edition dictionary generation and validation in the manual
-      build, including stable glossary destinations and existing verification.
+      build, preserving stable glossary IDs and existing verification.
 - [x] Implement safe automatic matching, explicit annotations, exclusions, and
       initialization that can run repeatedly without duplicating hints.
 - [x] Add the accessible popup interaction and responsive styling, register assets
-      in `book.toml`, and localize its controls for every configured edition.
+      in `book.toml`, using localized definitions in every configured edition.
 - [x] Document contributor usage in `docs/manual/README.md`; if reader-facing
       manual text changes, translate it in every configured language.
 - [x] Add focused regression checks for extraction, matching boundaries, language
@@ -195,7 +197,7 @@ popup covering its trigger and a German footer link splitting inside a word;
 focused regressions verify their corrected behavior. Temporary QA screenshots
 are removed after review.
 
-The bounded closure review reached `CLOSED`: the independent review found no
+The original bounded closure review reached `CLOSED`: the independent review found no
 material implementation defect, and the one visual finding was fixed and verified
 with an integrated review. No numerical performance gates or dependencies were
 added. Browser verification uses Chromium with emulated touch; physical mobile
@@ -206,3 +208,21 @@ unchanged.
 
 Implementation and the verified plan were committed as `08d5c2ec`. This final
 plan update records the commit task after verifying that commit succeeded.
+
+## Requested popup simplification
+
+The user subsequently requested a subtle shadow, then removal of the glossary
+link and close button. The shadow is retained. The popup now contains only the
+localized term and definition, with tooltip semantics and no additional Tab stops.
+Repeat activation, outside click/tap, and Escape dismiss it. Long definitions
+remain scrollable with touch/wheel input and keyboard keys on the focused term.
+Control-only labels and navigation fields were removed from generated data and
+language configuration. The glossary and its stable entry anchors remain intact.
+The earlier footer-layout result above records the original implementation;
+those controls and their associated tests have now been removed.
+
+The simplified hints pass `make manual-check` (21 Python checks), `make manual`
+for all three editions, and all 12 updated browser checks. Keyboard scrolling,
+hover/tap dismissal, zero popup controls/Tab stops, localized definitions,
+mobile bounds, and shadow styling are verified. Final desktop and mobile
+screenshots were inspected; temporary QA artifacts are removed after review.

@@ -113,19 +113,13 @@ def load_policy(path, language_codes):
             raise ValueError(f"Invalid term hint policy identifier: {key!r}")
         if not isinstance(rule, dict):
             # Malformed JSON configuration is reported through the CLI's value errors.
-            raise ValueError(
-                f"Term hint {key}: policy must be an object"
-            )  # noqa: TRY004
+            raise ValueError(f"Term hint {key}: policy must be an object")  # noqa: TRY004
         for field in ("automatic", "caseSensitive"):
             if not isinstance(rule.get(field), bool):
-                raise ValueError(
-                    f"Term hint {key}: {field} must be a boolean"
-                )  # noqa: TRY004
+                raise ValueError(f"Term hint {key}: {field} must be a boolean")  # noqa: TRY004
         aliases = rule.get("aliases")
         if not isinstance(aliases, dict):
-            raise ValueError(
-                f"Term hint {key}: aliases must map languages to lists"
-            )  # noqa: TRY004
+            raise ValueError(f"Term hint {key}: aliases must map languages to lists")  # noqa: TRY004
         for language, values in aliases.items():
             if language not in language_codes:
                 raise ValueError(f"Term hint {key}: unknown alias language {language}")
@@ -152,14 +146,6 @@ def dictionary(glossary_html, edition, policy):
     if missing or extra:
         raise ValueError(
             f"{edition['code']}: glossary/policy identifiers differ; missing={missing}, extra={extra}"
-        )
-    ui = edition.get("termHints")
-    if not isinstance(ui, dict) or any(
-        not isinstance(ui.get(key), str) or not ui[key].strip()
-        for key in ("glossary", "close")
-    ):
-        raise ValueError(
-            f"{edition['code']}: configure termHints glossary and close labels"
         )
     result = []
     seen = []
@@ -189,10 +175,9 @@ def dictionary(glossary_html, edition, policy):
                 "definition": definition,
                 "aliases": aliases,
                 "caseSensitive": rule["caseSensitive"],
-                "href": f"appendices/glossary.html#term-{key}",
             }
         )
-    return {"language": edition["code"], "ui": ui, "terms": result}
+    return {"language": edition["code"], "terms": result}
 
 
 def generate(destination, edition, policy):

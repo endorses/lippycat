@@ -71,9 +71,10 @@ guarantee the path mapping described above.
 
 The assembled manual shows glossary definitions on hover or keyboard focus.
 Click, tap, Enter, or Space keeps a definition open; activate the term again,
-press Escape, use the close control, or click elsewhere to dismiss it. The popup
-includes a link to the full glossary entry. Its definition and controls use the
-current edition's language.
+press Escape, or click elsewhere to dismiss it. The popup contains only the term
+and its definition in the current edition's language. Focus stays on the term;
+Tab proceeds to the next chapter control. For an overflowing definition, use the
+arrow keys, Page Up/Down, or Home/End while the term has focus to scroll its text.
 
 Definitions have a single source: the glossary table in
 `src/appendices/glossary.md` and its existing translated PO entries. Each term
@@ -119,8 +120,8 @@ Existing links, headings, code, diagrams, form controls, and the glossary and pr
 pages are excluded. Put annotations in ordinary prose, outside these elements.
 The build validates identifiers and cross-language annotation attributes. Missing
 definitions, duplicate identifiers, and conflicting aliases fail the build with
-context. Popup labels are configured under `termHints` in `languages.json` when
-adding another edition.
+context. No additional translated popup controls are required when adding an
+edition.
 
 `make manual` generates an edition-specific `term-hints.json` beside each edition's
 HTML after mdBook renders it. These dictionaries and the book output are ignored.

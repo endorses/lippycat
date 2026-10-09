@@ -15,9 +15,7 @@
   cursor: help;
 }
 
-.term-hint-trigger:focus-visible,
-.term-hint-close:focus-visible,
-.term-hint-glossary:focus-visible {
+.term-hint-trigger:focus-visible {
   outline: 2px solid var(--links);
   outline-offset: 3px;
 }
@@ -56,30 +54,6 @@
 
 #manual-term-hint-title {
   font-weight: bold;
-}
-
-.term-hint-glossary {
-  flex: 1 1 8rem;
-  align-self: center;
-  color: var(--links);
-  overflow-wrap: normal;
-}
-
-.term-hint-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1rem;
-}
-
-.term-hint-close {
-  flex: 0 0 auto;
-  padding: 0.35rem 0.6rem;
-  border: 1px solid var(--table-border-color);
-  border-radius: 0.2rem;
-  color: var(--fg);
-  background: var(--bg);
-  font: inherit;
-  cursor: pointer;
 }
 
 @media print {

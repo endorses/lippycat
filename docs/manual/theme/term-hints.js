@@ -26,8 +26,6 @@
   let popup;
   let title;
   let definition;
-  let glossaryLink;
-  let closeButton;
   let activeTrigger;
   let pinned = false;
   let hoveredTrigger;
@@ -131,43 +129,30 @@
       );
       title.textContent = term.label;
       definition.textContent = term.definition;
-      glossaryLink.href = new URL(term.href, editionRoot).href;
       popup.scrollTop = 0;
       activeTrigger = trigger;
-      // Keeping the popup immediately after its trigger preserves natural Tab
-      // order for its link and close button, without a modal focus trap.
+      // Keep the definition next to its term in the reading order.
       trigger.after(popup);
     }
     pinned = pin;
     popup.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
-    trigger.setAttribute("aria-describedby", definition.id);
+    trigger.setAttribute("aria-describedby", popup.id);
     positionPopup();
   }
 
   function createPopup() {
     popup = document.createElement("span");
     popup.id = "manual-term-hint-popup";
-    popup.setAttribute("role", "dialog");
-    popup.setAttribute("aria-modal", "false");
-    popup.setAttribute("aria-labelledby", "manual-term-hint-title");
-    popup.setAttribute("aria-describedby", "manual-term-hint-definition");
+    popup.setAttribute("role", "tooltip");
+    // Definitions stay out of the Tab order, including scrollable containers.
+    popup.tabIndex = -1;
     popup.hidden = true;
     title = document.createElement("span");
     title.id = "manual-term-hint-title";
     definition = document.createElement("span");
     definition.id = "manual-term-hint-definition";
-    glossaryLink = document.createElement("a");
-    glossaryLink.className = "term-hint-glossary";
-    glossaryLink.textContent = dictionary.ui.glossary;
-    closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "term-hint-close";
-    closeButton.textContent = dictionary.ui.close;
-    const actions = document.createElement("span");
-    actions.className = "term-hint-actions";
-    actions.append(glossaryLink, closeButton);
-    popup.append(title, definition, actions);
+    popup.append(title, definition);
     document.body.append(popup);
     popup.addEventListener("pointerenter", (event) => {
       if (event.pointerType !== "mouse" || Date.now() < suppressMouseUntil)
@@ -183,14 +168,13 @@
     popup.addEventListener("focusout", scheduleDismiss);
     popup.addEventListener("keydown", (event) => {
       // mdBook's document-level shortcuts must not navigate away when a reader
-      // uses keys in the popup. Default Tab/link/button behavior is retained.
+      // uses keys in a scrollable definition. Default keyboard scrolling remains.
       event.stopPropagation();
       if (event.key === "Escape") {
         event.preventDefault();
         dismiss(true);
       }
     });
-    closeButton.addEventListener("click", () => dismiss(true));
     document.addEventListener("pointerdown", (event) => {
       if (event.pointerType === "touch") suppressMouseUntil = Date.now() + 1000;
       if (activeTrigger && !insideInteraction(event.target)) dismiss();
@@ -214,7 +198,6 @@
     trigger.dataset.termHint = term.id;
     if (automatic) trigger.dataset.termHintAutomatic = "true";
     trigger.id = `manual-term-hint-trigger-${++triggerNumber}`;
-    trigger.setAttribute("aria-haspopup", "dialog");
     trigger.setAttribute("aria-controls", popup.id);
     trigger.setAttribute("aria-expanded", "false");
     trigger.addEventListener("pointerenter", (event) => {
@@ -239,6 +222,24 @@
       else show(trigger, true);
     });
     trigger.addEventListener("keydown", (event) => {
+      if (
+        activeTrigger === trigger &&
+        popup.scrollHeight > popup.clientHeight
+      ) {
+        const scrollSteps = {
+          ArrowDown: 40,
+          ArrowUp: -40,
+          PageDown: popup.clientHeight,
+          PageUp: -popup.clientHeight,
+        };
+        if (event.key in scrollSteps || ["Home", "End"].includes(event.key)) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.key === "Home") popup.scrollTop = 0;
+          else if (event.key === "End") popup.scrollTop = popup.scrollHeight;
+          else popup.scrollTop += scrollSteps[event.key];
+        }
+      }
       if (["Enter", " ", "Escape"].includes(event.key)) event.stopPropagation();
       if (event.key === "Escape") {
         event.preventDefault();
@@ -367,10 +368,6 @@
         if (
           data.language !== document.documentElement.lang ||
           !Array.isArray(data.terms) ||
-          typeof data.ui?.glossary !== "string" ||
-          !data.ui.glossary ||
-          typeof data.ui?.close !== "string" ||
-          !data.ui.close ||
           !data.terms.every(
             (term) =>
               typeof term.id === "string" &&
@@ -379,8 +376,6 @@
               term.label &&
               typeof term.definition === "string" &&
               term.definition &&
-              typeof term.href === "string" &&
-              term.href.startsWith("appendices/glossary.html#term-") &&
               typeof term.caseSensitive === "boolean" &&
               Array.isArray(term.aliases) &&
               term.aliases.every(

@@ -37,7 +37,6 @@ function fixture(url) {
 
 const dictionary = {
   language: "en",
-  ui: { glossary: "Read glossary", close: "Close definition" },
   terms: [
     {
       id: "pcap",
@@ -45,7 +44,6 @@ const dictionary = {
       definition: "Packet Capture, a capture file format.",
       aliases: ["PCAP"],
       caseSensitive: true,
-      href: "appendices/glossary.html#term-pcap",
     },
     {
       id: "tls",
@@ -53,7 +51,6 @@ const dictionary = {
       definition: "Transport Layer Security.",
       aliases: ["TLS"],
       caseSensitive: true,
-      href: "appendices/glossary.html#term-tls",
     },
     {
       id: "capture",
@@ -61,7 +58,6 @@ const dictionary = {
       definition: "Long alias definition.",
       aliases: ["Packet Capture"],
       caseSensitive: true,
-      href: "appendices/glossary.html#term-capture",
     },
     {
       id: "packet",
@@ -69,7 +65,6 @@ const dictionary = {
       definition: "Short alias definition.",
       aliases: ["Packet"],
       caseSensitive: true,
-      href: "appendices/glossary.html#term-packet",
     },
     {
       id: "processor",
@@ -77,7 +72,6 @@ const dictionary = {
       definition: "A long localized processor definition. ".repeat(100),
       aliases: [],
       caseSensitive: false,
-      href: "appendices/glossary.html#term-processor",
     },
   ],
 };
@@ -225,92 +219,78 @@ async function main() {
       await page.keyboard.press("Escape");
       await waitClosed();
     });
-    await test("keyboard preview, ARIA relationships, controls, restored focus and no focus trap", async () => {
+    await test("keyboard tooltip description, pin toggles, dismissal and prose Tab order", async () => {
       await term("pcap").focus();
       await waitOpen();
       assert.equal(
         await term("pcap").getAttribute("aria-describedby"),
-        "manual-term-hint-definition",
+        "manual-term-hint-popup",
       );
-      assert.equal(await term("pcap").getAttribute("aria-haspopup"), "dialog");
+      assert.equal(await term("pcap").getAttribute("aria-haspopup"), null);
       assert.equal(
         await term("pcap").getAttribute("aria-controls"),
         "manual-term-hint-popup",
       );
-      assert.equal(await page.locator(popup).getAttribute("role"), "dialog");
-      assert.equal(
-        await page.locator(popup).getAttribute("aria-labelledby"),
-        "manual-term-hint-title",
-      );
-      assert.equal(
-        await page.locator(popup).getAttribute("aria-describedby"),
-        "manual-term-hint-definition",
-      );
+      assert.equal(await page.locator(popup).getAttribute("role"), "tooltip");
       await page.locator("#outside").focus();
       await waitClosed();
       await term("pcap").focus();
-      await waitOpen();
       await page.keyboard.press("Enter");
-      await page.keyboard.press("Tab");
+      await waitOpen();
       assert.equal(
-        await page
-          .locator(".term-hint-glossary")
-          .evaluate((el) => el === document.activeElement),
+        await term("pcap").evaluate((el) => el === document.activeElement),
         true,
       );
-      await term("tls").hover();
-      assert.equal(
-        await page.locator("#manual-term-hint-title").innerText(),
-        "PCAP",
-      );
-      await page.keyboard.press("Tab");
-      assert.equal(
-        await page
-          .locator(".term-hint-close")
-          .evaluate((el) => el === document.activeElement),
-        true,
-      );
+      await page.keyboard.press("Enter");
+      await waitClosed();
+      await page.keyboard.press("Space");
+      await waitOpen();
+      await page.keyboard.press("Space");
+      await waitClosed();
+      await page.keyboard.press("Enter");
+      await waitOpen();
       await page.keyboard.press("Escape");
       await waitClosed();
       assert.equal(
         await term("pcap").evaluate((el) => el === document.activeElement),
         true,
       );
-      await page.keyboard.press("Space");
-      await waitOpen();
-      await page.locator(".term-hint-close").click();
-      await waitClosed();
-      await page.keyboard.press("Tab");
-      assert.equal(
-        await term("pcap").evaluate((el) => el === document.activeElement),
-        false,
-      );
-      await page.locator("#outside").focus();
-      await waitClosed();
+      assert.equal(await term("pcap").getAttribute("aria-expanded"), "false");
+      assert.equal(await term("pcap").getAttribute("aria-describedby"), null);
       await term("pcap").focus();
       await page.keyboard.press("Tab");
-      await term("tls").hover();
       assert.equal(
-        await page.locator("#manual-term-hint-title").innerText(),
-        "PCAP",
-      );
-      assert.equal(
-        await page
-          .locator(".term-hint-glossary")
-          .evaluate((el) => el === document.activeElement),
+        await term("capture").evaluate((el) => el === document.activeElement),
         true,
       );
       await page.keyboard.press("Escape");
       await waitClosed();
     });
-    await test("glossary destination resolves against edition root from nested chapters", async () => {
+    await test("hint contains only its localized label and definition", async () => {
       await term("pcap").click();
       await waitOpen();
+      assert.deepEqual(
+        await page
+          .locator(`${popup} > *`)
+          .evaluateAll((elements) => elements.map((el) => el.id)),
+        ["manual-term-hint-title", "manual-term-hint-definition"],
+      );
       assert.equal(
-        await page.locator(".term-hint-glossary").getAttribute("href"),
-        `${origin}/fixture/en/appendices/glossary.html#term-pcap`,
+        await page
+          .locator(`${popup} a, ${popup} button, ${popup} .term-hint-actions`)
+          .count(),
+        0,
+      );
+      assert.equal(
+        await page.locator("#manual-term-hint-title").innerText(),
+        "PCAP",
+      );
+      assert.equal(
+        await page.locator("#manual-term-hint-definition").innerText(),
+        dictionary.terms[0].definition,
       );
       await page.keyboard.press("Escape");
+      await waitClosed();
     });
     await test("touch tap toggles; synthetic mouse hover does not reopen dismissal", async () => {
       const touchContext = await browser.newContext({
@@ -339,9 +319,35 @@ async function main() {
         await touchContext.close();
       }
     });
-    await test("narrow viewport, long definition, resizing, scrolling, zoom and all themes", async () => {
+    await test("long definition keyboard scrolling, narrow viewport, resizing, zoom and all themes", async () => {
       await page.setViewportSize({ width: 320, height: 480 });
       await term("processor").click();
+      await waitOpen();
+      await page.keyboard.press("End");
+      assert.ok(await page.locator(popup).evaluate((el) => el.scrollTop > 0));
+      assert.equal(
+        await term("processor").evaluate((el) => el === document.activeElement),
+        true,
+      );
+      await page.keyboard.press("Home");
+      assert.equal(await page.locator(popup).evaluate((el) => el.scrollTop), 0);
+      await page.keyboard.press("PageDown");
+      const scrolledByPage = await page
+        .locator(popup)
+        .evaluate((el) => el.scrollTop);
+      assert.ok(scrolledByPage > 0);
+      await page.keyboard.press("ArrowUp");
+      assert.ok(
+        (await page.locator(popup).evaluate((el) => el.scrollTop)) <
+          scrolledByPage,
+      );
+      await page.keyboard.press("Escape");
+      await waitClosed();
+      assert.equal(
+        await term("processor").evaluate((el) => el === document.activeElement),
+        true,
+      );
+      await page.keyboard.press("Space");
       await waitOpen();
       const backgrounds = [];
       for (const theme of ["light", "rust", "coal", "navy", "ayu"]) {
@@ -481,7 +487,7 @@ async function main() {
         await disabled.close();
       }
     });
-    await test("built editions have localized definitions/controls, valid fragments, clean search and print", async () => {
+    await test("built editions have localized definitions, valid glossary fragments, clean search and print", async () => {
       for (const language of languages) {
         const base = `${origin}/book/${language.path}`;
         const data = JSON.parse(
@@ -521,22 +527,22 @@ async function main() {
           bpf.definition,
         );
         assert.equal(
-          await page.locator(".term-hint-glossary").innerText(),
-          data.ui.glossary,
+          await page.locator("#manual-term-hint-title").innerText(),
+          bpf.label,
         );
         assert.equal(
-          await page.locator(".term-hint-close").innerText(),
-          data.ui.close,
+          await page
+            .locator(`${popup} a, ${popup} button, ${popup} .term-hint-actions`)
+            .count(),
+          0,
         );
-        const href = await page
-          .locator(".term-hint-glossary")
-          .getAttribute("href");
-        assert.equal(href, new URL(bpf.href, base).href);
+        assert.equal(data.ui, undefined);
+        assert.equal(bpf.href, undefined);
         if (screenshots)
           await page.screenshot({
             path: path.join(screenshots, `edition-${language.code}.png`),
           });
-        await page.locator(".term-hint-glossary").click();
+        await page.goto(`${base}appendices/glossary.html#term-${bpf.id}`);
         await page.locator("#term-bpf").waitFor();
         assert.equal(await page.locator(trigger).count(), 0);
         await page.goto(`${base}print.html`);
@@ -572,54 +578,72 @@ async function main() {
         await page.locator("#mdbook-searchresults li").first().waitFor();
       }
     });
-    await test("localized mobile footer keeps words intact and both actions usable", async () => {
-      await page.setViewportSize({ width: 320, height: 720 });
-      for (const language of languages) {
-        await page.goto(
-          `${origin}/book/${language.path}part1-foundations/core-concepts.html`,
-        );
-        await page.locator(trigger).first().waitFor();
-        await term("bpf").click();
-        await waitOpen();
-        await page.locator(".term-hint-close").scrollIntoViewIfNeeded();
-        const word = await page
-          .locator(".term-hint-glossary")
-          .evaluate((el) => {
-            const text = el.firstChild;
-            const firstSpace = text.textContent.search(/\s/u);
-            const range = document.createRange();
-            range.setStart(text, 0);
-            range.setEnd(
-              text,
-              firstSpace < 0 ? text.textContent.length : firstSpace,
-            );
-            return {
-              text: range.toString(),
-              lines: range.getClientRects().length,
-            };
-          });
-        assert.equal(
-          word.lines,
-          1,
-          `${language.code}: split glossary action word ${word.text}`,
-        );
-        const bounds = await page.locator(popup).boundingBox();
-        for (const selector of [".term-hint-glossary", ".term-hint-close"]) {
-          const action = await page.locator(selector).boundingBox();
-          assert.ok(
-            action.x >= bounds.x &&
-              action.x + action.width <= bounds.x + bounds.width + 1 &&
-              action.y >= bounds.y &&
-              action.y + action.height <= bounds.y + bounds.height + 1,
-            `${language.code} ${selector}: ${JSON.stringify({ action, bounds })}`,
+    await test("all localized mobile hints remain readable without controls and dismiss by tap", async () => {
+      const mobileContext = await browser.newContext({
+        hasTouch: true,
+        viewport: { width: 320, height: 720 },
+      });
+      try {
+        const mobile = await mobileContext.newPage();
+        for (const language of languages) {
+          const data = JSON.parse(
+            fs.readFileSync(path.join(book, language.path, "term-hints.json")),
           );
+          const bpf = data.terms.find((entry) => entry.id === "bpf");
+          await mobile.goto(
+            `${origin}/book/${language.path}part1-foundations/core-concepts.html`,
+          );
+          const button = mobile
+            .locator(`${trigger}[data-term-hint="bpf"]`)
+            .first();
+          await button.tap();
+          await mobile.locator(popup).waitFor({ state: "visible" });
+          assert.equal(
+            await mobile
+              .locator(
+                `${popup} a, ${popup} button, ${popup} .term-hint-actions`,
+              )
+              .count(),
+            0,
+          );
+          assert.deepEqual(
+            await mobile
+              .locator(`${popup} > *`)
+              .evaluateAll((elements) => elements.map((el) => el.id)),
+            ["manual-term-hint-title", "manual-term-hint-definition"],
+          );
+          assert.equal(
+            await mobile.locator("#manual-term-hint-title").innerText(),
+            bpf.label,
+          );
+          assert.equal(
+            await mobile.locator("#manual-term-hint-definition").innerText(),
+            bpf.definition,
+          );
+          const bounds = await mobile.locator(popup).boundingBox();
+          assert.ok(
+            bounds.x >= 0 &&
+              bounds.y >= 0 &&
+              bounds.x + bounds.width <= 321 &&
+              bounds.y + bounds.height <= 721,
+            `${language.code}: ${JSON.stringify(bounds)}`,
+          );
+          if (screenshots)
+            await mobile.screenshot({
+              path: path.join(
+                screenshots,
+                `edition-mobile-${language.code}.png`,
+              ),
+            });
+          await button.tap();
+          await mobile.locator(popup).waitFor({ state: "hidden" });
+          await button.tap();
+          await mobile.locator(popup).waitFor({ state: "visible" });
+          await mobile.locator("#mdbook-search-toggle").tap();
+          await mobile.locator(popup).waitFor({ state: "hidden" });
         }
-        if (screenshots)
-          await page.screenshot({
-            path: path.join(screenshots, `edition-mobile-${language.code}.png`),
-          });
-        await page.locator(".term-hint-close").click();
-        await waitClosed();
+      } finally {
+        await mobileContext.close();
       }
     });
     console.log(`${passed} browser checks passed`);

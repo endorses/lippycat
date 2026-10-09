@@ -31,7 +31,6 @@ class TranslationTests(unittest.TestCase):
                         "path": path,
                         "title": "Test manual",
                         "description": "Test description",
-                        "termHints": {"glossary": "Glossary", "close": "Close"},
                     }
                     for code, path in [("en", ""), ("de", "de/")]
                 ]

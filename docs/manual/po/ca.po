@@ -34781,3 +34781,127 @@ msgstr "`R1_rewritten`"
 #: src/part5-advanced/protocol-deep-dives.md:8
 msgid "[SIP Call-Leg Correlation (LI)](sip-call-leg-correlation.md): grouping related SIP legs for authorized X2/X3 delivery."
 msgstr "[Correlació de trams SIP (LI)](sip-call-leg-correlation.md): agrupació de trams SIP relacionats per al lliurament X2/X3 autoritzat."
+
+#: src/part5-advanced/structured-protocol-logs.md:227
+msgid "`known_hosts.log`"
+msgstr "`known_hosts.log`"
+
+#: src/part5-advanced/structured-protocol-logs.md:229
+msgid ""
+"One scoped host observation when a completed TCP handshake or bidirectional "
+"UDP traffic first supplies sufficient evidence. The event kind is "
+"`known_host`; select `known_hosts` in `--log-streams` to write it to "
+"`known_hosts.log`."
+msgstr ""
+"Una observació d'amfitrió dins d'un àmbit quan una negociació TCP completa o "
+"el trànsit UDP bidireccional aporta per primera vegada prou proves. El tipus "
+"d'esdeveniment és `known_host`; seleccioneu `known_hosts` a `--log-streams` "
+"per escriure'l a `known_hosts.log`."
+
+#: src/part5-advanced/structured-protocol-logs.md:236
+msgid "`host`, `evidence`"
+msgstr "`host`, `evidence`"
+
+#: src/part5-advanced/structured-protocol-logs.md:236
+msgid "`addr`, `enum`"
+msgstr "`addr`, `enum`"
+
+#: src/part5-advanced/structured-protocol-logs.md:239
+msgid ""
+"`host` is the observed inventory subject, which may be either endpoint of "
+"the qualifying connection. The `id.orig_*` and `id.resp_*` fields retain "
+"that connection's endpoints; they are not rewritten to make the subject the "
+"originator. Host evidence is `tcp_handshake` or `udp_bidirectional`. A "
+"connection may yield separate records for both eligible hosts."
+msgstr ""
+"`host` és el subjecte d'inventari observat, que pot ser qualsevol dels dos "
+"extrems de la connexió que compleix els requisits. Els camps `id.orig_*` i "
+"`id.resp_*` conserven els extrems d'aquesta connexió; no es reescriuen per "
+"fer que el subjecte sigui l'originador. Les proves d'amfitrió són "
+"`tcp_handshake` o `udp_bidirectional`. Una connexió pot generar registres "
+"separats per a tots dos amfitrions que compleixin els requisits."
+
+#: src/part5-advanced/structured-protocol-logs.md:245
+msgid "`known_services.log`"
+msgstr "`known_services.log`"
+
+#: src/part5-advanced/structured-protocol-logs.md:247
+msgid ""
+"One scoped responder/service observation. The event kind is `known_service`; "
+"select `known_services` in `--log-streams` to write it to "
+"`known_services.log`."
+msgstr ""
+"Una observació de responent/servei dins d'un àmbit. El tipus d'esdeveniment "
+"és `known_service`; seleccioneu `known_services` a `--log-streams` per "
+"escriure'l a `known_services.log`."
+
+#: src/part5-advanced/structured-protocol-logs.md:253
+msgid "`host`, `port`, `transport`, `service`, `evidence`"
+msgstr "`host`, `port`, `transport`, `service`, `evidence`"
+
+#: src/part5-advanced/structured-protocol-logs.md:253
+msgid "`addr`, `port`, `enum`, `string`, `enum`"
+msgstr "`addr`, `port`, `enum`, `string`, `enum`"
+
+#: src/part5-advanced/structured-protocol-logs.md:256
+msgid ""
+"`host` and `port` identify the proven responder. `transport` is `tcp` or "
+"`udp`, and `service` is a stable lowercase protocol identifier. TCP service "
+"observations currently cover analyzed `http`, `tls`, and `smtp` with "
+"`tcp_handshake` evidence. UDP service observations cover successfully "
+"associated `dns`, `ntp`, and eligible `dhcp` exchanges, with `dns_exchange`, "
+"`ntp_exchange`, or `dhcp_exchange` evidence. A port number or bidirectional "
+"UDP traffic alone does not identify a service."
+msgstr ""
+"`host` i `port` identifiquen el responent demostrat. `transport` és `tcp` o "
+"`udp`, i `service` és un identificador estable de protocol en minúscules. "
+"Les observacions de servei TCP cobreixen actualment `http`, `tls` i `smtp` "
+"analitzats amb proves `tcp_handshake`. Les observacions de servei UDP "
+"cobreixen intercanvis `dns`, `ntp` i `dhcp` admissibles associats "
+"correctament, amb proves `dns_exchange`, `ntp_exchange` o `dhcp_exchange`. "
+"Un número de port o el trànsit UDP bidireccional per si sols no identifiquen "
+"un servei."
+
+#: src/part5-advanced/structured-protocol-logs.md:263
+msgid ""
+"Both inventory streams are opt-in; enabling inventory analysis alone does "
+"not create log files. For an offline inventory in JSONL:"
+msgstr ""
+"Tots dos fluxos d'inventari són opcionals; activar només l'anàlisi "
+"d'inventari no crea fitxers de registre. Per a un inventari fora de línia en "
+"JSONL:"
+
+#: src/part5-advanced/structured-protocol-logs.md:273
+msgid ""
+"Records are emitted when evidence becomes available, before connection "
+"expiry. Within the configured capture-time retention window (default `24h`), "
+"repeated qualifying observations for the same scoped host or service are "
+"suppressed. Expiry, capacity eviction, or a new capture scope can produce "
+"another record. These logs describe observed activity, not a complete asset "
+"database or a continuously refreshed list of listening ports."
+msgstr ""
+"Els registres s'emeten quan les proves estan disponibles, abans de la "
+"caducitat de la connexió. Dins de la finestra configurada de retenció basada "
+"en el temps de captura (per defecte `24h`), se suprimeixen les observacions "
+"repetides que compleixin els requisits per al mateix amfitrió o servei dins "
+"d'un àmbit. La caducitat, l'expulsió per capacitat o un nou àmbit de captura "
+"poden produir un altre registre. Aquests registres descriuen l'activitat "
+"observada, no una base de dades completa d'actius ni una llista de ports en "
+"escolta actualitzada contínuament."
+
+#: src/part5-advanced/structured-protocol-logs.md:280
+msgid ""
+"Inventory retains the qualifying connection's `uid`, `community_id`, "
+"`node_id`, `capture_scope`, and `partial` values. Positive host/service "
+"evidence does not make partial capture complete. For subject filtering, "
+"state limits, remote event privacy, and TUI visibility, see [Inventory "
+"evidence and policy](#inventory-evidence-policy) and [Privacy and "
+"compatibility](#network-privacy-compatibility)."
+msgstr ""
+"L'inventari conserva els valors `uid`, `community_id`, `node_id`, "
+"`capture_scope` i `partial` de la connexió que compleix els requisits. Les "
+"proves positives d'amfitrió/servei no fan que una captura parcial sigui "
+"completa. Per al filtratge de subjectes, els límits d'estat, la privadesa "
+"dels esdeveniments remots i la visibilitat a la TUI, consulteu [Proves i "
+"política d'inventari](#inventory-evidence-policy) i [Privadesa i "
+"compatibilitat](#network-privacy-compatibility)."

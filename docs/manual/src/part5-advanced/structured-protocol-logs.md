@@ -38,23 +38,23 @@ lc sniff http -r capture.pcap --log-dir ./logs --log-streams conn,http,files
 
 The shared flags are:
 
-| Flag                               |           Default | Meaning                                                                                   |
-| ---------------------------------- | ----------------: | ----------------------------------------------------------------------------------------- |
-| `--event-queue-size`               |           `20000` | Normalized-event queue capacity                                                           |
-| `--event-drop-policy`              |        `drop_new` | Overflow policy for the normalized-event queue                                            |
-| `--log-dir`                        |             unset | Output directory; setting it enables logging                                              |
-| `--log-format`                     |             `tsv` | `tsv` or `json`                                                                           |
+| Flag                               |               Default | Meaning                                                                                   |
+| ---------------------------------- | --------------------: | ----------------------------------------------------------------------------------------- |
+| `--event-queue-size`               |               `20000` | Normalized-event queue capacity                                                           |
+| `--event-drop-policy`              |            `drop_new` | Overflow policy for the normalized-event queue                                            |
+| `--log-dir`                        |                 unset | Output directory; setting it enables logging                                              |
+| `--log-format`                     |                 `tsv` | `tsv` or `json`                                                                           |
 | `--log-streams`                    | default seven streams | Comma-separated enabled streams                                                           |
-| `--log-rotate-interval`            |              `1h` | Time between rotations; `0` disables periodic rotation                                    |
-| `--log-queue-size`                 |           `10000` | Queue capacity for each stream                                                            |
-| `--log-post-rotate-command`        |             unset | Shell command run after rotation; `%log%` is the safely quoted rotated path               |
-| `--log-include-http-headers`       |           `false` | Preserve arbitrary HTTP header maps in normalized events; fixed log columns do not change |
-| `--log-include-email-body-preview` |           `false` | Permit captured email body previews for file analysis; potentially sensitive              |
-| `--extract-files`                  |           `false` | Write bounded HTTP/SMTP file content to disk                                              |
-| `--extract-files-dir`              |             unset | Extraction directory; required when extraction is enabled                                 |
-| `--extract-files-max-size`         |          `10 MiB` | Maximum bytes analyzed or extracted per file                                              |
-| `--extract-files-total-size`       |         `100 MiB` | Maximum bytes extracted during the process lifetime                                       |
-| `--log-emit-stage`                 |        `terminal` | `process`/`tap` only: `terminal`, `all`, or `none`                                        |
+| `--log-rotate-interval`            |                  `1h` | Time between rotations; `0` disables periodic rotation                                    |
+| `--log-queue-size`                 |               `10000` | Queue capacity for each stream                                                            |
+| `--log-post-rotate-command`        |                 unset | Shell command run after rotation; `%log%` is the safely quoted rotated path               |
+| `--log-include-http-headers`       |               `false` | Preserve arbitrary HTTP header maps in normalized events; fixed log columns do not change |
+| `--log-include-email-body-preview` |               `false` | Permit captured email body previews for file analysis; potentially sensitive              |
+| `--extract-files`                  |               `false` | Write bounded HTTP/SMTP file content to disk                                              |
+| `--extract-files-dir`              |                 unset | Extraction directory; required when extraction is enabled                                 |
+| `--extract-files-max-size`         |              `10 MiB` | Maximum bytes analyzed or extracted per file                                              |
+| `--extract-files-total-size`       |             `100 MiB` | Maximum bytes extracted during the process lifetime                                       |
+| `--log-emit-stage`                 |            `terminal` | `process`/`tap` only: `terminal`, `all`, or `none`                                        |
 
 Equivalent YAML keys are `events.queue_size`, `events.drop_policy`, `logs.dir`, `logs.format`,
 `logs.streams`, `logs.rotate_interval`, `logs.queue_size`, `logs.emit_stage`,
@@ -223,6 +223,66 @@ extraction succeeds.
 | `seen_bytes`, `total_bytes`, `missing_bytes`, `overflow_bytes`, `timedout` | `count`, `count`, `count`, `count`, `bool`                   |
 | `parent_fuid`, `md5`, `sha1`, `sha256`, `hash_complete`, `extracted`       | `string`, `string`, `string`, `string`, `bool`, `string`     |
 | `community_id`, `node_id`                                                  | `string`, `string`                                           |
+
+### `known_hosts.log` {#known-hosts-log}
+
+One scoped host observation when a completed TCP handshake or bidirectional UDP
+traffic first supplies sufficient evidence. The event kind is `known_host`; select
+`known_hosts` in `--log-streams` to write it to `known_hosts.log`.
+
+| Fields                                                                   | Zeek types                                               |
+| ------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p`, `proto` | `time`, `string`, `addr`, `port`, `addr`, `port`, `enum` |
+| `host`, `evidence`                                                       | `addr`, `enum`                                           |
+| `community_id`, `node_id`, `capture_scope`, `partial`                    | `string`, `string`, `enum`, `bool`                       |
+
+`host` is the observed inventory subject, which may be either endpoint of the
+qualifying connection. The `id.orig_*` and `id.resp_*` fields retain that
+connection's endpoints; they are not rewritten to make the subject the originator.
+Host evidence is `tcp_handshake` or `udp_bidirectional`. A connection may yield
+separate records for both eligible hosts.
+
+### `known_services.log` {#known-services-log}
+
+One scoped responder/service observation. The event kind is `known_service`;
+select `known_services` in `--log-streams` to write it to `known_services.log`.
+
+| Fields                                                                   | Zeek types                                               |
+| ------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p`, `proto` | `time`, `string`, `addr`, `port`, `addr`, `port`, `enum` |
+| `host`, `port`, `transport`, `service`, `evidence`                       | `addr`, `port`, `enum`, `string`, `enum`                 |
+| `community_id`, `node_id`, `capture_scope`, `partial`                    | `string`, `string`, `enum`, `bool`                       |
+
+`host` and `port` identify the proven responder. `transport` is `tcp` or `udp`,
+and `service` is a stable lowercase protocol identifier. TCP service observations
+currently cover analyzed `http`, `tls`, and `smtp` with `tcp_handshake` evidence.
+UDP service observations cover successfully associated `dns`, `ntp`, and eligible
+`dhcp` exchanges, with `dns_exchange`, `ntp_exchange`, or `dhcp_exchange` evidence.
+A port number or bidirectional UDP traffic alone does not identify a service.
+
+Both inventory streams are opt-in; enabling inventory analysis alone does not
+create log files. For an offline inventory in JSONL:
+
+<!-- i18n:skip -->
+
+```bash
+lc sniff -r network.pcap --inventory \
+  --log-dir ./logs --log-format json --log-streams known_hosts,known_services
+```
+
+Records are emitted when evidence becomes available, before connection expiry.
+Within the configured capture-time retention window (default `24h`), repeated
+qualifying observations for the same scoped host or service are suppressed.
+Expiry, capacity eviction, or a new capture scope can produce another record.
+These logs describe observed activity, not a complete asset database or a
+continuously refreshed list of listening ports.
+
+Inventory retains the qualifying connection's `uid`, `community_id`, `node_id`,
+`capture_scope`, and `partial` values. Positive host/service evidence does not
+make partial capture complete. For subject filtering, state limits, remote event
+privacy, and TUI visibility, see
+[Inventory evidence and policy](#inventory-evidence-policy) and
+[Privacy and compatibility](#network-privacy-compatibility).
 
 ## Rotation and operations {#rotation-and-operations}
 

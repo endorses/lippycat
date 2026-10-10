@@ -34881,3 +34881,128 @@ msgstr "`R1_rewritten`"
 #: src/part5-advanced/protocol-deep-dives.md:8
 msgid "[SIP Call-Leg Correlation (LI)](sip-call-leg-correlation.md): grouping related SIP legs for authorized X2/X3 delivery."
 msgstr "[SIP-Anrufabschnittskorrelation (LI)](sip-call-leg-correlation.md): Gruppierung verwandter SIP-Abschnitte für die autorisierte X2/X3-Ausleitung."
+
+#: src/part5-advanced/structured-protocol-logs.md:227
+msgid "`known_hosts.log`"
+msgstr "`known_hosts.log`"
+
+#: src/part5-advanced/structured-protocol-logs.md:229
+msgid ""
+"One scoped host observation when a completed TCP handshake or bidirectional "
+"UDP traffic first supplies sufficient evidence. The event kind is "
+"`known_host`; select `known_hosts` in `--log-streams` to write it to "
+"`known_hosts.log`."
+msgstr ""
+"Eine Host-Beobachtung je Geltungsbereich, sobald ein abgeschlossener TCP-"
+"Handshake oder bidirektionaler UDP-Verkehr erstmals ausreichende Nachweise "
+"liefert. Der Ereignistyp ist `known_host`; wählen Sie `known_hosts` in `--"
+"log-streams`, um ihn in `known_hosts.log` zu schreiben."
+
+#: src/part5-advanced/structured-protocol-logs.md:236
+msgid "`host`, `evidence`"
+msgstr "`host`, `evidence`"
+
+#: src/part5-advanced/structured-protocol-logs.md:236
+msgid "`addr`, `enum`"
+msgstr "`addr`, `enum`"
+
+#: src/part5-advanced/structured-protocol-logs.md:239
+msgid ""
+"`host` is the observed inventory subject, which may be either endpoint of "
+"the qualifying connection. The `id.orig_*` and `id.resp_*` fields retain "
+"that connection's endpoints; they are not rewritten to make the subject the "
+"originator. Host evidence is `tcp_handshake` or `udp_bidirectional`. A "
+"connection may yield separate records for both eligible hosts."
+msgstr ""
+"`host` ist das beobachtete Inventarsubjekt und kann einer der beiden "
+"Endpunkte der qualifizierenden Verbindung sein. Die Felder `id.orig_*` und "
+"`id.resp_*` behalten die Endpunkte dieser Verbindung bei; sie werden nicht "
+"umgeschrieben, um das Subjekt zum Initiator zu machen. Der Host-Nachweis ist "
+"`tcp_handshake` oder `udp_bidirectional`. Eine Verbindung kann getrennte "
+"Datensätze für beide geeigneten Hosts liefern."
+
+#: src/part5-advanced/structured-protocol-logs.md:245
+msgid "`known_services.log`"
+msgstr "`known_services.log`"
+
+#: src/part5-advanced/structured-protocol-logs.md:247
+msgid ""
+"One scoped responder/service observation. The event kind is `known_service`; "
+"select `known_services` in `--log-streams` to write it to "
+"`known_services.log`."
+msgstr ""
+"Eine Beobachtung eines antwortenden Endpunkts und seines Dienstes je "
+"Geltungsbereich. Der Ereignistyp ist `known_service`; wählen Sie "
+"`known_services` in `--log-streams`, um ihn in `known_services.log` zu "
+"schreiben."
+
+#: src/part5-advanced/structured-protocol-logs.md:253
+msgid "`host`, `port`, `transport`, `service`, `evidence`"
+msgstr "`host`, `port`, `transport`, `service`, `evidence`"
+
+#: src/part5-advanced/structured-protocol-logs.md:253
+msgid "`addr`, `port`, `enum`, `string`, `enum`"
+msgstr "`addr`, `port`, `enum`, `string`, `enum`"
+
+#: src/part5-advanced/structured-protocol-logs.md:256
+msgid ""
+"`host` and `port` identify the proven responder. `transport` is `tcp` or "
+"`udp`, and `service` is a stable lowercase protocol identifier. TCP service "
+"observations currently cover analyzed `http`, `tls`, and `smtp` with "
+"`tcp_handshake` evidence. UDP service observations cover successfully "
+"associated `dns`, `ntp`, and eligible `dhcp` exchanges, with `dns_exchange`, "
+"`ntp_exchange`, or `dhcp_exchange` evidence. A port number or bidirectional "
+"UDP traffic alone does not identify a service."
+msgstr ""
+"`host` und `port` identifizieren den nachgewiesenen antwortenden Endpunkt. "
+"`transport` ist `tcp` oder `udp`, und `service` ist ein stabiler "
+"Protokollbezeichner in Kleinbuchstaben. TCP-Dienstbeobachtungen umfassen "
+"derzeit analysierte `http`-, `tls`- und `smtp`-Verbindungen mit dem Nachweis "
+"`tcp_handshake`. UDP-Dienstbeobachtungen umfassen erfolgreich zugeordnete "
+"`dns`-, `ntp`- und geeignete `dhcp`-Austausche mit den Nachweisen "
+"`dns_exchange`, `ntp_exchange` oder `dhcp_exchange`. Eine Portnummer oder "
+"bidirektionaler UDP-Verkehr allein identifiziert keinen Dienst."
+
+#: src/part5-advanced/structured-protocol-logs.md:263
+msgid ""
+"Both inventory streams are opt-in; enabling inventory analysis alone does "
+"not create log files. For an offline inventory in JSONL:"
+msgstr ""
+"Beide Inventarstreams müssen ausdrücklich ausgewählt werden; die Aktivierung "
+"der Inventaranalyse allein erstellt keine Logdateien. Für ein Offline-"
+"Inventar im JSONL-Format:"
+
+#: src/part5-advanced/structured-protocol-logs.md:273
+msgid ""
+"Records are emitted when evidence becomes available, before connection "
+"expiry. Within the configured capture-time retention window (default `24h`), "
+"repeated qualifying observations for the same scoped host or service are "
+"suppressed. Expiry, capacity eviction, or a new capture scope can produce "
+"another record. These logs describe observed activity, not a complete asset "
+"database or a continuously refreshed list of listening ports."
+msgstr ""
+"Datensätze werden ausgegeben, sobald Nachweise vorliegen, noch vor dem "
+"Ablauf der Verbindung. Innerhalb des konfigurierten Aufbewahrungsfensters in "
+"der Erfassungszeit (standardmäßig `24h`) werden wiederholte qualifizierende "
+"Beobachtungen desselben Hosts oder Dienstes im selben Geltungsbereich "
+"unterdrückt. Ablauf, Verdrängung aufgrund von Kapazitätsgrenzen oder ein "
+"neuer Erfassungsgeltungsbereich können einen weiteren Datensatz erzeugen. "
+"Diese Logs beschreiben beobachtete Aktivität, keine vollständige Asset-"
+"Datenbank und keine fortlaufend aktualisierte Liste lauschender Ports."
+
+#: src/part5-advanced/structured-protocol-logs.md:280
+msgid ""
+"Inventory retains the qualifying connection's `uid`, `community_id`, "
+"`node_id`, `capture_scope`, and `partial` values. Positive host/service "
+"evidence does not make partial capture complete. For subject filtering, "
+"state limits, remote event privacy, and TUI visibility, see [Inventory "
+"evidence and policy](#inventory-evidence-policy) and [Privacy and "
+"compatibility](#network-privacy-compatibility)."
+msgstr ""
+"Das Inventar behält die Werte `uid`, `community_id`, `node_id`, "
+"`capture_scope` und `partial` der qualifizierenden Verbindung bei. Positive "
+"Host- oder Dienstnachweise machen einen unvollständigen Mitschnitt nicht "
+"vollständig. Hinweise zu Subjektfiltern, Zustandsgrenzen, Datenschutz bei "
+"Remote-Ereignissen und Sichtbarkeit in der TUI finden Sie unter "
+"[Inventarnachweise und Richtlinie](#inventory-evidence-policy) und "
+"[Datenschutz und Kompatibilität](#network-privacy-compatibility)."

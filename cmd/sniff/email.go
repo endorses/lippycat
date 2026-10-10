@@ -90,7 +90,7 @@ Examples:
 
   # Write to output file
   lc sniff email -i eth0 -w email-output.pcap`,
-	Run: emailHandler,
+	RunE: emailHandler,
 }
 
 var (
@@ -170,11 +170,12 @@ var emailRuntimeHooks = sniffRuntimeHooks{
 		}
 		return email.NewFilterBuilder().Build(email.FilterConfig{Ports: ports, Protocol: protocol, BaseFilter: baseFilter}), nil
 	},
-	StartLive:  email.StartLiveEmailSniffer,
-	StartFiles: email.StartOfflineEmailSniffer,
+	StartLive:   email.StartLiveEmailSniffer,
+	StartFiles:  email.StartOfflineEmailSniffer,
+	StartReplay: email.StartOfflineEmailSnifferWithReplay,
 }
 
-func emailHandler(cmd *cobra.Command, args []string) {
+func emailHandler(cmd *cobra.Command, args []string) error {
 	// Set email configuration values
 	if cmd.Flags().Changed("address") {
 		viper.Set("email.address_pattern", emailAddressPattern)
@@ -224,7 +225,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		patterns, err := email.LoadEmailPatternsFromFile(emailAddressesFile)
 		if err != nil {
 			logger.Error("Failed to load addresses file", "error", err, "file", emailAddressesFile)
-			return
+			return err
 		}
 		viper.Set("email.address_patterns", patterns)
 		logger.Info("Loaded address patterns from file", "count", len(patterns), "file", emailAddressesFile)
@@ -235,7 +236,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		patterns, err := email.LoadEmailPatternsFromFile(emailSendersFile)
 		if err != nil {
 			logger.Error("Failed to load senders file", "error", err, "file", emailSendersFile)
-			return
+			return err
 		}
 		viper.Set("email.sender_patterns", patterns)
 		logger.Info("Loaded sender patterns from file", "count", len(patterns), "file", emailSendersFile)
@@ -246,7 +247,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		patterns, err := email.LoadEmailPatternsFromFile(emailRecipientsFile)
 		if err != nil {
 			logger.Error("Failed to load recipients file", "error", err, "file", emailRecipientsFile)
-			return
+			return err
 		}
 		viper.Set("email.recipient_patterns", patterns)
 		logger.Info("Loaded recipient patterns from file", "count", len(patterns), "file", emailRecipientsFile)
@@ -257,7 +258,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		patterns, err := email.LoadSubjectPatternsFromFile(emailSubjectsFile)
 		if err != nil {
 			logger.Error("Failed to load subjects file", "error", err, "file", emailSubjectsFile)
-			return
+			return err
 		}
 		viper.Set("email.subject_patterns", patterns)
 		logger.Info("Loaded subject patterns from file", "count", len(patterns), "file", emailSubjectsFile)
@@ -268,7 +269,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		keywords, err := email.LoadKeywordsFromFile(emailKeywordsFile)
 		if err != nil {
 			logger.Error("Failed to load keywords file", "error", err, "file", emailKeywordsFile)
-			return
+			return err
 		}
 		viper.Set("email.keywords", keywords)
 		logger.Info("Loaded keywords from file", "count", len(keywords), "file", emailKeywordsFile)
@@ -281,7 +282,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 	effectiveFilter, err := emailRuntimeHooks.BuildBPF(filter)
 	if err != nil {
 		logger.Error("Invalid email filter configuration", "protocol", protocol, "error", err)
-		return
+		return err
 	}
 
 	logger.Info("Starting Email sniffing",
@@ -295,7 +296,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		"track_sessions", emailTrackSessions)
 
 	// Start email sniffer using appropriate mode
-	runProtocol(cmd, args, protocolcatalog.MustLookup("email"), emailRuntimeHooks)
+	return runProtocol(cmd, args, protocolcatalog.MustLookup("email"), emailRuntimeHooks)
 }
 
 func init() {

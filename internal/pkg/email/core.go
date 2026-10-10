@@ -5,6 +5,7 @@ package email
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -140,10 +141,34 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 }
 
 func startEmailSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
-	logger.Info("Starting Email sniffer",
-		"device_count", len(devices),
-		"filter", filter)
+	err := withEmailPacketSink(func() error {
+		var consumeErr error
+		processor := func(ch <-chan capture.PacketInfo) {
+			kind := pipeline.SourceLiveCapture
+			if isOffline {
+				kind = pipeline.SourcePCAPReplay
+			}
+			consumeErr = consumeEmailPass(context.Background(), ch, kind)
+		}
+		if isOffline {
+			capture.RunOfflineOrdered(devices, filter, processor)
+		} else {
+			capture.RunWithSignalHandler(devices, filter, processor)
+		}
+		return consumeErr
+	})
+	if err != nil {
+		logger.Error("Email capture failed", "error", err)
+	}
+}
 
+// consumeEmailPass creates analysis state for one capture pass and drains it
+// before returning. The output sink belongs to the surrounding replay session.
+func consumeEmailPass(parentCtx context.Context, packetChan <-chan capture.PacketInfo, kind pipeline.SourceKind) (err error) {
+	emailParser, imapParser, pop3Parser = nil, nil, nil
+	emailTracker, imapTracker, pop3Tracker = nil, nil, nil
+	smtpFactory, imapFactory, pop3Factory = nil, nil, nil
+	defer cleanup()
 	// Get protocol configuration
 	activeProtocol = viper.GetString("email.protocol")
 	if activeProtocol == "" {
@@ -173,17 +198,6 @@ func startEmailSniffer(devices []pcaptypes.PcapInterface, filter string, isOffli
 		pop3Parser = NewPOP3Parser()
 		if trackSessions {
 			pop3Tracker = NewPOP3Tracker(trackerConfig)
-		}
-	}
-
-	// PCAP sink if output file specified
-	if writeFile := viper.GetString("email.write_file"); writeFile != "" {
-		var err error
-		emailPacketSink, err = pcapsink.New(writeFile)
-		if err != nil {
-			logger.Error("Failed to create output file", "error", err, "file", writeFile)
-		} else {
-			logger.Info("Writing email packets to file", "file", writeFile)
 		}
 	}
 
@@ -220,7 +234,7 @@ func startEmailSniffer(devices []pcaptypes.PcapInterface, filter string, isOffli
 
 	// Create processor function with TCP reassembly
 	// Create TCP assembler with multi-protocol factory
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 	captureBody := viper.GetBool("email.capture_body")
 	maxBodySize := viper.GetInt("email.max_body_size")
@@ -233,40 +247,52 @@ func startEmailSniffer(devices []pcaptypes.PcapInterface, filter string, isOffli
 		IMAPPorts:   activeImapPorts,
 		POP3Ports:   activePop3Ports,
 	})
-	emailAssembler = pipeline.NewReassemblyEngine(multiFactory, pipeline.DefaultReassemblyConfig())
-	defer func() {
-		if err := emailAssembler.Close(); err != nil {
-			logger.Error("Failed to close email reassembly engine", "error", err)
-		}
-	}()
+	var factory pipeline.StreamFactory = multiFactory
+	if kind == pipeline.SourcePCAPReplay {
+		factory = &replayEmailFactory{MultiProtocolFactory: multiFactory}
+	}
+	emailAssembler = pipeline.NewReassemblyEngine(factory, pipeline.DefaultReassemblyConfig())
+
+	asm := emailAssembler
 	go func() {
-		if err := emailAssembler.Run(ctx); err != nil {
+		if err := asm.Run(ctx); err != nil {
 			logger.Error("Email reassembly engine stopped", "error", err)
 		}
 	}()
-	processor := func(packetChan <-chan capture.PacketInfo) {
-		kind := pipeline.SourceLiveCapture
-		if isOffline {
-			kind = pipeline.SourcePCAPReplay
+
+	defer func() {
+		err = errors.Join(err, asm.Close())
+		printStatistics()
+	}()
+	for {
+		select {
+		case <-parentCtx.Done():
+			return parentCtx.Err()
+		case info, ok := <-packetChan:
+			if !ok {
+				return nil
+			}
+			env := captureadapter.FromPacketInfo(info, kind)
+			processEmailEnvelope(env, asm)
 		}
-		captureadapter.ForEach(packetChan, kind, func(env *pipeline.PacketEnvelope) {
-			processEmailEnvelope(env, emailAssembler)
-		})
 	}
+}
 
-	// Run capture with appropriate mode
-	if isOffline {
-		capture.RunOfflineOrdered(devices, filter, processor)
-	} else {
-		capture.RunWithSignalHandler(devices, filter, processor)
+func withEmailPacketSink(run func() error) (err error) {
+	emailPacketSink = nil
+	if path := viper.GetString("email.write_file"); path != "" {
+		emailPacketSink, err = pcapsink.New(path)
+		if err != nil {
+			return fmt.Errorf("create Email output file: %w", err)
+		}
 	}
-	if err := emailAssembler.Close(); err != nil {
-		logger.Error("Failed to close email reassembly engine", "error", err)
-	}
-
-	// Print statistics and cleanup
-	printStatistics()
-	cleanup()
+	defer func() {
+		if emailPacketSink != nil {
+			err = errors.Join(err, emailPacketSink.Close(context.Background()))
+			emailPacketSink = nil
+		}
+	}()
+	return run()
 }
 
 // initializePortMaps initializes the port maps for protocol detection.
@@ -370,12 +396,6 @@ func cleanup() {
 	}
 
 	// Close output file
-	if emailPacketSink != nil {
-		if err := emailPacketSink.Close(context.Background()); err != nil {
-			logger.Error("Failed to close email PCAP sink", "error", err)
-		}
-		emailPacketSink = nil
-	}
 
 	// Close factories
 	if factory, ok := smtpFactory.(*smtpStreamFactory); ok {
@@ -434,8 +454,22 @@ func StartLiveEmailSniffer(interfaces, filter string) {
 
 // StartOfflineEmailSniffer starts email capture from a PCAP file.
 func StartOfflineEmailSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startEmailSniffer(devices, filter, true)
+	if err := StartOfflineEmailSnifferWithReplay(context.Background(), readFiles, filter, capture.OfflineReplayOptions{Count: 1}); err != nil {
+		logger.Error("Offline Email capture failed", "error", err)
+	}
+}
+
+// StartOfflineEmailSnifferWithReplay retains output for the full replay session
+// and creates fresh protocol state for each pass.
+func StartOfflineEmailSnifferWithReplay(ctx context.Context, readFiles []string, filter string, opts capture.OfflineReplayOptions) error {
+	return withEmailPacketSink(func() error {
+		var replayErr error
+		openErr := capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+			replayErr = capture.RunOfflineOrderedRepeated(ctx, devices, filter, opts, func(ctx context.Context, ch <-chan capture.PacketInfo) error {
+				return consumeEmailPass(ctx, ch, pipeline.SourcePCAPReplay)
+			})
+		})
+		return errors.Join(openErr, replayErr)
 	})
 }
 

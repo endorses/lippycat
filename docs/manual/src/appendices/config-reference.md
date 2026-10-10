@@ -806,18 +806,20 @@ Tap also supports `tap.http` and `tap.email` sections with the same keys as `hun
 
 Settings for `lc sniff`. See [CLI Capture with `lc sniff`](../part2-local-capture/sniff.md).
 
-| Key                         | Type     | Default  | Description                                            |
-| --------------------------- | -------- | -------- | ------------------------------------------------------ |
-| `sniff.format`              | string   | `"json"` | Output format: `"json"` or `"text"`.                   |
-| `sniff.quiet`               | boolean  | `false`  | Suppress non-packet output.                            |
-| `sniff.virtual_interface`   | boolean  | `false`  | Replay captured packets on a virtual interface.        |
-| `sniff.vif_type`            | string   | `"tap"`  | Virtual interface type.                                |
-| `sniff.vif_name`            | string   | `"lc0"`  | Virtual interface name.                                |
-| `sniff.vif_buffer_size`     | integer  | `65536`  | Virtual interface buffer size.                         |
-| `sniff.vif_drop_privileges` | string   | `""`     | User to drop privileges to.                            |
-| `sniff.vif_netns`           | string   | `""`     | Network namespace.                                     |
-| `sniff.vif_replay_timing`   | boolean  | `false`  | Maintain original packet timing during replay.         |
-| `sniff.vif_startup_delay`   | duration | `"3s"`   | Delay before starting replay (allows interface setup). |
+| Key                         | Type     | Default  | Description                                                  |
+| --------------------------- | -------- | -------- | ------------------------------------------------------------ |
+| `sniff.format`              | string   | `"json"` | Output format: `"json"` or `"text"`.                         |
+| `sniff.quiet`               | boolean  | `false`  | Suppress non-packet output.                                  |
+| `sniff.replay_loop`         | integer  | `1`      | Number of PCAP replay passes; `0` repeats until interrupted. |
+| `sniff.replay_loop_delay`   | duration | `"0s"`   | Delay between PCAP replay passes.                            |
+| `sniff.virtual_interface`   | boolean  | `false`  | Replay captured packets on a virtual interface.              |
+| `sniff.vif_type`            | string   | `"tap"`  | Virtual interface type.                                      |
+| `sniff.vif_name`            | string   | `"lc0"`  | Virtual interface name.                                      |
+| `sniff.vif_buffer_size`     | integer  | `65536`  | Virtual interface buffer size.                               |
+| `sniff.vif_drop_privileges` | string   | `""`     | User to drop privileges to.                                  |
+| `sniff.vif_netns`           | string   | `""`     | Network namespace.                                           |
+| `sniff.vif_replay_timing`   | boolean  | `false`  | Maintain original packet timing during replay.               |
+| `sniff.vif_startup_delay`   | duration | `"3s"`   | Delay before starting replay (allows interface setup).       |
 
 ### `watch` — Watch (TUI) Settings {#watch--watch-tui-settings}
 

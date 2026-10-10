@@ -197,6 +197,30 @@ lc sniff tls -r dns-traffic.pcap
 
 The PCAP file contains the raw packets and can be re-analyzed with any protocol subcommand or opened in Wireshark.
 
+### Repeated Replay {#repeated-replay}
+
+Use `--replay-loop N` to read the input files N times. The default is `1`; `0` repeats until interrupted. `--replay-loop-delay` adds a delay between passes and defaults to `0s`. Both options work with `lc sniff` and every protocol subcommand, and require PCAP input files.
+
+<!-- i18n:skip -->
+
+```bash
+lc sniff -r capture.pcap --replay-loop 3
+lc sniff dns -r capture.pcap --replay-loop 0 --replay-loop-delay 1s
+```
+
+Multiple input files are merged in timestamp order on every pass. Output sinks and the virtual interface stay open across passes. Raw PCAP output preserves packet bytes and capture timestamps; per-call VoIP files accumulate all passes, with TCP SIP output reconstructing complete-message frames as usual. Protocol analysis and replay timing restart for each pass. A continuous loop stops with an error if a pass contains no packets matching the capture filter.
+
+For a continuously running traffic demonstration, enable a virtual interface and original packet timing. Attach a viewer to `lc0` during the startup delay, then stop replay with Ctrl+C. Startup, packet timing, and inter-pass waits can all be interrupted.
+
+<!-- i18n:skip -->
+
+```bash
+sudo lc sniff -r capture.pcap --replay-loop 0 \
+  --virtual-interface --vif-replay-timing --vif-startup-delay 10s
+```
+
+Original packet timing is applied to virtual-interface injection. Without `--vif-replay-timing`, file replay runs as quickly as processing allows. Packets observed on the virtual interface have current kernel timestamps.
+
 ## Protocol Modes {#protocol-modes}
 
 `lc sniff` has protocol-specific subcommands that enable deep analysis. Each adds protocol-aware filtering, correlation, and output.

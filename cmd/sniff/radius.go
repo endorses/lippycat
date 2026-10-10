@@ -24,8 +24,7 @@ var radiusCmd = &cobra.Command{Use: "radius", Short: "Sniff visible RADIUS authe
 	if format != "json" && format != "text" {
 		return fmt.Errorf("unsupported output format %q", format)
 	}
-	sniffConfigured(cmd, args, &c, c.BPF(filter))
-	return nil
+	return sniffConfigured(cmd, args, &c, c.BPF(filter))
 }}
 
 func init() {

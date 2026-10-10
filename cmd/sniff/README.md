@@ -23,11 +23,43 @@ lc sniff -i eth0 --format text
 - `-i, --interface` - Network interface to capture from
 - `-f, --filter` - BPF filter expression
 - `-r, --read-file` - Read from PCAP file instead of live capture
+- `--replay-loop` - Number of file replay passes (default `1`, `0` repeats until interrupted)
+- `--replay-loop-delay` - Delay between file replay passes (default `0s`)
 - `--format` - Output format: `json` (default), `text`
 - `-q, --quiet` - Quiet mode - don't print packets (only statistics to stderr)
 - `--esp-null` - Decapsulate ESP as NULL-encrypted using ESP trailer/SPI validation (off by default)
 - `--esp-heuristic` - Decapsulate ESP by sniffing payload content for SIP (off by default)
 - `--esp-icv-size` - ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires `--esp-null`
+
+## Repeated File Replay
+
+Replay one or more PCAP files a fixed number of times, or continuously until
+Ctrl+C. The options are inherited by every protocol subcommand and require
+file input. Files are merged in timestamp order on each pass.
+
+```bash
+lc sniff -r capture.pcap --replay-loop 3
+lc sniff dns -r first.pcap second.pcap --replay-loop 0 --replay-loop-delay 1s
+sudo lc sniff -r capture.pcap --replay-loop 0 \
+  --virtual-interface --vif-replay-timing --vif-startup-delay 10s
+```
+
+Attach a viewer to `lc0` during the startup delay for a continuous traffic demo.
+Original packet timing applies to virtual-interface injection; other file
+processing runs as quickly as possible. Startup, pacing, and inter-pass delays
+are cancellable. The virtual interface and output sinks stay open across passes,
+while protocol analysis and timing reset. Raw PCAP output retains every pass
+with original packet bytes and timestamps. Per-call VoIP files also accumulate
+all passes; TCP SIP output continues to reconstruct complete-message frames.
+Injected traffic receives current kernel timestamps. Continuous replay stops on
+errors or a pass with no packets matching the capture filter. There is no delay
+after the final pass.
+
+```yaml
+sniff:
+  replay_loop: 0
+  replay_loop_delay: 1s
+```
 
 ## Structured Protocol Logs
 
@@ -611,6 +643,7 @@ For advanced users, individual TCP parameters can be overridden:
 - `--tcp-max-goroutines` - Advisory threshold for TCP stream processing goroutine warnings (0 = use default); it does not reject streams
 
 **Resource Limits:**
+
 - `--max-tcp-buffers` - Maximum number of TCP packet buffers (0 = use profile default)
 - `--tcp-assembler-max-pages` - Maximum pages for TCP assembler (0 = use profile default)
 

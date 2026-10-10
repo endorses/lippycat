@@ -250,8 +250,8 @@ matching YAML keys and validation rules are listed under [Network Observation Se
 
 | Flag                             | Default   | Meaning                                 |
 | -------------------------------- | --------- | --------------------------------------- |
-| `--inventory`                    | `true`   | Produce known-host/service observations |
-| `--inventory-local-cidrs`        | unset     | Optional IPv4/IPv6 subject filter |
+| `--inventory`                    | `true`    | Produce known-host/service observations |
+| `--inventory-local-cidrs`        | unset     | Optional IPv4/IPv6 subject filter       |
 | `--inventory-max-entries`        | `16384`   | Global inventory entry cap              |
 | `--inventory-max-bytes`          | `8388608` | Global accounted inventory byte cap     |
 | `--inventory-scope-max-entries`  | `4096`    | Per-scope inventory entry cap           |
@@ -314,15 +314,17 @@ Capture and display packets from a network interface or PCAP file. Output is wri
 lc sniff [flags]
 ```
 
-| Flag            | Short | Type   | Default | Description                     |
-| --------------- | ----- | ------ | ------- | ------------------------------- |
-| `--interface`   | `-i`  | string | `any`   | Network interface to capture on |
-| `--filter`      | `-f`  | string |         | BPF filter expression           |
-| `--promiscuous` | `-p`  | bool   | `false` | Enable promiscuous mode         |
-| `--read-file`   | `-r`  | string |         | Read packets from PCAP file     |
-| `--write-file`  | `-w`  | string |         | Write packets to PCAP file      |
-| `--format`      |       | string | `json`  | Output format: `json` or `text` |
-| `--quiet`       | `-q`  | bool   | `false` | Suppress non-packet output      |
+| Flag                  | Short | Type     | Default | Description                                                 |
+| --------------------- | ----- | -------- | ------- | ----------------------------------------------------------- |
+| `--interface`         | `-i`  | string   | `any`   | Network interface to capture on                             |
+| `--filter`            | `-f`  | string   |         | BPF filter expression                                       |
+| `--promiscuous`       | `-p`  | bool     | `false` | Enable promiscuous mode                                     |
+| `--read-file`         | `-r`  | string   |         | Read packets from PCAP file                                 |
+| `--replay-loop`       |       | int      | `1`     | Number of PCAP replay passes; `0` repeats until interrupted |
+| `--replay-loop-delay` |       | duration | `0s`    | Delay between PCAP replay passes                            |
+| `--write-file`        | `-w`  | string   |         | Write packets to PCAP file                                  |
+| `--format`            |       | string   | `json`  | Output format: `json` or `text`                             |
+| `--quiet`             | `-q`  | bool     | `false` | Suppress non-packet output                                  |
 
 Plus [Virtual Interface Flags](#virtual-interface-flags) and
 [Structured Protocol Log Flags](#structured-protocol-log-flags).

@@ -5,6 +5,7 @@ package tls
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -36,10 +37,32 @@ func StartTLSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 }
 
 func startTLSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
-	logger.Info("Starting TLS sniffer",
-		"device_count", len(devices),
-		"filter", filter)
+	err := withTLSPacketSink(func() error {
+		var consumeErr error
+		processor := func(ch <-chan capture.PacketInfo) {
+			kind := pipeline.SourceLiveCapture
+			if isOffline {
+				kind = pipeline.SourcePCAPReplay
+			}
+			consumeErr = consumeTLSPass(context.Background(), ch, kind)
+		}
+		if isOffline {
+			capture.RunOfflineOrdered(devices, filter, processor)
+		} else {
+			capture.RunWithSignalHandler(devices, filter, processor)
+		}
+		return consumeErr
+	})
+	if err != nil {
+		logger.Error("TLS capture failed", "error", err)
+	}
+}
 
+// consumeTLSPass creates analysis state for one capture pass and drains it
+// before returning. The output sink belongs to the surrounding replay session.
+func consumeTLSPass(parentCtx context.Context, packetChan <-chan capture.PacketInfo, kind pipeline.SourceKind) (err error) {
+	tlsTracker = nil
+	defer cleanup()
 	// Initialize parser
 	tlsParser = NewParser()
 
@@ -54,36 +77,36 @@ func startTLSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline
 	// Initialize content filter
 	tlsContentFilter = buildContentFilter()
 
-	// PCAP sink if output file specified
-	if writeFile := viper.GetString("tls.write_file"); writeFile != "" {
-		var err error
-		tlsPacketSink, err = pcapsink.New(writeFile)
-		if err != nil {
-			logger.Error("Failed to create output file", "error", err, "file", writeFile)
-		} else {
-			logger.Info("Writing TLS packets to file", "file", writeFile)
+	defer printStatistics(tlsAggregator, tlsTracker)
+	for {
+		select {
+		case <-parentCtx.Done():
+			return parentCtx.Err()
+		case info, ok := <-packetChan:
+			if !ok {
+				return nil
+			}
+			env := captureadapter.FromPacketInfo(info, kind)
+			processTLSEnvelope(env)
 		}
 	}
+}
 
-	// Create processor function
-	kind := pipeline.SourceLiveCapture
-	if isOffline {
-		kind = pipeline.SourcePCAPReplay
+func withTLSPacketSink(run func() error) (err error) {
+	tlsPacketSink = nil
+	if path := viper.GetString("tls.write_file"); path != "" {
+		tlsPacketSink, err = pcapsink.New(path)
+		if err != nil {
+			return fmt.Errorf("create TLS output file: %w", err)
+		}
 	}
-	processor := func(packetChan <-chan capture.PacketInfo) {
-		captureadapter.ForEach(packetChan, kind, processTLSEnvelope)
-	}
-
-	// Run capture with appropriate mode
-	if isOffline {
-		capture.RunOfflineOrdered(devices, filter, processor)
-	} else {
-		capture.RunWithSignalHandler(devices, filter, processor)
-	}
-
-	// Print statistics and cleanup
-	printStatistics(tlsAggregator, tlsTracker)
-	cleanup()
+	defer func() {
+		if tlsPacketSink != nil {
+			err = errors.Join(err, tlsPacketSink.Close(context.Background()))
+			tlsPacketSink = nil
+		}
+	}()
+	return run()
 }
 
 func processTLSEnvelope(env *pipeline.PacketEnvelope) {
@@ -189,12 +212,6 @@ func buildContentFilter() *ContentFilter {
 func cleanup() {
 	if tlsTracker != nil {
 		tlsTracker.Stop()
-	}
-	if tlsPacketSink != nil {
-		if err := tlsPacketSink.Close(context.Background()); err != nil {
-			logger.Error("Failed to close TLS PCAP sink", "error", err)
-		}
-		tlsPacketSink = nil
 	}
 }
 
@@ -309,8 +326,22 @@ func StartLiveTLSSniffer(interfaces, filter string) {
 
 // StartOfflineTLSSniffer starts TLS capture from a PCAP file.
 func StartOfflineTLSSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startTLSSniffer(devices, filter, true)
+	if err := StartOfflineTLSSnifferWithReplay(context.Background(), readFiles, filter, capture.OfflineReplayOptions{Count: 1}); err != nil {
+		logger.Error("Offline TLS capture failed", "error", err)
+	}
+}
+
+// StartOfflineTLSSnifferWithReplay retains output for the full replay session
+// and creates fresh protocol state for each pass.
+func StartOfflineTLSSnifferWithReplay(ctx context.Context, readFiles []string, filter string, opts capture.OfflineReplayOptions) error {
+	return withTLSPacketSink(func() error {
+		var replayErr error
+		openErr := capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+			replayErr = capture.RunOfflineOrderedRepeated(ctx, devices, filter, opts, func(ctx context.Context, ch <-chan capture.PacketInfo) error {
+				return consumeTLSPass(ctx, ch, pipeline.SourcePCAPReplay)
+			})
+		})
+		return errors.Join(openErr, replayErr)
 	})
 }
 

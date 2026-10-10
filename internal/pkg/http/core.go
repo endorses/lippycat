@@ -5,6 +5,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -102,10 +103,33 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 }
 
 func startHTTPSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
-	logger.Info("Starting HTTP sniffer",
-		"device_count", len(devices),
-		"filter", filter)
+	err := withHTTPPacketSink(func() error {
+		var consumeErr error
+		processor := func(ch <-chan capture.PacketInfo) {
+			kind := pipeline.SourceLiveCapture
+			if isOffline {
+				kind = pipeline.SourcePCAPReplay
+			}
+			consumeErr = consumeHTTPPass(context.Background(), ch, kind)
+		}
+		if isOffline {
+			capture.RunOfflineOrdered(devices, filter, processor)
+		} else {
+			capture.RunWithSignalHandler(devices, filter, processor)
+		}
+		return consumeErr
+	})
+	if err != nil {
+		logger.Error("HTTP capture failed", "error", err)
+	}
+}
 
+// consumeHTTPPass creates analysis state for one capture pass and drains it
+// before returning. The output sink belongs to the surrounding replay session.
+func consumeHTTPPass(parentCtx context.Context, packetChan <-chan capture.PacketInfo, kind pipeline.SourceKind) (err error) {
+	httpTracker = nil
+	httpContentFilter = nil
+	defer cleanup()
 	// Initialize parser
 	httpParser = NewParser()
 
@@ -124,17 +148,6 @@ func startHTTPSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 		logger.Info("HTTP content filter enabled")
 	}
 
-	// PCAP sink if output file specified
-	if writeFile := viper.GetString("http.write_file"); writeFile != "" {
-		var err error
-		httpPacketSink, err = pcapsink.New(writeFile)
-		if err != nil {
-			logger.Error("Failed to create output file", "error", err, "file", writeFile)
-		} else {
-			logger.Info("Writing HTTP packets to file", "file", writeFile)
-		}
-	}
-
 	// Create CLI handler
 	quietMode := viper.GetBool("sniff.quiet")
 	format := viper.GetString("sniff.format")
@@ -146,7 +159,7 @@ func startHTTPSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 	}
 
 	// Create TCP reassembly factory
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 	factoryConfig := DefaultHTTPStreamFactoryConfig()
 
@@ -166,42 +179,52 @@ func startHTTPSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 	httpFactory = NewHTTPStreamFactory(ctx, httpHandler, factoryConfig)
 
 	// Create assembler
-	httpAssembler = pipeline.NewReassemblyEngine(httpFactory, pipeline.DefaultReassemblyConfig())
-	defer func() {
-		if err := httpAssembler.Close(); err != nil {
-			logger.Error("Failed to close HTTP reassembly engine", "error", err)
-		}
-	}()
+	var factory pipeline.StreamFactory = httpFactory
+	if kind == pipeline.SourcePCAPReplay {
+		factory = &replayHTTPFactory{HTTPStreamFactory: httpFactory}
+	}
+	httpAssembler = pipeline.NewReassemblyEngine(factory, pipeline.DefaultReassemblyConfig())
+
+	asm := httpAssembler
 	go func() {
-		if err := httpAssembler.Run(ctx); err != nil {
+		if err := asm.Run(ctx); err != nil {
 			logger.Error("HTTP reassembly engine stopped", "error", err)
 		}
 	}()
 
-	// Create processor function
-	processor := func(packetChan <-chan capture.PacketInfo) {
-		kind := pipeline.SourceLiveCapture
-		if isOffline {
-			kind = pipeline.SourcePCAPReplay
+	defer func() {
+		err = errors.Join(err, asm.Close())
+		printStatistics()
+	}()
+	for {
+		select {
+		case <-parentCtx.Done():
+			return parentCtx.Err()
+		case info, ok := <-packetChan:
+			if !ok {
+				return nil
+			}
+			env := captureadapter.FromPacketInfo(info, kind)
+			processHTTPEnvelope(env, asm)
 		}
-		captureadapter.ForEach(packetChan, kind, func(env *pipeline.PacketEnvelope) {
-			processHTTPEnvelope(env, httpAssembler)
-		})
 	}
+}
 
-	// Run capture with appropriate mode
-	if isOffline {
-		capture.RunOfflineOrdered(devices, filter, processor)
-	} else {
-		capture.RunWithSignalHandler(devices, filter, processor)
+func withHTTPPacketSink(run func() error) (err error) {
+	httpPacketSink = nil
+	if path := viper.GetString("http.write_file"); path != "" {
+		httpPacketSink, err = pcapsink.New(path)
+		if err != nil {
+			return fmt.Errorf("create HTTP output file: %w", err)
+		}
 	}
-	if err := httpAssembler.Close(); err != nil {
-		logger.Error("Failed to close HTTP reassembly engine", "error", err)
-	}
-
-	// Print statistics and cleanup
-	printStatistics()
-	cleanup()
+	defer func() {
+		if httpPacketSink != nil {
+			err = errors.Join(err, httpPacketSink.Close(context.Background()))
+			httpPacketSink = nil
+		}
+	}()
+	return run()
 }
 
 func processHTTPEnvelope(env *pipeline.PacketEnvelope, asm *pipeline.ReassemblyEngine) {
@@ -265,12 +288,6 @@ func cleanup() {
 	if httpTracker != nil {
 		httpTracker.Close()
 	}
-	if httpPacketSink != nil {
-		if err := httpPacketSink.Close(context.Background()); err != nil {
-			logger.Error("Failed to close HTTP PCAP sink", "error", err)
-		}
-		httpPacketSink = nil
-	}
 }
 
 // printHTTPPacket prints an HTTP packet to the console.
@@ -331,8 +348,22 @@ func StartLiveHTTPSniffer(interfaces, filter string) {
 
 // StartOfflineHTTPSniffer starts HTTP capture from a PCAP file.
 func StartOfflineHTTPSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startHTTPSniffer(devices, filter, true)
+	if err := StartOfflineHTTPSnifferWithReplay(context.Background(), readFiles, filter, capture.OfflineReplayOptions{Count: 1}); err != nil {
+		logger.Error("Offline HTTP capture failed", "error", err)
+	}
+}
+
+// StartOfflineHTTPSnifferWithReplay retains output for the full replay session
+// and creates fresh protocol state for each pass.
+func StartOfflineHTTPSnifferWithReplay(ctx context.Context, readFiles []string, filter string, opts capture.OfflineReplayOptions) error {
+	return withHTTPPacketSink(func() error {
+		var replayErr error
+		openErr := capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+			replayErr = capture.RunOfflineOrderedRepeated(ctx, devices, filter, opts, func(ctx context.Context, ch <-chan capture.PacketInfo) error {
+				return consumeHTTPPass(ctx, ch, pipeline.SourcePCAPReplay)
+			})
+		})
+		return errors.Join(openErr, replayErr)
 	})
 }
 

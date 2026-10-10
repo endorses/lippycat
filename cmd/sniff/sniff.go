@@ -3,6 +3,8 @@
 package sniff
 
 import (
+	"context"
+	"errors"
 	"os"
 	"time"
 
@@ -21,10 +23,10 @@ var SniffCmd = &cobra.Command{
 	Short:             "Start lippycat in sniff mode",
 	Long:              `Start lippycat in sniff mode. Monitor the specified device`,
 	PersistentPreRunE: validateLiveCaptureBufferConfig,
-	Run:               sniff,
+	RunE:              sniff,
 }
 
-func validateLiveCaptureBufferConfig(cmd *cobra.Command, _ []string) error {
+func validateLiveCaptureBufferConfig(cmd *cobra.Command, args []string) error {
 	if cmd != nil {
 		bindSniffEventFlags(cmd)
 	}
@@ -32,6 +34,9 @@ func validateLiveCaptureBufferConfig(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := capture.ValidateIPv4DefragConfig(); err != nil {
+		return err
+	}
+	if err := validateReplayOptions(cmd, args); err != nil {
 		return err
 	}
 	return validateSniffAnalysisPolicy()
@@ -62,11 +67,11 @@ var (
 	vifDropPrivileges    string
 )
 
-func sniff(cmd *cobra.Command, args []string) {
-	sniffConfigured(cmd, args, nil, filter)
+func sniff(cmd *cobra.Command, args []string) error {
+	return sniffConfigured(cmd, args, nil, filter)
 }
 
-func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconfig.Config, effectiveFilter string) {
+func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconfig.Config, effectiveFilter string) error {
 	// Set quiet mode in viper so it's accessible globally
 	viper.Set("sniff.quiet", quiet)
 	viper.Set("sniff.format", format)
@@ -99,10 +104,28 @@ func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconf
 	}
 
 	files := collectReadFiles(readFile, args)
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(files) != 0 {
+		var cleanup func()
+		ctx, cleanup = offlineReplayContext(cmd)
+		defer cleanup()
+	}
+	var runErr error
 	// The local pipeline owns ordinary RADIUS association and shares that same
 	// observation with optional consumers before packet fan-out.
-	withEventAnalysisMode(files, structuredLogAnalysisProfile("sniff", filter), filter, true, func(logSession *sniffEventSession) {
+	analysisErr := withEventAnalysisMode(files, structuredLogAnalysisProfile("sniff", filter), filter, true, func(logSession *sniffEventSession) {
 		registrations := []pipeline.SinkRegistration{{Name: "cli", Sink: newCLIEnvelopeSink(os.Stdout, format, quiet)}}
+		composed := false
+		defer func() {
+			if !composed {
+				for _, registration := range registrations {
+					runErr = errors.Join(runErr, registration.Sink.Close(context.Background()))
+				}
+			}
+		}()
 		if writeFile != "" {
 			pcapSink, err := newPCAPEnvelopeSink(writeFile)
 			if err != nil {
@@ -111,6 +134,7 @@ func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconf
 				registrations = append(registrations, pipeline.SinkRegistration{Name: "pcap", Sink: pcapSink})
 			}
 		}
+		var vifSink *virtualInterfaceEnvelopeSink
 		if viper.GetBool("sniff.virtual_interface") {
 			cfg := vinterface.DefaultConfig()
 			if value := viper.GetString("sniff.vif_name"); value != "" {
@@ -124,8 +148,13 @@ func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconf
 			}
 			cfg.NetNS = viper.GetString("sniff.vif_netns")
 			cfg.DropPrivilegesUser = viper.GetString("sniff.vif_drop_privileges")
-			vifSink, err := startVirtualInterfaceSink(cfg, viper.GetBool("sniff.vif_replay_timing"), viper.GetDuration("sniff.vif_startup_delay"))
+			var err error
+			vifSink, err = startVirtualInterfaceSinkContext(ctx, cfg, viper.GetBool("sniff.vif_replay_timing"), viper.GetDuration("sniff.vif_startup_delay"))
 			if err != nil {
+				if ctx.Err() != nil {
+					runErr = err
+					return
+				}
 				logger.Error("Failed to start virtual interface; continuing without it", "error", err, "interface_name", cfg.Name)
 			} else {
 				registrations = append(registrations, pipeline.SinkRegistration{Name: "virtual-interface", Sink: vifSink})
@@ -133,11 +162,13 @@ func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconf
 		}
 		fanout, err := pipeline.NewPacketFanout(registrations...)
 		if err != nil {
+			runErr = err
 			logger.Error("Failed to compose local packet sinks", "error", err)
 			return
 		}
+		composed = true
 		localPipeline := &localEnvelopePipeline{fanout: fanout, radiusConfig: radiusConfig, logSession: logSession}
-		defer localPipeline.close()
+		defer func() { runErr = errors.Join(runErr, localPipeline.close()) }()
 
 		processor := func(kind pipeline.SourceKind) func(<-chan capture.PacketInfo) {
 			return func(ch <-chan capture.PacketInfo) { localPipeline.process(ch, kind) }
@@ -147,12 +178,28 @@ func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconf
 				capture.RunWithSignalHandler(devices, filter, processor(pipeline.SourceLiveCapture))
 			})
 		} else {
-			capture.StartOfflineSnifferOrdered(files, effectiveFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-				capture.RunOfflineOrdered(devices, filter, processor(pipeline.SourcePCAPReplay))
+			opts := replayOptionsForSession(sniffReplayOptions(), logSession)
+			before := opts.BeforePass
+			opts.BeforePass = func(pass uint64) error {
+				if vifSink != nil {
+					vifSink.timing.Reset()
+				}
+				return before(pass)
+			}
+			startErr := capture.StartOfflineSnifferOrdered(files, effectiveFilter, func(devices []pcaptypes.PcapInterface, filter string) {
+				runErr = capture.RunOfflineOrderedRepeated(ctx, devices, filter, opts, func(passCtx context.Context, ch <-chan capture.PacketInfo) error {
+					return localPipeline.processContext(passCtx, ch, pipeline.SourcePCAPReplay)
+				})
 			})
+			runErr = errors.Join(startErr, runErr)
 		}
 		logger.Info("Packet processing completed", "total_packets", localPipeline.count)
 	})
+	runErr = errors.Join(analysisErr, runErr)
+	if ctx.Err() != nil && onlyReplayCancellation(runErr) {
+		return nil
+	}
+	return runErr
 }
 
 // collectReadFiles combines the --read-file/-r flag value with any leftover
@@ -171,6 +218,10 @@ func collectReadFiles(flagValue string, positional []string) []string {
 
 func init() {
 	registerStructuredLogFlags(SniffCmd)
+	SniffCmd.PersistentFlags().Int("replay-loop", 1, "Number of PCAP replay passes (0 repeats until interrupted)")
+	SniffCmd.PersistentFlags().Duration("replay-loop-delay", 0, "Delay between PCAP replay passes")
+	_ = viper.BindPFlag("sniff.replay_loop", SniffCmd.PersistentFlags().Lookup("replay-loop"))
+	_ = viper.BindPFlag("sniff.replay_loop_delay", SniffCmd.PersistentFlags().Lookup("replay-loop-delay"))
 	SniffCmd.AddCommand(voipCmd)
 	SniffCmd.AddCommand(dnsCmd)
 	SniffCmd.AddCommand(emailCmd)

@@ -298,7 +298,7 @@ func TestSniffCommandStructure(t *testing.T) {
 	assert.NotNil(t, SniffCmd, "SniffCmd should be initialized")
 	assert.Equal(t, "sniff", SniffCmd.Use)
 	assert.Contains(t, SniffCmd.Short, "Start lippycat in sniff mode")
-	assert.NotNil(t, SniffCmd.Run, "SniffCmd should have a Run function")
+	assert.NotNil(t, SniffCmd.RunE, "SniffCmd should have a RunE function")
 
 	// Check flags
 	flags := []struct {

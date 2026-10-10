@@ -223,6 +223,7 @@ func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, 
 	// Start processing goroutine immediately
 	if factory != nil {
 		factory.allWorkers.Add(2)
+		factory.streamWorkers.Add(2)
 	}
 	go s.processLoop()
 	go s.reverse.processLoop()
@@ -425,6 +426,7 @@ func (s *bufferedSIPStream) rearm() bool {
 			root.slotReserved = true
 		}
 		s.factory.allWorkers.Add(1)
+		s.factory.streamWorkers.Add(1)
 		s.factory.lifecycleMu.Unlock()
 	}
 	root.liveWorkers++
@@ -527,6 +529,7 @@ func (s *bufferedSIPStream) processLoop() {
 		}
 		root.workerMu.Unlock()
 		if s.factory != nil {
+			s.factory.streamWorkers.Done()
 			s.factory.allWorkers.Done()
 		}
 	}()

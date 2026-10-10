@@ -35,7 +35,7 @@ Examples:
 
   # Write to output file
   lc sniff dns -i eth0 -w dns-output.pcap`,
-	Run: dnsHandler,
+	RunE: dnsHandler,
 }
 
 var (
@@ -57,11 +57,12 @@ var dnsRuntimeHooks = sniffRuntimeHooks{
 		}
 		return dns.NewFilterBuilder().Build(dns.FilterConfig{Ports: ports, UDPOnly: dnsUDPOnly, BaseFilter: baseFilter}), nil
 	},
-	StartLive:  dns.StartLiveDNSSniffer,
-	StartFiles: dns.StartOfflineDNSSniffer,
+	StartLive:   dns.StartLiveDNSSniffer,
+	StartFiles:  dns.StartOfflineDNSSniffer,
+	StartReplay: dns.StartOfflineDNSSnifferWithReplay,
 }
 
-func dnsHandler(cmd *cobra.Command, args []string) {
+func dnsHandler(cmd *cobra.Command, args []string) error {
 	// Set DNS configuration values
 	if cmd.Flags().Changed("domain") {
 		viper.Set("dns.domain_pattern", dnsDomainPattern)
@@ -87,7 +88,7 @@ func dnsHandler(cmd *cobra.Command, args []string) {
 		patterns, err := dns.LoadDomainsFromFile(dnsDomainsFile)
 		if err != nil {
 			logger.Error("Failed to load domains file", "error", err, "file", dnsDomainsFile)
-			return
+			return err
 		}
 		viper.Set("dns.domain_patterns", patterns)
 		logger.Info("Loaded domain patterns from file", "count", len(patterns), "file", dnsDomainsFile)
@@ -102,7 +103,7 @@ func dnsHandler(cmd *cobra.Command, args []string) {
 		"detect_tunneling", dnsDetectTunnel)
 
 	// Start DNS sniffer using appropriate mode
-	runProtocol(cmd, args, protocolcatalog.MustLookup("dns"), dnsRuntimeHooks)
+	return runProtocol(cmd, args, protocolcatalog.MustLookup("dns"), dnsRuntimeHooks)
 }
 
 func init() {

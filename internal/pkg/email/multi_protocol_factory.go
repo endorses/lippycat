@@ -25,6 +25,7 @@ type MultiProtocolFactory struct {
 	maxGoroutines    int
 	cleanupTicker    *time.Ticker
 	allWorkers       sync.WaitGroup
+	streamWorkers    sync.WaitGroup
 	closed           int32
 
 	// Protocol-specific handlers
@@ -119,13 +120,25 @@ func (f *MultiProtocolFactory) New(net, transport gopacket.Flow, tcp *layers.TCP
 	switch protocol {
 	case "SMTP":
 		stream := f.createSMTPStream(reader, net, transport, isFromServer, sessionID)
-		go stream.run()
+		f.streamWorkers.Add(1)
+		go func() {
+			defer f.streamWorkers.Done()
+			stream.run()
+		}()
 	case "IMAP":
 		stream := f.createIMAPStream(reader, net, transport, isFromServer, sessionID)
-		go stream.run()
+		f.streamWorkers.Add(1)
+		go func() {
+			defer f.streamWorkers.Done()
+			stream.run()
+		}()
 	case "POP3":
 		stream := f.createPOP3Stream(reader, net, transport, isFromServer, sessionID)
-		go stream.run()
+		f.streamWorkers.Add(1)
+		go func() {
+			defer f.streamWorkers.Done()
+			stream.run()
+		}()
 	default:
 		atomic.AddInt64(&f.activeGoroutines, -1)
 	}

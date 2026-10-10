@@ -24,11 +24,11 @@ type sniffProtocolContract struct {
 
 func TestSniffProtocolCLIContracts(t *testing.T) {
 	helpHashes := map[string]string{
-		"dns":   "4a7a708912c7e7b42c215c06561888e97d2ba0e8934d703abcd5d55f4fcdb4e3",
-		"email": "cd86517871223a1a3281e2eebde4308cfe0bc7b850bb9bd876890c7c1f96d350",
-		"http":  "612cad1d086b2dc1fa23ff6ff55833ac276da0d7e994f8a0ffc61404a7835f5c",
-		"tls":   "9aae7ff2e5658483d2b61a62f9c9aaa9150a9a372aaeee999bda225f4322f9ca",
-		"voip":  "caf1778e2b56cc1dd176d0f84f886835e593350d3b5c41dcaf5925cb0ed2695e",
+		"dns":   "a44fc3a2bb16d8efb208d7124a778fb55acfb4bcfb61986ea1c28d393f8c04a6",
+		"email": "591f4f9b640b00eea38b1c016ca810aea44ac7136257446ba85ad0c2857a57a8",
+		"http":  "2091a8d23536b50c11d8b8cd88fe2c961820bebfa14e3da0d83e6440c9b78ce1",
+		"tls":   "ebe5efc912e1c89e6610b33ccc671f6dcb89e1e9bf9bea3dd5b48f941f385ef3",
+		"voip":  "2f46c1a7683bc81c79f76009b1633b767db0dd2fe1dcd2d3ef21d47df69b5158",
 	}
 	contracts := map[string]sniffProtocolContract{
 		"dns": {
@@ -61,6 +61,12 @@ func TestSniffProtocolCLIContracts(t *testing.T) {
 	for name, contract := range contracts {
 		t.Run(name, func(t *testing.T) {
 			require.Equal(t, name, contract.cmd.Use)
+			require.NotNil(t, contract.cmd.RunE)
+			for flagName, want := range map[string]string{"replay-loop": "1", "replay-loop-delay": "0s"} {
+				flag := contract.cmd.InheritedFlags().Lookup(flagName)
+				require.NotNil(t, flag, "protocol must inherit replay options")
+				require.Equal(t, want, flag.DefValue)
+			}
 			require.Equal(t, contract.flags, commandFlagDefaults(contract.cmd))
 			require.Equal(t, helpHashes[name], renderedHelpHash(t, contract.cmd), "full rendered help changed")
 
@@ -115,7 +121,7 @@ func distinctFlagValue(flag *pflag.Flag) string {
 
 func commandFlagDefaults(cmd *cobra.Command) map[string]string {
 	result := make(map[string]string)
-	cmd.Flags().VisitAll(func(flag *pflag.Flag) { result[flag.Name] = flag.DefValue })
+	cmd.LocalNonPersistentFlags().VisitAll(func(flag *pflag.Flag) { result[flag.Name] = flag.DefValue })
 	return result
 }
 

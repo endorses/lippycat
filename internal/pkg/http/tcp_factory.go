@@ -36,6 +36,7 @@ type httpStreamFactory struct {
 	handler          HTTPMessageHandler
 	cleanupTicker    *time.Ticker
 	allWorkers       sync.WaitGroup
+	streamWorkers    sync.WaitGroup
 	closed           int32
 
 	// Track server ports to determine direction
@@ -140,7 +141,11 @@ func (f *httpStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, a
 	stream := createHTTPStream(reader, f.ctx, f, net, transport.Reverse(), isFromServer, sessionID)
 
 	atomic.AddInt64(&f.activeGoroutines, 1)
-	go stream.run()
+	f.streamWorkers.Add(1)
+	go func() {
+		defer f.streamWorkers.Done()
+		stream.run()
+	}()
 
 	return rs
 }

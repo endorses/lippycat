@@ -5,6 +5,7 @@ package dns
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -39,10 +40,33 @@ func StartDNSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 }
 
 func startDNSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
-	logger.Info("Starting DNS sniffer",
-		"device_count", len(devices),
-		"filter", filter)
+	err := withDNSPacketSink(func() error {
+		var consumeErr error
+		processor := func(ch <-chan capture.PacketInfo) {
+			kind := pipeline.SourceLiveCapture
+			if isOffline {
+				kind = pipeline.SourcePCAPReplay
+			}
+			consumeErr = consumeDNSPass(context.Background(), ch, kind)
+		}
+		if isOffline {
+			capture.RunOfflineOrdered(devices, filter, processor)
+		} else {
+			capture.RunWithSignalHandler(devices, filter, processor)
+		}
+		return consumeErr
+	})
+	if err != nil {
+		logger.Error("DNS capture failed", "error", err)
+	}
+}
 
+// consumeDNSPass creates analysis state for one capture pass and drains it
+// before returning. The output sink belongs to the surrounding replay session.
+func consumeDNSPass(parentCtx context.Context, packetChan <-chan capture.PacketInfo, kind pipeline.SourceKind) (err error) {
+	dnsTracker = nil
+	dnsTunneling = nil
+	defer cleanup()
 	// Initialize parser and optionally tracker/tunneling detector
 	dnsParser = NewParser()
 
@@ -68,36 +92,36 @@ func startDNSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline
 	// Create aggregator for statistics
 	dnsAggregator = NewQueryAggregator(10000)
 
-	// PCAP sink if output file specified
-	if writeFile := viper.GetString("dns.write_file"); writeFile != "" {
-		var err error
-		dnsPacketSink, err = pcapsink.New(writeFile)
-		if err != nil {
-			logger.Error("Failed to create output file", "error", err, "file", writeFile)
-		} else {
-			logger.Info("Writing DNS packets to file", "file", writeFile)
+	defer printStatistics(dnsAggregator, dnsTracker, dnsTunneling)
+	for {
+		select {
+		case <-parentCtx.Done():
+			return parentCtx.Err()
+		case info, ok := <-packetChan:
+			if !ok {
+				return nil
+			}
+			env := captureadapter.FromPacketInfo(info, kind)
+			processDNSEnvelope(env)
 		}
 	}
+}
 
-	// Create processor function
-	kind := pipeline.SourceLiveCapture
-	if isOffline {
-		kind = pipeline.SourcePCAPReplay
+func withDNSPacketSink(run func() error) (err error) {
+	dnsPacketSink = nil
+	if path := viper.GetString("dns.write_file"); path != "" {
+		dnsPacketSink, err = pcapsink.New(path)
+		if err != nil {
+			return fmt.Errorf("create DNS output file: %w", err)
+		}
 	}
-	processor := func(packetChan <-chan capture.PacketInfo) {
-		captureadapter.ForEach(packetChan, kind, processDNSEnvelope)
-	}
-
-	// Run capture with appropriate mode
-	if isOffline {
-		capture.RunOfflineOrdered(devices, filter, processor)
-	} else {
-		capture.RunWithSignalHandler(devices, filter, processor)
-	}
-
-	// Print statistics and cleanup
-	printStatistics(dnsAggregator, dnsTracker, dnsTunneling)
-	cleanup()
+	defer func() {
+		if dnsPacketSink != nil {
+			err = errors.Join(err, dnsPacketSink.Close(context.Background()))
+			dnsPacketSink = nil
+		}
+	}()
+	return run()
 }
 
 func processDNSEnvelope(env *pipeline.PacketEnvelope) {
@@ -169,12 +193,6 @@ func processDNSEnvelope(env *pipeline.PacketEnvelope) {
 func cleanup() {
 	if dnsTunneling != nil {
 		dnsTunneling.Stop()
-	}
-	if dnsPacketSink != nil {
-		if err := dnsPacketSink.Close(context.Background()); err != nil {
-			logger.Error("Failed to close DNS PCAP sink", "error", err)
-		}
-		dnsPacketSink = nil
 	}
 }
 
@@ -275,8 +293,22 @@ func StartLiveDNSSniffer(interfaces, filter string) {
 
 // StartOfflineDNSSniffer starts DNS capture from one or more PCAP files.
 func StartOfflineDNSSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startDNSSniffer(devices, filter, true)
+	if err := StartOfflineDNSSnifferWithReplay(context.Background(), readFiles, filter, capture.OfflineReplayOptions{Count: 1}); err != nil {
+		logger.Error("Offline DNS capture failed", "error", err)
+	}
+}
+
+// StartOfflineDNSSnifferWithReplay retains output for the full replay session
+// and creates fresh protocol state for each pass.
+func StartOfflineDNSSnifferWithReplay(ctx context.Context, readFiles []string, filter string, opts capture.OfflineReplayOptions) error {
+	return withDNSPacketSink(func() error {
+		var replayErr error
+		openErr := capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+			replayErr = capture.RunOfflineOrderedRepeated(ctx, devices, filter, opts, func(ctx context.Context, ch <-chan capture.PacketInfo) error {
+				return consumeDNSPass(ctx, ch, pipeline.SourcePCAPReplay)
+			})
+		})
+		return errors.Join(openErr, replayErr)
 	})
 }
 

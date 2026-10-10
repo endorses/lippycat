@@ -24,13 +24,22 @@ var (
 // ordinary normalized packet sink. Selection happens before dispatch; the sink
 // has no knowledge of SIP/RTP or call tracking.
 type virtualInterfacePacketSink struct {
-	manager vinterface.Manager
-	timing  *vinterface.TimingReplayer
+	manager       vinterface.Manager
+	timing        *vinterface.TimingReplayer
+	replayContext context.Context
 }
 
-func (s *virtualInterfacePacketSink) HandlePacket(_ context.Context, env *pipeline.PacketEnvelope) pipeline.Result {
+func (s *virtualInterfacePacketSink) HandlePacket(ctx context.Context, env *pipeline.PacketEnvelope) pipeline.Result {
+	if s.replayContext != nil {
+		ctx = s.replayContext
+	}
+	if err := ctx.Err(); err != nil {
+		return pipeline.Result{Outcome: pipeline.OutcomeRetryableFailure, Err: err}
+	}
 	if s.timing != nil {
-		s.timing.WaitForPacketTime(env.CaptureTime)
+		if err := s.timing.WaitForPacketTimeContext(ctx, env.CaptureTime); err != nil {
+			return pipeline.Result{Outcome: pipeline.OutcomeRetryableFailure, Err: err}
+		}
 	}
 	display := capture.ConvertPacketToDisplay(captureadapter.ToPacketInfo(env))
 	display.RawData = append([]byte(nil), env.Data...)

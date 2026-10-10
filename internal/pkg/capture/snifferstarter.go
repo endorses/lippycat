@@ -171,6 +171,13 @@ func RunOfflineOrderedContext(ctx context.Context, devices []pcaptypes.PcapInter
 // dataset. The caller must discard any unpublished session on failure.
 func RunOfflineOrderedStream(ctx context.Context, devices []pcaptypes.PcapInterface, filter string,
 	processor func(context.Context, <-chan PacketInfo) error) (err error) {
+	return runOfflineOrderedStream(ctx, devices, filter, processor, nil)
+}
+
+// delivered counts records successfully handed to the consumer. It is updated
+// only by the producer, and callers read it after the producer and consumer join.
+func runOfflineOrderedStream(ctx context.Context, devices []pcaptypes.PcapInterface, filter string,
+	processor func(context.Context, <-chan PacketInfo) error, delivered *uint64) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -221,6 +228,9 @@ func RunOfflineOrderedStream(ctx context.Context, devices []pcaptypes.PcapInterf
 		case <-ctx.Done():
 			producerErr = ctx.Err()
 		case packetStream <- entry.packet:
+			if delivered != nil {
+				*delivered += 1
+			}
 		}
 		if producerErr != nil {
 			break

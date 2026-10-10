@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,10 +41,14 @@ type sessionFiles struct {
 
 // SessionOutputManager is the legacy per-call PCAP output service.
 type SessionOutputManager struct {
-	mu       sync.RWMutex
-	config   Config
-	sessions map[string]*sessionFiles
-	closed   bool
+	mu     sync.RWMutex
+	openMu sync.Mutex
+	// replayFiles remembers outputs created in this replay session. Reopened
+	// calls append records without writing another PCAP global header.
+	replayFiles map[string]layers.LinkType
+	config      Config
+	sessions    map[string]*sessionFiles
+	closed      bool
 }
 
 func NewSessionOutputManager(config *Config) *SessionOutputManager {
@@ -63,11 +68,17 @@ func (m *SessionOutputManager) OnCallEnded(call *CallInfo) error {
 }
 
 func (m *SessionOutputManager) OpenSession(callID string, linkType layers.LinkType) error {
+	m.openMu.Lock()
+	defer m.openMu.Unlock()
 	m.mu.RLock()
 	closed := m.closed
+	previousLinkType, appendRecords := m.replayFiles[callID]
 	m.mu.RUnlock()
 	if closed {
 		return ErrOutputManagerClosed
+	}
+	if appendRecords && previousLinkType != linkType {
+		return fmt.Errorf("cannot append replay call %q with link type %v to %v PCAP", SanitizeCallIDForLogging(callID), linkType, previousLinkType)
 	}
 	name := sanitizeWithMaxLength(callID, m.config.MaxFilenameLength)
 	var sipPath, rtpPath string
@@ -92,12 +103,18 @@ func (m *SessionOutputManager) OpenSession(callID string, linkType layers.LinkTy
 		sipPath, rtpPath = filepath.Join(dir, "sip_"+name+".pcap"), filepath.Join(dir, "rtp_"+name+".pcap")
 	}
 	s := &sessionFiles{}
+	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	if appendRecords {
+		// These files were created by this manager. Refuse to silently replace
+		// an output removed during replay with a headerless PCAP.
+		flags = os.O_WRONLY | os.O_APPEND
+	}
 	var err error
-	s.sipFile, err = os.OpenFile(sipPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	s.sipFile, err = os.OpenFile(sipPath, flags, 0o600)
 	if err != nil {
 		return fmt.Errorf("create SIP file: %w", err)
 	}
-	s.rtpFile, err = os.OpenFile(rtpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	s.rtpFile, err = os.OpenFile(rtpPath, flags, 0o600)
 	if err != nil {
 		if closeErr := s.sipFile.Close(); closeErr != nil {
 			logger.Error("close SIP output after RTP open failure", "call_id", SanitizeCallIDForLogging(callID), "error", closeErr)
@@ -105,8 +122,10 @@ func (m *SessionOutputManager) OpenSession(callID string, linkType layers.LinkTy
 		return fmt.Errorf("create RTP file: %w", err)
 	}
 	s.sipWriter, s.rtpWriter = pcapgo.NewWriter(s.sipFile), pcapgo.NewWriter(s.rtpFile)
-	if err = s.sipWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, linkType); err == nil {
-		err = s.rtpWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, linkType)
+	if !appendRecords {
+		if err = s.sipWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, linkType); err == nil {
+			err = s.rtpWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, linkType)
+		}
 	}
 	if err != nil {
 		if closeErr := s.sipFile.Close(); closeErr != nil {
@@ -120,11 +139,16 @@ func (m *SessionOutputManager) OpenSession(callID string, linkType layers.LinkTy
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
-		_ = closeSessionFiles(s)
+		if closeErr := closeSessionFiles(s); closeErr != nil {
+			return errors.Join(ErrOutputManagerClosed, fmt.Errorf("close rejected call output: %w", closeErr))
+		}
 		return ErrOutputManagerClosed
 	}
 	old := m.sessions[callID]
 	m.sessions[callID] = s
+	if m.replayFiles != nil {
+		m.replayFiles[callID] = linkType
+	}
 	m.mu.Unlock()
 	if old != nil {
 		if err := closeSessionFiles(old); err != nil {

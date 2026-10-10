@@ -39,7 +39,7 @@ Examples:
 
   # Write matching packets to file
   lc sniff tls -i eth0 -w tls-output.pcap`,
-	Run: tlsHandler,
+	RunE: tlsHandler,
 }
 
 var (
@@ -65,11 +65,12 @@ var tlsRuntimeHooks = sniffRuntimeHooks{
 		}
 		return tls.NewFilterBuilder().Build(tls.FilterConfig{Ports: ports, BaseFilter: baseFilter}), nil
 	},
-	StartLive:  tls.StartLiveTLSSniffer,
-	StartFiles: tls.StartOfflineTLSSniffer,
+	StartLive:   tls.StartLiveTLSSniffer,
+	StartFiles:  tls.StartOfflineTLSSniffer,
+	StartReplay: tls.StartOfflineTLSSnifferWithReplay,
 }
 
-func tlsHandler(cmd *cobra.Command, args []string) {
+func tlsHandler(cmd *cobra.Command, args []string) error {
 	// Set TLS configuration values
 	if cmd.Flags().Changed("sni") {
 		viper.Set("tls.sni_pattern", tlsSNIPattern)
@@ -89,7 +90,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 		patterns, err := tls.LoadSNIPatternsFromFile(tlsSNIFile)
 		if err != nil {
 			logger.Error("Failed to load SNI patterns file", "error", err, "file", tlsSNIFile)
-			return
+			return err
 		}
 		viper.Set("tls.sni_patterns", patterns)
 		logger.Info("Loaded SNI patterns from file", "count", len(patterns), "file", tlsSNIFile)
@@ -98,8 +99,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 	// Set JA3 filters
 	if cmd.Flags().Changed("ja3") {
 		if !tls.IsValidJA3Hash(tlsJA3) {
-			logger.Error("Invalid JA3 hash format (must be 32-char hex)", "hash", tlsJA3)
-			return
+			return fmt.Errorf("invalid JA3 hash %q (must be 32-char hex)", tlsJA3)
 		}
 		viper.Set("tls.ja3", tlsJA3)
 	}
@@ -107,7 +107,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 		hashes, err := tls.LoadJA3HashesFromFile(tlsJA3File)
 		if err != nil {
 			logger.Error("Failed to load JA3 hashes file", "error", err, "file", tlsJA3File)
-			return
+			return err
 		}
 		viper.Set("tls.ja3_hashes", hashes)
 		logger.Info("Loaded JA3 hashes from file", "count", len(hashes), "file", tlsJA3File)
@@ -116,8 +116,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 	// Set JA3S filters
 	if cmd.Flags().Changed("ja3s") {
 		if !tls.IsValidJA3Hash(tlsJA3S) {
-			logger.Error("Invalid JA3S hash format (must be 32-char hex)", "hash", tlsJA3S)
-			return
+			return fmt.Errorf("invalid JA3S hash %q (must be 32-char hex)", tlsJA3S)
 		}
 		viper.Set("tls.ja3s", tlsJA3S)
 	}
@@ -125,7 +124,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 		hashes, err := tls.LoadJA3SHashesFromFile(tlsJA3SFile)
 		if err != nil {
 			logger.Error("Failed to load JA3S hashes file", "error", err, "file", tlsJA3SFile)
-			return
+			return err
 		}
 		viper.Set("tls.ja3s_hashes", hashes)
 		logger.Info("Loaded JA3S hashes from file", "count", len(hashes), "file", tlsJA3SFile)
@@ -134,8 +133,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 	// Set JA4 filters
 	if cmd.Flags().Changed("ja4") {
 		if !tls.IsValidJA4Fingerprint(tlsJA4) {
-			logger.Error("Invalid JA4 fingerprint format", "fingerprint", tlsJA4)
-			return
+			return fmt.Errorf("invalid JA4 fingerprint %q", tlsJA4)
 		}
 		viper.Set("tls.ja4", tlsJA4)
 	}
@@ -143,7 +141,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 		fingerprints, err := tls.LoadJA4FingerprintsFromFile(tlsJA4File)
 		if err != nil {
 			logger.Error("Failed to load JA4 fingerprints file", "error", err, "file", tlsJA4File)
-			return
+			return err
 		}
 		viper.Set("tls.ja4_fingerprints", fingerprints)
 		logger.Info("Loaded JA4 fingerprints from file", "count", len(fingerprints), "file", tlsJA4File)
@@ -160,7 +158,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 		"track_connections", tlsTrackConns)
 
 	// Start TLS sniffer using appropriate mode
-	runProtocol(cmd, args, protocolcatalog.MustLookup("tls"), tlsRuntimeHooks)
+	return runProtocol(cmd, args, protocolcatalog.MustLookup("tls"), tlsRuntimeHooks)
 }
 
 func init() {

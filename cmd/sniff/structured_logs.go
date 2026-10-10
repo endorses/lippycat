@@ -4,6 +4,7 @@ package sniff
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,16 +46,16 @@ func withEventAnalysis(inputFiles []string, analysisProfile, effectiveFilter str
 	withEventAnalysisMode(inputFiles, analysisProfile, effectiveFilter, false, func(*sniffEventSession) { run() })
 }
 
-func withEventAnalysisMode(inputFiles []string, analysisProfile, effectiveFilter string, pipelineOwned bool, run func(*sniffEventSession)) {
+func withEventAnalysisMode(inputFiles []string, analysisProfile, effectiveFilter string, pipelineOwned bool, run func(*sniffEventSession)) (resultErr error) {
 	dir := viper.GetString("logs.dir")
 	s, err := newSniffEventSession(dir, inputFiles, analysisProfile, nil)
 	if err != nil {
 		logger.Error("Failed to initialize normalized event analysis", "error", err)
-		return
+		return err
 	}
 	if s == nil {
 		run(nil)
-		return
+		return nil
 	}
 	s.filtered = strings.TrimSpace(effectiveFilter) != ""
 	defer func() {
@@ -67,19 +68,20 @@ func withEventAnalysisMode(inputFiles []string, analysisProfile, effectiveFilter
 		defer cancel()
 		if err := s.dispatcher.Close(ctx); err != nil {
 			logger.Error("Failed to close normalized event analysis", "error", err)
+			resultErr = errors.Join(resultErr, err)
 		}
 	}()
 	if !pipelineOwned {
 		s.radius, err = radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "local"})
 		if err != nil {
 			logger.Error("Failed to initialize RADIUS observations", "error", err)
-			run(nil)
-			return
+			return err
 		}
 		restore := capture.SetPacketObserver(s.observe)
 		defer restore()
 	}
 	run(s)
+	return nil
 }
 
 func newSniffEventSession(dir string, inputFiles []string, analysisProfile string, additionalSink events.Sink) (*sniffEventSession, error) {

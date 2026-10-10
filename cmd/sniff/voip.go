@@ -30,7 +30,7 @@ var voipCmd = &cobra.Command{
 		}
 		return nil
 	},
-	Run: voipHandler,
+	RunE: voipHandler,
 }
 
 var (
@@ -94,11 +94,12 @@ var voipRuntimeHooks = sniffRuntimeHooks{
 		logger.Info("VoIP BPF filter optimization enabled", "udp_only", udpOnly, "sip_ports", sipPorts, "rtp_port_ranges", rtpRanges, "effective_filter", effective)
 		return effective, nil
 	},
-	StartLive:  voip.StartLiveVoipSniffer,
-	StartFiles: voip.StartOfflineVoipSniffer,
+	StartLive:   voip.StartLiveVoipSniffer,
+	StartFiles:  voip.StartOfflineVoipSniffer,
+	StartReplay: voip.StartOfflineVoipSnifferWithReplay,
 }
 
-func voipHandler(cmd *cobra.Command, args []string) {
+func voipHandler(cmd *cobra.Command, args []string) error {
 	expirationDate := time.Date(1, 1, 1, 1, 1, 1, 1, time.UTC)
 	su := sipusers.SipUser{ExpirationDate: expirationDate}
 
@@ -201,7 +202,7 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	// The VoIP package deliberately has no dependency on Viper.
 	voip.SetConfig(loadVoIPLibraryConfig())
 
-	runProtocol(cmd, args, protocolcatalog.MustLookup("voip"), voipRuntimeHooks)
+	return runProtocol(cmd, args, protocolcatalog.MustLookup("voip"), voipRuntimeHooks)
 }
 
 func loadVoIPLibraryConfig() *voip.Config {

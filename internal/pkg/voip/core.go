@@ -5,6 +5,7 @@ package voip
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -52,24 +53,32 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 }
 
 func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
-	ctx := context.Background()
+	if err := startVoipSession(context.Background(), devices, filter, isOffline, capture.OfflineReplayOptions{Count: 1}); err != nil {
+		logger.Error("VoIP capture failed", "error", err)
+	}
+}
+
+// startVoipSession owns outputs for the entire replay, while each pass owns its
+// tracker, buffers, and TCP reassembly. Repeated source timestamps never leak
+// into the next pass's analysis or virtual-interface pacing.
+func startVoipSession(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, isOffline bool, replay capture.OfflineReplayOptions) (runErr error) {
 	config := GetConfig()
 	var callOutput CallOutput = NoopCallOutput{}
 	if config.WriteVoIP {
-		callOutput = NewSessionOutputManager(config)
+		output := NewSessionOutputManager(config)
+		if isOffline && replay.Count != 1 {
+			output.replayFiles = make(map[string]layers.LinkType)
+		}
+		callOutput = output
 	}
-	tracker := NewCallTrackerWithOutput(config, callOutput)
-	var packetOutputs *pipeline.PacketFanout
 	defer func() {
 		if err := callOutput.Shutdown(); err != nil {
-			logger.Error("Failed to shut down VoIP session output", "error", err)
+			runErr = errors.Join(runErr, fmt.Errorf("shut down VoIP session output: %w", err))
 		}
 	}()
-	defer tracker.Shutdown()
-	logger.InfoContext(ctx, "Starting VoIP sniffer",
-		"device_count", len(devices),
-		"filter", filter)
-
+	var packetOutputs *pipeline.PacketFanout
+	var vifSink *virtualInterfacePacketSink
+	logger.InfoContext(ctx, "Starting VoIP sniffer", "device_count", len(devices), "filter", filter)
 	// Initialize virtual interface FIRST if enabled (before processing any packets)
 	// This allows early permission check and avoids wasting time processing packets
 	if config.VirtualInterface {
@@ -141,6 +150,9 @@ func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 						"interface_name", vifName)
 				}
 				logger.Warn("Continuing without virtual interface")
+				if shutdownErr := vifMgr.Shutdown(); shutdownErr != nil {
+					logger.Error("Failed to clean up virtual interface after start failure", "error", shutdownErr)
+				}
 				vifMgr = nil
 			}
 		}
@@ -151,7 +163,7 @@ func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 
 			// Initialize timing replayer for virtual interface
 			replayTiming := config.VIFReplayTiming
-			vifSink := &virtualInterfacePacketSink{manager: vifMgr, timing: vinterface.NewTimingReplayer(replayTiming)}
+			vifSink = &virtualInterfacePacketSink{manager: vifMgr, timing: vinterface.NewTimingReplayer(replayTiming), replayContext: ctx}
 			packetOutputs, err = pipeline.NewPacketFanout(pipeline.SinkRegistration{Name: "virtual-interface", Sink: vifSink})
 			if err != nil {
 				logger.Error("Failed to compose VoIP packet sinks", "error", err)
@@ -160,15 +172,6 @@ func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 				}
 				vifMgr = nil
 			}
-
-			// Wait for external tools (tcpdump, Wireshark) to attach
-			startupDelay := config.VIFStartupDelay
-			if startupDelay > 0 {
-				logger.Info("Waiting for monitoring tools to attach...",
-					"delay", startupDelay)
-				time.Sleep(startupDelay)
-			}
-			logger.Info("Starting packet injection")
 		}
 
 		// Ensure cleanup on exit
@@ -183,11 +186,11 @@ func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 
 				if packetOutputs != nil {
 					if err := packetOutputs.Close(context.Background()); err != nil {
-						logger.Error("Error shutting down virtual interface", "error", err)
+						runErr = errors.Join(runErr, fmt.Errorf("shut down virtual interface: %w", err))
 					}
 				} else {
 					if err := vifMgr.Shutdown(); err != nil {
-						logger.Error("Error shutting down virtual interface", "error", err)
+						runErr = errors.Join(runErr, fmt.Errorf("shut down virtual interface: %w", err))
 					}
 				}
 				if packetOutputs != nil {
@@ -197,6 +200,59 @@ func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 		}()
 	}
 
+	if packetOutputs != nil {
+		if err := waitVoIPReplayStartup(ctx, config.VIFStartupDelay); err != nil {
+			return err
+		}
+	}
+	consumer := func(passCtx context.Context, ch <-chan capture.PacketInfo) error {
+		if vifSink != nil {
+			vifSink.replayContext = passCtx
+		}
+		return runVoipPass(passCtx, ch, config, callOutput, packetOutputs, isOffline)
+	}
+	if isOffline {
+		beforePass := replay.BeforePass
+		replay.BeforePass = func(pass uint64) error {
+			if vifSink != nil && vifSink.timing != nil {
+				vifSink.timing.Reset()
+			}
+			if beforePass != nil {
+				return beforePass(pass)
+			}
+			return nil
+		}
+		return capture.RunOfflineOrderedRepeated(ctx, devices, filter, replay, consumer)
+	}
+	capture.RunWithSignalHandler(devices, filter, func(ch <-chan capture.PacketInfo) {
+		if err := consumer(ctx, ch); err != nil {
+			logger.Error("VoIP capture failed", "error", err)
+		}
+	}, capture.CaptureOptions{ReassembleIPFragments: true})
+	return nil
+}
+
+func waitVoIPReplayStartup(ctx context.Context, delay time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if delay <= 0 {
+		return nil
+	}
+	logger.Info("Waiting for monitoring tools to attach...", "delay", delay)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func runVoipPass(ctx context.Context, ch <-chan capture.PacketInfo, config *Config, callOutput CallOutput, packetOutputs *pipeline.PacketFanout, isOffline bool) (runErr error) {
+	tracker := NewCallTrackerWithOutput(config, callOutput)
+	defer tracker.Shutdown()
 	bufferManager := NewBufferManager(5*time.Second, 200)
 	defer bufferManager.Close()
 	logger.Info("Initialized VoIP buffer manager", "max_age", "5s", "max_size", 200)
@@ -204,18 +260,23 @@ func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 	// Create handler for local file writing
 	handler := newLocalFileHandlerWithOutputs(tracker, bufferManager, packetOutputs)
 	streamFactory := NewSipStreamFactoryWithConfig(ctx, handler, *tracker.config, tracker.IsCallActive)
+	if isOffline {
+		streamFactory = &replaySIPStreamFactory{sipStreamFactory: streamFactory.(*sipStreamFactory), ctx: ctx}
+	}
 	// VoIP owns its (connection-aware reassembly) assembler internally rather
 	// than threading it through the shared capture-layer signatures, which stay
 	// typed to the legacy *tcpassembly.Assembler for the other protocols.
 	assembler := pipeline.NewReassemblyEngine(streamFactory, pipeline.DefaultReassemblyConfig())
 	defer func() {
 		if err := assembler.Close(); err != nil {
-			logger.Error("Failed to close VoIP reassembly engine", "error", err)
+			runErr = errors.Join(runErr, fmt.Errorf("close VoIP reassembly engine: %w", err))
 		}
 	}()
 	go func() {
 		if err := assembler.Run(ctx); err != nil {
-			logger.Error("VoIP reassembly engine stopped", "error", err)
+			if !errors.Is(err, context.Canceled) {
+				logger.Error("VoIP reassembly engine stopped", "error", err)
+			}
 		}
 	}()
 	kind := pipeline.SourceLiveCapture
@@ -233,13 +294,8 @@ func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 		startProcessorWithBufferAndOutputs(tracker, bufferManager, envelopes, assembler, isOffline, packetOutputs)
 	}
 
-	if isOffline {
-		// For offline mode, run until PCAP is fully read
-		capture.RunOfflineOrdered(devices, filter, processor)
-	} else {
-		// For live mode, run with signal handler (waits for Ctrl+C)
-		capture.RunWithSignalHandler(devices, filter, processor, capture.CaptureOptions{ReassembleIPFragments: true})
-	}
+	processor(ch)
+	return ctx.Err()
 }
 
 func StartLiveVoipSniffer(interfaces, filter string) {
@@ -249,9 +305,19 @@ func StartLiveVoipSniffer(interfaces, filter string) {
 }
 
 func StartOfflineVoipSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startVoipSniffer(devices, filter, true)
+	if err := StartOfflineVoipSnifferWithReplay(context.Background(), readFiles, filter, capture.OfflineReplayOptions{Count: 1}); err != nil {
+		logger.Error("VoIP offline capture failed", "error", err)
+	}
+}
+
+// StartOfflineVoipSnifferWithReplay reads timestamp-ordered sources repeatedly
+// with persistent output resources and fresh protocol state on each pass.
+func StartOfflineVoipSnifferWithReplay(ctx context.Context, readFiles []string, filter string, replay capture.OfflineReplayOptions) error {
+	var runErr error
+	err := capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		runErr = startVoipSession(ctx, devices, filter, true, replay)
 	})
+	return errors.Join(err, runErr)
 }
 
 func startProcessor(tracker *CallTracker, ch <-chan *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offlineMode ...bool) {

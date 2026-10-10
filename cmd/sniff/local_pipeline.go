@@ -29,6 +29,12 @@ type localEnvelopePipeline struct {
 }
 
 func (p *localEnvelopePipeline) process(in <-chan capture.PacketInfo, kind pipeline.SourceKind) {
+	if err := p.processContext(context.Background(), in, kind); err != nil {
+		logger.Error("Local packet processing failed", "error", err)
+	}
+}
+
+func (p *localEnvelopePipeline) processContext(ctx context.Context, in <-chan capture.PacketInfo, kind pipeline.SourceKind) error {
 	cfg := radiusconfig.Config{Scope: radius.CaptureScope{OriginNodeID: "sniff", SourceID: "local"}}
 	if p.radiusConfig != nil {
 		cfg = *p.radiusConfig
@@ -38,10 +44,23 @@ func (p *localEnvelopePipeline) process(in <-chan capture.PacketInfo, kind pipel
 	observer, err := radius.NewCaptureProcessorWithConfig(cfg.Scope, cfg.Correlation, cfg.Ports...)
 	if err != nil {
 		logger.Error("Initialize RADIUS observations", "error", err)
-		return
+		return err
 	}
 	defer observer.Close()
-	for info := range in {
+	for {
+		var info capture.PacketInfo
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case value, ok := <-in:
+			if !ok {
+				return ctx.Err()
+			}
+			info = value
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if info.RADIUS == nil {
 			info.RADIUS = observer.Process(info.Packet, info.LinkType, info.Interface, cfg.Matcher)
 		}
@@ -53,7 +72,7 @@ func (p *localEnvelopePipeline) process(in <-chan capture.PacketInfo, kind pipel
 		}
 		env := captureadapter.FromPacketInfo(info, kind)
 		p.count++
-		for _, named := range p.fanout.Dispatch(context.Background(), env) {
+		for _, named := range p.fanout.Dispatch(ctx, env) {
 			result := named.Result
 			if result.Outcome == pipeline.OutcomeDropped {
 				logger.Warn("Local packet sink dropped packet", "sink", named.Name, "outcome", result.Outcome, "drop_reason", result.DropReason, "interface", env.Source.InterfaceName)
@@ -64,10 +83,12 @@ func (p *localEnvelopePipeline) process(in <-chan capture.PacketInfo, kind pipel
 	}
 }
 
-func (p *localEnvelopePipeline) close() {
-	if err := p.fanout.Close(context.Background()); err != nil {
+func (p *localEnvelopePipeline) close() error {
+	err := p.fanout.Close(context.Background())
+	if err != nil {
 		logger.Error("Failed to close local packet sinks", "error", err)
 	}
+	return err
 }
 
 type cliEnvelopeSink struct {
@@ -119,9 +140,14 @@ type virtualInterfaceEnvelopeSink struct {
 	timing  *vinterface.TimingReplayer
 }
 
-func (s *virtualInterfaceEnvelopeSink) HandlePacket(_ context.Context, env *pipeline.PacketEnvelope) pipeline.Result {
+func (s *virtualInterfaceEnvelopeSink) HandlePacket(ctx context.Context, env *pipeline.PacketEnvelope) pipeline.Result {
 	if s.timing != nil {
-		s.timing.WaitForPacketTime(env.CaptureTime)
+		if err := s.timing.WaitForPacketTimeContext(ctx, env.CaptureTime); err != nil {
+			return pipeline.Result{Outcome: pipeline.OutcomeRetryableFailure, Err: err}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return pipeline.Result{Outcome: pipeline.OutcomeRetryableFailure, Err: err}
 	}
 	display := capture.ConvertPacketToDisplay(captureadapter.ToPacketInfo(env))
 	display.RawData = append([]byte(nil), env.Data...)
@@ -148,6 +174,10 @@ func (s *virtualInterfaceEnvelopeSink) Close(context.Context) error {
 }
 
 func startVirtualInterfaceSink(cfg vinterface.Config, replayTiming bool, startupDelay time.Duration) (*virtualInterfaceEnvelopeSink, error) {
+	return startVirtualInterfaceSinkContext(context.Background(), cfg, replayTiming, startupDelay)
+}
+
+func startVirtualInterfaceSinkContext(ctx context.Context, cfg vinterface.Config, replayTiming bool, startupDelay time.Duration) (*virtualInterfaceEnvelopeSink, error) {
 	mgr, err := vinterface.NewManager(cfg)
 	if err != nil {
 		return nil, err
@@ -158,8 +188,8 @@ func startVirtualInterfaceSink(cfg vinterface.Config, replayTiming bool, startup
 		}
 		return nil, err
 	}
-	if startupDelay > 0 {
-		time.Sleep(startupDelay)
+	if err := waitReplayStartup(ctx, startupDelay); err != nil {
+		return nil, errors.Join(err, mgr.Shutdown())
 	}
 	return &virtualInterfaceEnvelopeSink{manager: mgr, timing: vinterface.NewTimingReplayer(replayTiming)}, nil
 }

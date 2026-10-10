@@ -30,6 +30,7 @@ type sipStreamFactory struct {
 	// lifecycleMu orders rearm worker registration before Shutdown begins Wait.
 	lifecycleMu   sync.Mutex
 	allWorkers    sync.WaitGroup // tracks all background goroutines
+	streamWorkers sync.WaitGroup // stream parsers, drained separately at replay EOF
 	cleanupTicker *time.Ticker
 	closed        int32             // atomic flag to track if factory is closed
 	handler       SIPMessageHandler // handler for processing complete SIP messages

@@ -45,6 +45,7 @@ func TestProtocolCommandsUseSharedCatalog(t *testing.T) {
 		"dns": dnsRuntimeHooks, "email": emailRuntimeHooks, "http": httpRuntimeHooks, "tls": tlsRuntimeHooks, "voip": voipRuntimeHooks,
 	} {
 		require.NoError(t, got.validate(protocolcatalog.MustLookup(name)))
+		require.NotNil(t, got.StartReplay, "production protocol must support repeated offline capture")
 	}
 }
 
@@ -72,7 +73,7 @@ func TestRunProtocolSelectsIngressAndPreservesArguments(t *testing.T) {
 	}
 
 	readFile = ""
-	runProtocol(&cobra.Command{}, nil, protocol, hooks)
+	require.NoError(t, runProtocol(&cobra.Command{}, nil, protocol, hooks))
 	require.Equal(t, 1, liveCalls)
 	require.Equal(t, "eth-test", gotInterfaces)
 	require.Equal(t, "tcp and port 42", gotFilter)
@@ -82,7 +83,7 @@ func TestRunProtocolSelectsIngressAndPreservesArguments(t *testing.T) {
 	require.NoError(t, os.WriteFile(first, []byte("first"), 0o600))
 	require.NoError(t, os.WriteFile(second, []byte("second"), 0o600))
 	readFile = first
-	runProtocol(&cobra.Command{}, []string{second}, protocol, hooks)
+	require.NoError(t, runProtocol(&cobra.Command{}, []string{second}, protocol, hooks))
 	require.Equal(t, []string{first, second}, gotFiles)
 	require.Equal(t, "tcp and port 42", gotFilter)
 }

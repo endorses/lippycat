@@ -316,7 +316,7 @@ func TestVoipCommandStructure(t *testing.T) {
 	assert.Equal(t, "voip", voipCmd.Use)
 	assert.Contains(t, voipCmd.Short, "Sniff in VOIP mode")
 	assert.Contains(t, voipCmd.Long, "Filter for SIP username")
-	assert.NotNil(t, voipCmd.Run, "voipCmd should have a Run function")
+	assert.NotNil(t, voipCmd.RunE, "voipCmd should have a RunE function")
 
 	// Check flags
 	flags := []struct {

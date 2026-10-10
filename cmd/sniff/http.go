@@ -86,7 +86,7 @@ Examples:
   mkfifo /tmp/sslkeys.pipe
   lc sniff http -i eth0 --tls-keylog-pipe /tmp/sslkeys.pipe &
   SSLKEYLOGFILE=/tmp/sslkeys.pipe curl https://example.com`,
-	Run: httpHandler,
+	RunE: httpHandler,
 }
 
 var (
@@ -125,11 +125,12 @@ var httpRuntimeHooks = sniffRuntimeHooks{
 		}
 		return http.NewFilterBuilder().Build(http.FilterConfig{Ports: ports, BaseFilter: baseFilter}), nil
 	},
-	StartLive:  http.StartLiveHTTPSniffer,
-	StartFiles: http.StartOfflineHTTPSniffer,
+	StartLive:   http.StartLiveHTTPSniffer,
+	StartFiles:  http.StartOfflineHTTPSniffer,
+	StartReplay: http.StartOfflineHTTPSnifferWithReplay,
 }
 
-func httpHandler(cmd *cobra.Command, args []string) {
+func httpHandler(cmd *cobra.Command, args []string) error {
 	// Set HTTP configuration values
 	if cmd.Flags().Changed("host") {
 		viper.Set("http.host_pattern", httpHostPattern)
@@ -172,7 +173,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		patterns, err := http.LoadPatternsFromFile(httpHostsFile)
 		if err != nil {
 			logger.Error("Failed to load hosts file", "error", err, "file", httpHostsFile)
-			return
+			return err
 		}
 		viper.Set("http.host_patterns", patterns)
 		logger.Info("Loaded host patterns from file", "count", len(patterns), "file", httpHostsFile)
@@ -183,7 +184,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		patterns, err := http.LoadPatternsFromFile(httpPathsFile)
 		if err != nil {
 			logger.Error("Failed to load paths file", "error", err, "file", httpPathsFile)
-			return
+			return err
 		}
 		viper.Set("http.url_patterns", patterns)
 		logger.Info("Loaded path patterns from file", "count", len(patterns), "file", httpPathsFile)
@@ -194,7 +195,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		patterns, err := http.LoadPatternsFromFile(httpUserAgentsFile)
 		if err != nil {
 			logger.Error("Failed to load user-agents file", "error", err, "file", httpUserAgentsFile)
-			return
+			return err
 		}
 		viper.Set("http.user_agent_patterns", patterns)
 		logger.Info("Loaded user-agent patterns from file", "count", len(patterns), "file", httpUserAgentsFile)
@@ -205,7 +206,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		patterns, err := http.LoadPatternsFromFile(httpContentTypesFile)
 		if err != nil {
 			logger.Error("Failed to load content-types file", "error", err, "file", httpContentTypesFile)
-			return
+			return err
 		}
 		viper.Set("http.content_type_patterns", patterns)
 		logger.Info("Loaded content-type patterns from file", "count", len(patterns), "file", httpContentTypesFile)
@@ -216,7 +217,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		keywords, err := http.LoadKeywordsFromFile(httpKeywordsFile)
 		if err != nil {
 			logger.Error("Failed to load keywords file", "error", err, "file", httpKeywordsFile)
-			return
+			return err
 		}
 		viper.Set("http.keywords", keywords)
 		logger.Info("Loaded keywords from file", "count", len(keywords), "file", httpKeywordsFile)
@@ -234,7 +235,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		}
 		if err := decryptConfig.Validate(); err != nil {
 			logger.Error("Invalid TLS keylog configuration", "error", err)
-			return
+			return err
 		}
 		viper.Set("http.tls_keylog", tlsKeylogPath)
 		viper.Set("http.tls_decryption_enabled", true)
@@ -251,7 +252,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		"tls_decryption", tlsKeylogPath != "")
 
 	// Start HTTP sniffer using appropriate mode
-	runProtocol(cmd, args, protocolcatalog.MustLookup("http"), httpRuntimeHooks)
+	return runProtocol(cmd, args, protocolcatalog.MustLookup("http"), httpRuntimeHooks)
 }
 
 func init() {

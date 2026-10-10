@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,4 +75,44 @@ func TestSessionOutputManagerShutdownIsTerminalAndIdempotent(t *testing.T) {
 	require.NoError(t, m.Shutdown())
 	require.ErrorIs(t, m.OpenSession("later", layers.LinkTypeEthernet), ErrOutputManagerClosed)
 	require.ErrorIs(t, m.WritePacket("shutdown", testOutputPacket(), PacketTypeSIP), ErrOutputManagerClosed)
+}
+
+func TestSessionOutputManagerReplayReopensWithoutTruncating(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.OutputFile = filepath.Join(t.TempDir(), "capture.pcap")
+	manager := NewSessionOutputManager(cfg)
+	manager.replayFiles = make(map[string]layers.LinkType)
+	packet := testOutputPacket()
+	for range 2 {
+		require.NoError(t, manager.OpenSession("repeat", layers.LinkTypeEthernet))
+		require.NoError(t, manager.WritePacket("repeat", packet, PacketTypeSIP))
+		require.NoError(t, manager.WritePacket("repeat", packet, PacketTypeRTP))
+		require.NoError(t, manager.CloseSession("repeat"))
+	}
+	require.NoError(t, manager.Shutdown())
+	for _, kind := range []string{"sip", "rtp"} {
+		file, err := os.Open(filepath.Join(filepath.Dir(cfg.OutputFile), "capture_"+kind+"_repeat.pcap"))
+		require.NoError(t, err)
+		reader, err := pcapgo.NewReader(file)
+		require.NoError(t, err)
+		for range 2 {
+			data, _, err := reader.ReadPacketData()
+			require.NoError(t, err)
+			require.Equal(t, packet.Data(), data)
+		}
+		_, _, err = reader.ReadPacketData()
+		require.ErrorIs(t, err, io.EOF)
+		require.NoError(t, file.Close())
+	}
+}
+
+func TestSessionOutputManagerReplayRejectsChangedLinkType(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.OutputFile = filepath.Join(t.TempDir(), "capture.pcap")
+	manager := NewSessionOutputManager(cfg)
+	manager.replayFiles = make(map[string]layers.LinkType)
+	require.NoError(t, manager.OpenSession("repeat", layers.LinkTypeEthernet))
+	require.NoError(t, manager.CloseSession("repeat"))
+	require.ErrorContains(t, manager.OpenSession("repeat", layers.LinkTypeRaw), "cannot append replay call")
+	require.NoError(t, manager.Shutdown())
 }

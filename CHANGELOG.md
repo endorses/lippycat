@@ -5,10 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] - 2026-10-10
+
+### Added
+
+- Add opt-in Linux eBPF media admission for `hunt voip` and `tap voip` via
+  `--rtp-ebpf`, with enforce/shadow modes, configurable runtime failure policy,
+  bounded SDP endpoint tracking, observation-domain isolation, and status
+  telemetry. Existing userspace ownership and authorization checks remain
+  authoritative; pre-match RTP is not retained.
+- Add optional authorized SIP call-leg correlation across X2 signaling and X3
+  media, with configurable correlation evidence, encrypted independent
+  persistence, offline migration/key rotation, bounded asynchronous storage,
+  and aggregate telemetry. Correlation is disabled by default; enabling it
+  changes adopted legs' correlation IDs and requires MDF coordination.
+- Add ADMF/X1 task-definition convergence and an opt-in complete-task contract,
+  with durable conflict reporting and explicit conflict recovery.
+- Add typed DHCPv4 and NTP message events across local, offline, distributed,
+  and TUI paths, plus optional `dhcp` and `ntp` structured-log streams.
+- Add bounded known-host and known-service inventory, enabled by default with
+  immediate evidence-based observations, `--inventory=false` opt-out, optional
+  `--inventory-local-cidrs` filtering, and explicitly selected `known_hosts`
+  and `known_services` log streams. Default log-stream selection is unchanged.
+- Add retained packet marking and selective PCAP export in capture order;
+  marks survive filtering and live-buffer eviction within configured limits.
+- Add draggable TUI split-pane borders, responsive packet/event/call details,
+  shared modal buttons and mouse controls, remote-node change highlighting,
+  quiet mode, and capacity-aware CPU/RAM utilization colors.
+- Add `lc list interfaces` type, state, address and default-route details,
+  hidden-device counts, `--names`, richer JSON, and optional capture-access
+  checks with `--check`.
+- Add `--tcp-max-streams` to VoIP hunter and tap, limiting active buffered TCP
+  SIP stream processors when positive; the default `0` remains unlimited.
+- Add complete German and Catalan manuals, multilingual navigation and build
+  validation, and accessible localized glossary hints.
 
 ### Changed
 
+- Require Go 1.26 or newer for builds; update patched CI runtimes, security
+  dependencies, artifact actions, and the maintained golangci-lint v2 setup.
+  Separate CI, integration, and security workflows.
+- Improve offline PCAP indexing and filter scans with bounded caches and
+  parallel compact scans while preserving capture order and cancellation.
+- Separate packet monitoring and normalized-event analysis according to output
+  demand; derive TUI Events locally from remote packet-mode monitoring.
+- Emit X2 for every complete admitted SIP request and response, including
+  provisional responses, failures, redirects, and extension methods. X2-only
+  tasks retain headers and SDP while withholding other bodies and repairing
+  Content-Length.
+- Reconcile authoritative ADMF startup state with cancellable retries and
+  stricter acknowledgments. Conflicting task definitions narrow authorization
+  to their common scope; retained-task reactivation requires a complete
+  mediation definition.
+- Prepare the manual for `lippy.cat` with Catalan at the site root, improve SIP
+  call-leg correlation explanations and diagrams, and refine translated
+  terminology.
 - Recover applicable SIP admission uncertainty through a complete confirmed
   negotiation from either participant, using separate initiator sequence spaces.
   Preserve faulty-context trailing-media attribution through the existing grace
@@ -60,6 +111,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Retain unresolved SDP by signaling context until a corresponding repair,
   validated supersession or retirement. A complete opposite-side answer cannot
   clear an incomplete offer; safe endpoints remain independently usable.
+
+### Fixed
+
+- Release retained TCP SIP resources after bursts, safely rearm streams, and
+  handle connection tuple reuse and capture-lane ordering without mixing
+  signaling generations.
+- Correct TCP SIP sender direction, framing, SDP parsing, and X2 payload
+  construction; preserve replay freshness across timestamp regressions.
+- Wait for call-output initialization before reusing an existing call.
+- Isolate LI correlation persistence from packet processing, bound deferred
+  correlation handoffs, and harden journal/replay recovery and conflict
+  revocation while preserving task-generation authorization and expiry.
+  Shutdown can discard correlation-held products before downstream admission.
+- Apply TUI filters to retained packets as well as live arrivals, preserve
+  interface selection when settings edits are cancelled, and repair modal
+  focus/rendering, detail navigation, capture following, resize behavior,
+  scrollbars, and toast placement.
+- Prevent Mermaid label clipping on mobile manual layouts.
 
 ## [0.12.2] - 2026-09-27
 

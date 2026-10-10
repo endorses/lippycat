@@ -20,6 +20,10 @@ Mirror the visible BRAS/BNG-to-AAA UDP link into a dedicated POI interface:
 
 <!-- i18n:skip -->
 
+<figure id="fig-radius-tap-poi">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart TB
     BNG["BRAS/BNG"] <--> RADIUS["UDP RADIUS link"] <--> AAA["AAA server"]
@@ -27,6 +31,12 @@ flowchart TB
     POI -->|"X2/TLS"| MDF["MDF"]
     ADMF["ADMF"] -->|"X1/mTLS"| POI
 ```
+
+<figcaption>RADIUS capture and lawful interception tap topology.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Observe both request and response directions on the same isolated capture feed.
 Defaults include UDP 1812 and 1813; configured ports add to these defaults.

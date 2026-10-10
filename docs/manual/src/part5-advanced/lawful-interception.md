@@ -22,6 +22,10 @@ The following diagram shows how the ADMF, lippycat processor, and MDF interact:
 
 <!-- i18n:skip -->
 
+<figure id="fig-li-architecture">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart TB
     ADMF["ADMF<br/>(Administration)"]
@@ -49,6 +53,12 @@ flowchart TB
     DC -->|"X2 IRI (TLS)"| MDF
     DC -->|"X3 CC (TLS)"| MDF
 ```
+
+<figcaption>Lawful interception architecture and ETSI interfaces.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 The flow works as follows:
 
@@ -191,6 +201,10 @@ LI interfaces require mutual TLS (mTLS) on all connections. This means the proce
 
 <!-- i18n:skip -->
 
+<figure id="fig-li-certificate-chains">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart TB
     subgraph chains["Certificate Chains"]
@@ -219,6 +233,12 @@ flowchart TB
         end
     end
 ```
+
+<figcaption>Certificate chains for lawful interception interfaces.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 The certificates required on the processor side are:
 
@@ -431,6 +451,10 @@ When lippycat restarts, all in-memory task and destination state is lost. To rec
 
 <!-- i18n:skip -->
 
+<figure id="fig-admf-state-synchronization">
+
+<!-- i18n:skip -->
+
 ```mermaid
 sequenceDiagram
     participant P as Processor
@@ -442,6 +466,12 @@ sequenceDiagram
     Note over P: Activate tasks & push filters
     P->>P: Normal operation resumes
 ```
+
+<figcaption>Processor state synchronization with the ADMF.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 The sync is designed for graceful degradation:
 
@@ -666,6 +696,10 @@ The end-to-end path from task activation to PDU delivery is:
 
 <!-- i18n:skip -->
 
+<figure id="fig-li-filter-delivery">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart TD
     A["ADMF activates task via X1"] --> B["LI Manager creates filters<br/>for each target identifier"]
@@ -680,6 +714,12 @@ flowchart TD
     H --> J["Delivery Client → MDF"]
     I --> J
 ```
+
+<figcaption>Target filtering and authorized X2/X3 delivery.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Each filter created by the LI Manager is assigned an internal ID with the format `li-{xid_prefix}-{index}` (for example, `li-a1b2c3d4-0`). When packets matching these filters arrive at the processor, the LI Manager looks up the corresponding XID and routes SIP IRI, enabled normalized protocol metadata, and communication content through their appropriate delivery paths.
 

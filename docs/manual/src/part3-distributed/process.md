@@ -101,6 +101,10 @@ Every packet a processor receives can be sent to multiple destinations simultane
 
 <!-- i18n:skip -->
 
+<figure id="fig-processor-outputs">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     Hunters -->|gRPC| P[Processor]
@@ -112,6 +116,12 @@ flowchart LR
     P --> Hooks["Command Hooks<br/>(gzip, upload, alerting)"]
     P --> LI["LI Delivery<br/>(X2/X3 to MDF)"]
 ```
+
+<figcaption>Processor output channels.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 | Channel                 | Flag(s)                            | Description                                      |
 | ----------------------- | ---------------------------------- | ------------------------------------------------ |
@@ -489,6 +499,10 @@ lc process --listen :55555 \
 
 <!-- i18n:skip -->
 
+<figure id="fig-processor-hierarchy">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     subgraph Site1["Site A"]
@@ -503,6 +517,12 @@ flowchart LR
     E2 -->|gRPC/TLS| R
     R -->|gRPC/TLS| C[Central]
 ```
+
+<figcaption>Forwarding through edge, regional, and central processors.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Each processor in the chain can write PCAP locally in addition to forwarding upstream.
 

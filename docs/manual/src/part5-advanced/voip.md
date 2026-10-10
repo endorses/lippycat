@@ -8,6 +8,10 @@ SIP (Session Initiation Protocol) uses a request/response model to establish, mo
 
 <!-- i18n:skip -->
 
+<figure id="fig-sip-call-flow">
+
+<!-- i18n:skip -->
+
 ```mermaid
 sequenceDiagram
     participant Caller
@@ -26,6 +30,12 @@ sequenceDiagram
     Callee->>Caller: BYE
     Caller-->>Callee: 200 OK
 ```
+
+<figcaption>SIP call establishment, RTP media, and termination.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 lippycat parses each SIP message and extracts:
 
@@ -286,6 +296,10 @@ Understanding how packets move through the VoIP analyzer helps with troubleshoot
 
 <!-- i18n:skip -->
 
+<figure id="fig-voip-processing-flow">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     A[Network Interface] --> B[gopacket]
@@ -302,6 +316,12 @@ flowchart LR
     I --> K[Filter & Display]
     J --> K
 ```
+
+<figcaption>VoIP packet detection, processing, and filtering.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 UDP SIP packets are parsed directly. TCP SIP packets go through the reassembly engine first (configured by `--tcp-performance-mode`). RTP packets are detected by header structure within the configured port range. The VoIP Packet Processor correlates RTP streams with SIP dialogs using the Call-ID. GPU acceleration, when available, offloads pattern matching for SIP user filtering.
 

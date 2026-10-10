@@ -16,6 +16,7 @@ from functools import partial
 from html.parser import HTMLParser
 from pathlib import Path
 
+import figures
 import term_hints
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +70,7 @@ class Chapter(HTMLParser):
         self.examples = []
         self.code_spans = []
         self.term_markers = term_hints.annotation_fingerprint(path.read_text())
+        self.figure_markers = []
         self.in_main = False
         self.in_pre = False
         self.in_code = False
@@ -86,6 +88,17 @@ class Chapter(HTMLParser):
             self.heading_ids.append(attributes.get("id"))
         if tag == "a":
             self.links.append(attributes.get("href"))
+        if tag == "figure":
+            self.figure_markers.append(
+                (
+                    tag,
+                    attributes.get("id"),
+                    attributes.get("data-figure-number"),
+                    attributes.get("aria-labelledby"),
+                )
+            )
+        if tag == "figcaption":
+            self.figure_markers.append((tag, attributes.get("id")))
         if tag == "pre":
             self.in_pre = True
             self.examples.append("")
@@ -129,6 +142,7 @@ def verify_build(editions):
                 "links",
                 "code_spans",
                 "term_markers",
+                "figure_markers",
             ):
                 before, after = getattr(original, field), getattr(translated, field)
                 if field in ("links", "code_spans"):
@@ -136,7 +150,7 @@ def verify_build(editions):
                 if before != after:
                     raise ValueError(f"{edition['code']}: changed {field} in {chapter}")
     print(
-        "Verified chapter paths, heading IDs, examples, code spans, links, and term annotations across editions",
+        "Verified chapter paths, heading IDs, examples, code spans, links, term annotations, and figures across editions",
         flush=True,
     )
 
@@ -277,6 +291,12 @@ def check(require_complete=False):
                     raise ValueError(
                         f"{edition['code']}: changed code or link target in {source!r}"
                     )
+            if source.startswith("<figcaption>") and not figures.CAPTION.fullmatch(
+                translation.strip()
+            ):
+                raise ValueError(
+                    f"{edition['code']}: changed figure caption markup in {source!r}"
+                )
             if term_hints.annotation_fingerprint(
                 source
             ) != term_hints.annotation_fingerprint(translation):

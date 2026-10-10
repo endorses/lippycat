@@ -4,6 +4,10 @@ lippycat provides a set of CLI commands for managing and inspecting distributed 
 
 <!-- i18n:skip -->
 
+<figure id="fig-admin-command-resources">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     subgraph Commands["CLI Admin Commands"]
@@ -33,6 +37,12 @@ flowchart LR
     Set --> Filters
     Rm --> Filters
 ```
+
+<figcaption>Administration commands and the resources they manage.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 All remote commands connect to a processor via gRPC and share a common set of connection flags. Local commands (`show config`, `list interfaces`) run without a processor connection.
 

@@ -221,6 +221,10 @@ sudo lc hunt voip --processor processor:55555 -i eth0 \
 
 <!-- i18n:skip -->
 
+<figure id="fig-voip-hunter-flow">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     C[Capture] --> D[Detect SIP/RTP]
@@ -229,6 +233,12 @@ flowchart LR
     M -->|Yes| F[Forward to processor]
     M -->|No| X[Drop]
 ```
+
+<figcaption>VoIP hunter buffering and filtering flow.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 1. Hunter captures SIP and RTP packets
 2. Packets are buffered locally, grouped by SIP Call-ID

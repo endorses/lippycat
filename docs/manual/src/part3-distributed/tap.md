@@ -8,6 +8,10 @@ Everything `hunt` can do (capture, GPU filtering, protocol detection) and everyt
 
 <!-- i18n:skip -->
 
+<figure id="fig-tap-architecture">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     subgraph Tap["lc tap (single process)"]
@@ -21,6 +25,12 @@ flowchart LR
     TUI[TUI Client] <-->|gRPC| Tap
     A -.->|optional| UP[Upstream<br>Processor]
 ```
+
+<figcaption>Capture and analysis within a standalone tap.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 ## When to Use Tap {#when-to-use-tap}
 
@@ -393,6 +403,10 @@ locate the saturated stage.
 
 <!-- i18n:skip -->
 
+<figure id="fig-tap-upstream-forwarding">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     subgraph Edge["Edge Tap Node"]
@@ -411,6 +425,12 @@ flowchart LR
     TUI1[Local TUI] <-->|gRPC| T
     TUI2[Central TUI] <-->|gRPC| P
 ```
+
+<figcaption>Tap forwarding with local and central monitoring.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 ## Virtual Interface {#virtual-interface}
 

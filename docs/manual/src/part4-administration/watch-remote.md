@@ -4,6 +4,10 @@ The TUI's remote mode (`lc watch remote`) connects to processors and displays li
 
 <!-- i18n:skip -->
 
+<figure id="fig-remote-monitoring">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     subgraph Edge["Network Edge"]
@@ -21,6 +25,12 @@ flowchart LR
     H3 -->|gRPC| P
     TUI["lc watch remote"] <-->|gRPC/TLS| P
 ```
+
+<figcaption>Remote TUI monitoring of distributed capture.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 ## Quick Start {#quick-start}
 

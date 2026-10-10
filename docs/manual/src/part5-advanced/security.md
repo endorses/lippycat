@@ -184,6 +184,10 @@ Server TLS encrypts the channel and lets clients verify the processor, but any c
 
 <!-- i18n:skip -->
 
+<figure id="fig-mtls-trust">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart TB
     CA["Internal CA<br/>(ca-cert.pem)"]
@@ -209,6 +213,12 @@ flowchart TB
         CAcopy3["CA cert (for verifying server)"]
     end
 ```
+
+<figcaption>Mutual TLS certificate trust model.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 All certificates are signed by the same CA. Each node trusts any certificate signed by that CA. To revoke a hunter, stop issuing it certificates and restart the processor — the revoked hunter can no longer present a valid client certificate.
 
@@ -572,6 +582,10 @@ In distributed mode, hunters automatically forward TLS session keys to the proce
 
 <!-- i18n:skip -->
 
+<figure id="fig-session-key-forwarding">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     subgraph Hunter
@@ -584,6 +598,12 @@ flowchart LR
 
     Hunter -->|"gRPC (TLS-encrypted)<br/>packets + session keys"| Processor
 ```
+
+<figcaption>Forwarding TLS session keys from hunter to processor.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Capture with the key log on the hunter:
 

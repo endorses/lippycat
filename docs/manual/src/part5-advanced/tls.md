@@ -6,6 +6,10 @@ The TLS analyzer inspects handshake messages without decrypting traffic. It extr
 
 <!-- i18n:skip -->
 
+<figure id="fig-tls-handshake">
+
+<!-- i18n:skip -->
+
 ```mermaid
 sequenceDiagram
     participant Client
@@ -24,6 +28,12 @@ sequenceDiagram
     Server-->>Client: Finished
     Note over Client,Server: Encrypted application data
 ```
+
+<figcaption>TLS handshake analysis and fingerprinting.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 lippycat captures and parses the unencrypted handshake messages at the start of every TLS connection.
 

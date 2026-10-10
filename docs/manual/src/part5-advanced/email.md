@@ -8,6 +8,10 @@ SMTP capture tracks the envelope transaction: EHLO, MAIL FROM, RCPT TO, DATA, an
 
 <!-- i18n:skip -->
 
+<figure id="fig-smtp-starttls-session">
+
+<!-- i18n:skip -->
+
 ```mermaid
 sequenceDiagram
     participant Client
@@ -32,6 +36,12 @@ sequenceDiagram
     Client->>Server: .
     Server-->>Client: 250 OK
 ```
+
+<figcaption>SMTP session with STARTTLS and authentication.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Start email capture:
 

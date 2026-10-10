@@ -19,6 +19,10 @@ lippycat's distributed architecture has two node types:
 
 <!-- i18n:skip -->
 
+<figure id="fig-distributed-architecture">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart TB
     subgraph Edge["Distributed Hunters"]
@@ -59,6 +63,12 @@ flowchart TB
     P <-->|gRPC/TLS| Clients
 ```
 
+<figcaption>Distributed capture architecture and output channels.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
+
 **Data flow**: Hunters batch packets (default: 64 per batch) and stream them to the processor over gRPC. The processor writes to PCAP, broadcasts to TUI subscribers, injects into virtual interfaces, and optionally forwards upstream.
 
 ### Packet and Event Forwarding {#packet-and-event-forwarding}
@@ -91,6 +101,10 @@ The simplest topology. All hunters connect directly to one processor:
 
 <!-- i18n:skip -->
 
+<figure id="fig-hub-and-spoke">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart TB
     H1[Hunter 1] -->|gRPC/TLS| P
@@ -104,6 +118,12 @@ flowchart TB
         W[PCAP Writing]
     end
 ```
+
+<figcaption>Hub-and-spoke capture topology.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 **When to use**: Small to medium deployments (up to ~50 hunters), single site, simple requirements.
 
@@ -130,6 +150,10 @@ Multi-tier architecture for geographic or network segmentation. Edge processors 
 
 <!-- i18n:skip -->
 
+<figure id="fig-hierarchical-topology">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     subgraph Site1["Site A"]
@@ -146,6 +170,12 @@ flowchart LR
     E2 -->|gRPC/TLS| R
     R -->|gRPC/TLS| C[Central Processor]
 ```
+
+<figcaption>Hierarchical capture topology.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 **When to use**: Multi-site deployments, geographic distribution, DMZ/internal segmentation, gradual aggregation with filtering at each tier.
 
@@ -184,6 +214,10 @@ Distribute hunters across multiple independent processors for load distribution:
 
 <!-- i18n:skip -->
 
+<figure id="fig-multi-processor-topology">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     H1["Hunters 1-50"] --> P1[Processor 1]
@@ -191,11 +225,21 @@ flowchart LR
     H3["Hunters 101-150"] --> P3[Processor 3]
 ```
 
+<figcaption>Capture divided across independent processors.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
+
 **When to use**: Very large deployments where a single processor can't handle all traffic, or when you want independent monitoring domains.
 
 ### DMZ Segmentation {#dmz-segmentation}
 
 Capture from both DMZ and internal networks using hierarchical forwarding through the firewall:
+
+<!-- i18n:skip -->
+
+<figure id="fig-dmz-topology">
 
 <!-- i18n:skip -->
 
@@ -219,6 +263,12 @@ flowchart TB
     IH1 --> IP
     IH2 --> IP
 ```
+
+<figcaption>Capture across DMZ and internal network segments.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 The DMZ processor forwards aggregated traffic through a single firewall port to the internal processor, which merges it with internal captures. This means:
 

@@ -21,6 +21,10 @@ selected first; the letters are illustrative identifiers.
 
 <!-- i18n:skip -->
 
+<figure id="fig-call-leg-delivery-group">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart TB
     subgraph Path["SIP signaling path"]
@@ -37,6 +41,12 @@ flowchart TB
     X2 -->|"shared Correlation ID"| MDF["MDF: final CIN interpretation<br/>and deduplication"]
     X3 -->|"shared Correlation ID"| MDF
 ```
+
+<figcaption>Correlating SIP call legs into a delivery group.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Grouping preserves a common active LI task generation across all members. It
 does not authorize another leg or broaden an interception task. X2 and X3 retain
@@ -88,6 +98,10 @@ match stops the search; signals are not added together as a confidence score.
 
 <!-- i18n:skip -->
 
+<figure id="fig-call-leg-correlation-decision">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart TB
     Start["Observed leg"] --> Retained{"Retained decision?"}
@@ -100,6 +114,12 @@ flowchart TB
     Address -->|"no match or disabled"| Identities["Priority 4: exact calling/called<br/>identity matching<br/>Only with no address candidate<br/>Match: join; ambiguous groups: standalone"]
     Identities -->|"no match, skipped or disabled"| Rewritten["Priority 5: address chaining<br/>with rewritten identities<br/>No same-called address candidate<br/>Exactly one eligible address candidate: join<br/>Otherwise: standalone"]
 ```
+
+<figcaption>Call-leg correlation decisions and matching priorities.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Conflicting trusted evidence stops matching rather than falling through to a
 heuristic. Missing or ambiguous SDP evidence permits weaker matching. Address

@@ -1,0 +1,32 @@
+/* Figure captions are generated at build time, including the print edition. */
+figure[data-figure-number] {
+  margin: 2rem 0;
+  max-width: 100%;
+}
+
+figure[data-figure-number] .mermaid {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+figure[data-figure-number] figcaption {
+  margin-top: 0.8rem;
+  color: var(--fg);
+  font-size: 0.9em;
+  line-height: 1.5;
+  text-align: center;
+}
+
+figure[data-figure-number] .figure-label {
+  font-weight: 600;
+}
+
+@media print {
+  figure[data-figure-number] {
+    break-inside: avoid;
+  }
+
+  figure[data-figure-number] .mermaid {
+    overflow: visible;
+  }
+}

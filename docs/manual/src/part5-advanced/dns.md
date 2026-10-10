@@ -8,6 +8,10 @@ lippycat matches DNS queries to their responses using the transaction ID (a 16-b
 
 <!-- i18n:skip -->
 
+<figure id="fig-dns-query-response">
+
+<!-- i18n:skip -->
+
 ```mermaid
 sequenceDiagram
     participant Client
@@ -17,6 +21,12 @@ sequenceDiagram
     Resolver-->>Client: Response (TxID: 0xA1B2, 93.184.216.34, TTL=3600)
     Note right of Client: RTT measured
 ```
+
+<figcaption>DNS query and response correlation.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Start DNS capture:
 

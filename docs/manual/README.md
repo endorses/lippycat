@@ -67,6 +67,49 @@ Set this up after the new Pages domain is serving successfully. Test existing
 chapter URLs separately: the basic domain-forwarding documentation does not
 guarantee the path mapping described above.
 
+## Numbered figures
+
+Wrap each Mermaid diagram in a semantic figure with a unique descriptive
+`fig-...` anchor and a short caption. For example:
+
+````markdown
+<!-- i18n:skip -->
+
+<figure id="fig-example-architecture">
+
+<!-- i18n:skip -->
+
+```mermaid
+graph LR
+    Hunter --> Processor
+```
+
+<figcaption>Capture agents send traffic to a central processor.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
+````
+
+The skip comments keep wrappers and diagram code unchanged across languages;
+translate the caption text while preserving its `<figcaption>` tags. Keep captions
+on one source line. Do not type figure numbers into the source.
+
+The figures preprocessor runs after Gettext and before Mermaid. It numbers figures
+continuously in `SUMMARY.md` reading order, including nested chapters, and writes
+localized labels (`Figure`, `Abbildung`, `Figura`) into the HTML. Individual
+chapters and the print page share the same numbers, including without JavaScript.
+Adding or reordering figures changes numbers; descriptive anchors remain stable.
+Link to the anchor, for example
+`[the capture architecture](part3-distributed/architecture.md#fig-distributed-architecture)`,
+rather than hard-coding a number in prose.
+
+Every figure must contain exactly one Mermaid diagram and a nonempty caption.
+Missing wrappers, malformed markup, and duplicate anchors fail the build with
+chapter context. When adding a language, add its figure label in `tools/figures.py`.
+Caption text is searchable, and caption styling follows the current theme and
+keeps figures together for printing when page space permits.
+
 ## Glossary hints
 
 The assembled manual shows glossary definitions on hover or keyboard focus.

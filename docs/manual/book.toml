@@ -19,11 +19,17 @@ additional-js = [
     "theme/language-selector.js",
     "theme/term-hints.js",
 ]
-additional-css = ["theme/language-selector.css", "theme/term-hints.css"]
+additional-css = ["theme/language-selector.css", "theme/term-hints.css", "theme/figures.css"]
 
 [preprocessor.mermaid]
 command = "mdbook-mermaid"
 
 [preprocessor.gettext]
 after = ["links"]
+before = ["mermaid"]
+
+[preprocessor.figures]
+command = "python3 tools/figures.py"
+renderers = ["html"]
+after = ["gettext"]
 before = ["mermaid"]

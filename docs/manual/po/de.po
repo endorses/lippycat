@@ -35006,3 +35006,191 @@ msgstr ""
 "Remote-Ereignissen und Sichtbarkeit in der TUI finden Sie unter "
 "[Inventarnachweise und Richtlinie](#inventory-evidence-policy) und "
 "[Datenschutz und Kompatibilität](#network-privacy-compatibility)."
+
+#: src/part1-foundations/introduction.md:104
+msgid "<figcaption>Local and distributed capture commands.</figcaption>\n"
+msgstr ""
+"<figcaption>Befehle für lokale und verteilte Paketerfassung.</figcaption>\n"
+
+#: src/part1-foundations/core-concepts.md:158
+msgid ""
+"<figcaption>Hunters send captured traffic to a central processor.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Hunter senden erfassten Netzwerkverkehr an einen zentralen "
+"Prozessor.</figcaption>\n"
+
+#: src/part3-distributed/architecture.md:66
+msgid ""
+"<figcaption>Distributed capture architecture and output channels.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Architektur der verteilten Paketerfassung und Ausgabekanäle.</"
+"figcaption>\n"
+
+#: src/part3-distributed/architecture.md:122
+msgid "<figcaption>Hub-and-spoke capture topology.</figcaption>\n"
+msgstr "<figcaption>Hub-and-Spoke-Topologie der Paketerfassung.</figcaption>\n"
+
+#: src/part3-distributed/architecture.md:174
+msgid "<figcaption>Hierarchical capture topology.</figcaption>\n"
+msgstr "<figcaption>Hierarchische Topologie der Paketerfassung.</figcaption>\n"
+
+#: src/part3-distributed/architecture.md:228
+msgid ""
+"<figcaption>Capture divided across independent processors.</figcaption>\n"
+msgstr ""
+"<figcaption>Aufteilung der Paketerfassung auf unabhängige Prozessoren.</"
+"figcaption>\n"
+
+#: src/part3-distributed/architecture.md:267
+msgid ""
+"<figcaption>Capture across DMZ and internal network segments.</figcaption>\n"
+msgstr ""
+"<figcaption>Paketerfassung in DMZ und internen Netzwerksegmenten.</"
+"figcaption>\n"
+
+#: src/part3-distributed/hunt.md:237
+msgid "<figcaption>VoIP hunter buffering and filtering flow.</figcaption>\n"
+msgstr ""
+"<figcaption>Ablauf der Pufferung und Filterung im VoIP-Hunter.</figcaption>\n"
+
+#: src/part3-distributed/process.md:120
+msgid "<figcaption>Processor output channels.</figcaption>\n"
+msgstr "<figcaption>Ausgabekanäle des Prozessors.</figcaption>\n"
+
+#: src/part3-distributed/process.md:521
+msgid ""
+"<figcaption>Forwarding through edge, regional, and central processors.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Weiterleitung über Edge-, regionale und zentrale Prozessoren.</"
+"figcaption>\n"
+
+#: src/part3-distributed/tap.md:29
+msgid ""
+"<figcaption>Capture and analysis within a standalone tap.</figcaption>\n"
+msgstr ""
+"<figcaption>Paketerfassung und Analyse in einem eigenständigen Tap.</"
+"figcaption>\n"
+
+#: src/part3-distributed/tap.md:429
+msgid ""
+"<figcaption>Tap forwarding with local and central monitoring.</figcaption>\n"
+msgstr ""
+"<figcaption>Tap-Weiterleitung mit lokaler und zentraler Überwachung.</"
+"figcaption>\n"
+
+#: src/part4-administration/cli-admin.md:41
+msgid ""
+"<figcaption>Administration commands and the resources they manage.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Administrationsbefehle und die von ihnen verwalteten Ressourcen."
+"</figcaption>\n"
+
+#: src/part4-administration/watch-remote.md:29
+msgid ""
+"<figcaption>Remote TUI monitoring of distributed capture.</figcaption>\n"
+msgstr ""
+"<figcaption>Überwachung verteilter Paketerfassung mit der Remote-TUI.</"
+"figcaption>\n"
+
+#: src/part5-advanced/security.md:217
+msgid "<figcaption>Mutual TLS certificate trust model.</figcaption>\n"
+msgstr ""
+"<figcaption>Vertrauensmodell für Zertifikate bei gegenseitigem TLS.</"
+"figcaption>\n"
+
+#: src/part5-advanced/security.md:602
+msgid ""
+"<figcaption>Forwarding TLS session keys from hunter to processor.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Weiterleitung von TLS-Sitzungsschlüsseln vom Hunter zum "
+"Prozessor.</figcaption>\n"
+
+#: src/part5-advanced/performance.md:252
+msgid "<figcaption>Automatic GPU backend selection.</figcaption>\n"
+msgstr "<figcaption>Automatische Auswahl des GPU-Backends.</figcaption>\n"
+
+#: src/part5-advanced/lawful-interception.md:57
+msgid ""
+"<figcaption>Lawful interception architecture and ETSI interfaces.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Architektur der rechtmäßigen Telekommunikationsüberwachung und "
+"ETSI-Schnittstellen.</figcaption>\n"
+
+#: src/part5-advanced/lawful-interception.md:237
+msgid ""
+"<figcaption>Certificate chains for lawful interception interfaces.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Zertifikatsketten für Schnittstellen der rechtmäßigen "
+"Telekommunikationsüberwachung.</figcaption>\n"
+
+#: src/part5-advanced/lawful-interception.md:470
+msgid ""
+"<figcaption>Processor state synchronization with the ADMF.</figcaption>\n"
+msgstr ""
+"<figcaption>Synchronisierung des Prozessorzustands mit der ADMF.</"
+"figcaption>\n"
+
+#: src/part5-advanced/lawful-interception.md:718
+msgid ""
+"<figcaption>Target filtering and authorized X2/X3 delivery.</figcaption>\n"
+msgstr ""
+"<figcaption>Zielfilterung und autorisierte X2/X3-Ausleitung.</figcaption>\n"
+
+#: src/part5-advanced/voip.md:34
+msgid ""
+"<figcaption>SIP call establishment, RTP media, and termination.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>SIP-Verbindungsaufbau, RTP-Medien und Verbindungsabbau.</"
+"figcaption>\n"
+
+#: src/part5-advanced/voip.md:320
+msgid ""
+"<figcaption>VoIP packet detection, processing, and filtering.</figcaption>\n"
+msgstr ""
+"<figcaption>Erkennung, Verarbeitung und Filterung von VoIP-Paketen.</"
+"figcaption>\n"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:45
+msgid ""
+"<figcaption>Correlating SIP call legs into a delivery group.</figcaption>\n"
+msgstr ""
+"<figcaption>Zusammenführung von SIP-Verbindungsabschnitten zu einer "
+"Ausleitungsgruppe.</figcaption>\n"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:118
+msgid ""
+"<figcaption>Call-leg correlation decisions and matching priorities.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Korrelationsentscheidungen für Verbindungsabschnitte und "
+"Abgleichprioritäten.</figcaption>\n"
+
+#: src/part5-advanced/dns.md:25
+msgid "<figcaption>DNS query and response correlation.</figcaption>\n"
+msgstr "<figcaption>Zuordnung von DNS-Anfragen und -Antworten.</figcaption>\n"
+
+#: src/part5-advanced/tls.md:32
+msgid "<figcaption>TLS handshake analysis and fingerprinting.</figcaption>\n"
+msgstr "<figcaption>TLS-Handshake-Analyse und Fingerprinting.</figcaption>\n"
+
+#: src/part5-advanced/email.md:40
+msgid ""
+"<figcaption>SMTP session with STARTTLS and authentication.</figcaption>\n"
+msgstr ""
+"<figcaption>SMTP-Sitzung mit STARTTLS und Authentifizierung.</figcaption>\n"
+
+#: src/part5-advanced/radius.md:35
+msgid ""
+"<figcaption>RADIUS capture and lawful interception tap topology.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>RADIUS-Paketerfassung und Tap-Topologie für die rechtmäßige "
+"Telekommunikationsüberwachung.</figcaption>\n"

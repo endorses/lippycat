@@ -170,6 +170,28 @@ class TranslationTests(unittest.TestCase):
         ):
             manual.check()
 
+    def test_reviewed_translations_cannot_remove_figure_caption_markup(self):
+        self.catalog(fuzzy=True)
+        source = "<figcaption>Capture architecture.</figcaption>\n"
+        (self.root / "src" / "introduction.md").write_text(
+            "# Introduction {#introduction}\n\n<!-- i18n:skip -->\n\n"
+            '<figure id="fig-test">\n\n<!-- i18n:skip -->\n\n'
+            "```mermaid\ngraph LR\nA --> B\n```\n\n"
+            + source
+            + "\n<!-- i18n:skip -->\n\n</figure>\n"
+        )
+        catalog = self.root / "po" / "de.po"
+        catalog.write_text(
+            catalog.read_text()
+            + f"\nmsgid {json.dumps(source)}\n"
+            + 'msgstr "Erfassungsarchitektur.\\n"\n'
+        )
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(ValueError, "de: changed figure caption markup"),
+        ):
+            manual.check()
+
     def test_build_checks_translated_exclusion_attributes(self):
         self.catalog(fuzzy=True)
         source = "<span data-no-term-hints>PCAP</span>."

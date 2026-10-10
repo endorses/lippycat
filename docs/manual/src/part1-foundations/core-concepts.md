@@ -139,6 +139,10 @@ lippycat can operate as a **distributed system** for capturing traffic across mu
 
 <!-- i18n:skip -->
 
+<figure id="fig-hunter-processor-model">
+
+<!-- i18n:skip -->
+
 ```mermaid
 graph LR
     h1["Hunter<br>(edge)"]
@@ -150,6 +154,12 @@ graph LR
     h2 -->|gRPC| p
     p --> out
 ```
+
+<figcaption>Hunters send captured traffic to a central processor.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 - **Hunters** capture packets at the network edge and forward them via gRPC
 - <span data-term="processor">**Processors**</span> receive, aggregate, and analyze packets from multiple hunters

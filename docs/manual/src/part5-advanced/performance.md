@@ -238,12 +238,22 @@ lippycat probes available backends in priority order and selects the best one:
 
 <!-- i18n:skip -->
 
+<figure id="fig-gpu-backend-selection">
+
+<!-- i18n:skip -->
+
 ```mermaid
 flowchart LR
     Auto["--gpu-backend auto"] --> CUDA{CUDA\navailable?}
     CUDA -->|Yes| UseCUDA[Use CUDA]
     CUDA -->|No| SIMD["Use CPU SIMD\n(always available)"]
 ```
+
+<figcaption>Automatic GPU backend selection.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Select a backend explicitly or let auto-detection choose:
 

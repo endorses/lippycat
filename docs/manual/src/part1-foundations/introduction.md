@@ -73,6 +73,10 @@ The learning path in this manual follows natural complexity:
 
 <!-- i18n:skip -->
 
+<figure id="fig-command-overview">
+
+<!-- i18n:skip -->
+
 ```mermaid
 graph LR
     sniff["lc sniff"]
@@ -96,5 +100,11 @@ graph LR
         remote
     end
 ```
+
+<figcaption>Local and distributed capture commands.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
 
 Each command builds on concepts from the previous one, so working through the manual in order gives you the smoothest learning experience.

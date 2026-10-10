@@ -18,7 +18,7 @@ Track SIP calls end-to-end, correlate RTP streams, and write per-call PCAP files
 Inspect TLS handshakes, detect protocol anomalies, and capture traffic for forensic analysis. Supports ESP-NULL decapsulation for encrypted tunnel inspection.
 
 **Distributed Capture**
-Deploy lightweight hunter nodes across network segments and aggregate traffic at a central processor. Monitor everything from a single TUI.
+Deploy lightweight hunter nodes across network segments and aggregate traffic at a central <span data-term="processor">processor</span>. Monitor everything from a single TUI.
 
 ## Comparison with Similar Tools {#comparison-with-similar-tools}
 

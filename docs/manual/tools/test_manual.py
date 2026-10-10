@@ -38,6 +38,18 @@ class TranslationTests(unittest.TestCase):
         )
         (self.root / "src" / "SUMMARY.md").write_text(
             "# Summary\n\n- [Introduction](introduction.md)\n"
+            "- [Glossary](appendices/glossary.md)\n"
+        )
+        (self.root / "src" / "appendices").mkdir()
+        (self.root / "src" / "appendices" / "glossary.md").write_text(
+            "# Glossary {#glossary}\n\n| Term | Definition |\n| --- | --- |\n"
+            '| <span id="term-pcap" data-glossary-term="pcap">**PCAP**</span> '
+            "| Packet capture. |\n"
+        )
+        (self.root / "term-hints.json").write_text(
+            json.dumps(
+                {"pcap": {"automatic": True, "caseSensitive": True, "aliases": {}}}
+            )
         )
         (self.root / "src" / "introduction.md").write_text(
             "# Introduction {#introduction}\n\nRun `lc sniff --new`.\n"
@@ -139,6 +151,38 @@ class TranslationTests(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "changed code or link target"),
         ):
             manual.check()
+
+    def test_reviewed_translations_cannot_change_term_annotations(self):
+        self.catalog(fuzzy=True)
+        source = '<span data-term="pcap">capture</span> and <span data-no-term-hints>PCAP</span>.'
+        translated = '<span data-term="pcap">Mitschnitt</span> und <span>PCAP</span>.'
+        (self.root / "src" / "introduction.md").write_text(
+            "# Introduction {#introduction}\n\n" + source + "\n"
+        )
+        catalog = self.root / "po" / "de.po"
+        catalog.write_text(
+            catalog.read_text()
+            + f"\nmsgid {json.dumps(source)}\nmsgstr {json.dumps(translated)}\n"
+        )
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(ValueError, "de: changed term annotations"),
+        ):
+            manual.check()
+
+    def test_build_checks_translated_exclusion_attributes(self):
+        self.catalog(fuzzy=True)
+        source = "<span data-no-term-hints>PCAP</span>."
+        (self.root / "src" / "introduction.md").write_text(
+            "# Introduction {#introduction}\n\n" + source + "\n"
+        )
+        catalog = self.root / "po" / "de.po"
+        catalog.write_text(
+            catalog.read_text()
+            + f'\nmsgid {json.dumps(source)}\nmsgstr "<span>PCAP</span>."\n'
+        )
+        with self.assertRaisesRegex(ValueError, "de: changed term_markers"):
+            manual.build()
 
 
 if __name__ == "__main__":

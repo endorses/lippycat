@@ -170,6 +170,26 @@ class TranslationTests(unittest.TestCase):
         ):
             manual.check()
 
+    def test_reviewed_translations_cannot_change_figure_reference_targets(self):
+        self.catalog(fuzzy=True)
+        source = "See {{#figure fig-overview}}."
+        (self.root / "src" / "introduction.md").write_text(
+            "# Introduction {#introduction}\n\n" + source + "\n"
+        )
+        catalog = self.root / "po" / "de.po"
+        original = catalog.read_text()
+        for translated in ("Siehe die Abbildung.", "Siehe {{#figure fig-other}}."):
+            with self.subTest(translated=translated):
+                catalog.write_text(
+                    original
+                    + f"\nmsgid {json.dumps(source)}\nmsgstr {json.dumps(translated)}\n"
+                )
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    self.assertRaisesRegex(ValueError, "de: changed figure references"),
+                ):
+                    manual.check()
+
     def test_reviewed_translations_cannot_remove_figure_caption_markup(self):
         self.catalog(fuzzy=True)
         source = "<figcaption>Capture architecture.</figcaption>\n"

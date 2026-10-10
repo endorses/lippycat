@@ -291,6 +291,12 @@ def check(require_complete=False):
                     raise ValueError(
                         f"{edition['code']}: changed code or link target in {source!r}"
                     )
+            if figures.reference_fingerprint(source) != figures.reference_fingerprint(
+                translation
+            ):
+                raise ValueError(
+                    f"{edition['code']}: changed figure references in {source!r}"
+                )
             if source.startswith("<figcaption>") and not figures.CAPTION.fullmatch(
                 translation.strip()
             ):

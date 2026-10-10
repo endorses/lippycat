@@ -18,7 +18,7 @@ The **X1** interface carries administrative commands: the ADMF sends task activa
 
 ### Architecture {#architecture}
 
-The following diagram shows how the ADMF, lippycat processor, and MDF interact:
+{{#figure fig-li-architecture}} shows how the ADMF, lippycat processor, and MDF interact:
 
 <!-- i18n:skip -->
 
@@ -197,7 +197,7 @@ processor:
 
 ### LI Certificate Setup {#li-certificate-setup}
 
-LI interfaces require mutual TLS (mTLS) on all connections. This means the processor must present a client certificate when connecting to the ADMF and MDF, and it must verify the certificates presented by those systems. Three separate certificate chains are involved:
+LI interfaces require mutual TLS (mTLS) on all connections. This means the processor must present a client certificate when connecting to the ADMF and MDF, and it must verify the certificates presented by those systems. {{#figure fig-li-certificate-chains}} shows the three separate certificate chains involved:
 
 <!-- i18n:skip -->
 
@@ -447,7 +447,7 @@ Disable keepalives:
 
 When lippycat restarts, all in-memory task and destination state is lost. To recover without waiting for the ADMF to re-push each task individually, the processor queries the ADMF for current state on startup using the standard `GetAllDetails` operation defined in ETSI TS 103 221-1.
 
-**Startup sync** is enabled by default. After sending the startup notification, the processor calls `GetAllDetails` on the ADMF, which returns all tasks and destinations assigned to this network element. The processor registers each destination and activates each task, recreating the full filter and delivery state automatically.
+**Startup sync** is enabled by default. As shown in {{#figure fig-admf-state-synchronization}}, after sending the startup notification, the processor calls `GetAllDetails` on the ADMF, which returns all tasks and destinations assigned to this network element. The processor registers each destination and activates each task, recreating the full filter and delivery state automatically.
 
 <!-- i18n:skip -->
 
@@ -692,7 +692,7 @@ When the ADMF activates a task, the LI Manager translates target identifiers int
 
 ### Filter Flow {#filter-flow}
 
-The end-to-end path from task activation to PDU delivery is:
+{{#figure fig-li-filter-delivery}} shows the end-to-end path from task activation to PDU delivery:
 
 <!-- i18n:skip -->
 

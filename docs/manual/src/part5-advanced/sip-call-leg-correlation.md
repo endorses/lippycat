@@ -13,7 +13,7 @@ is a separate mechanism and does not use this LI matching hierarchy.
 
 ## From separate legs to one delivery group {#delivery-group-overview}
 
-The example shows three observed legs of one call. A PBX and an SBC originate
+{{#figure fig-call-leg-delivery-group}} shows three observed legs of one call. A PBX and an SBC originate
 new legs, so Call-ID alone cannot link the entire path. When enabled evidence
 identifies one eligible group, lippycat joins the new leg to it. The first
 selected Call-ID supplies the group's Correlation ID. In this example, leg A is
@@ -91,8 +91,8 @@ capture and an X3-first leg cannot use later evidence to replace their retained
 standalone decisions. New adoption also depends on retained state, capacity, the
 decision horizon and storage availability.
 
-The diagram shows the retained-decision check, eligibility check and matching
-sequence. Every candidate must be live and belong to a resolved group sharing an
+{{#figure fig-call-leg-correlation-decision}} shows the retained-decision check,
+eligibility check and matching sequence. Every candidate must be live and belong to a resolved group sharing an
 active task context with the new leg. Disabled methods are skipped. A successful
 match stops the search; signals are not added together as a confidence score.
 

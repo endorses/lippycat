@@ -4,7 +4,7 @@ Tap mode combines local packet capture with full processor capabilities in a sin
 
 **The formula**: `tap = process + hunt - gRPC`
 
-Everything `hunt` can do (capture, GPU filtering, protocol detection) and everything `process` can do (PCAP writing, TUI serving, command hooks, virtual interface) — without the gRPC transport between them.
+As shown in {{#figure fig-tap-architecture}}, tap combines everything `hunt` can do (capture, GPU filtering, protocol detection) and everything `process` can do (PCAP writing, TUI serving, command hooks, virtual interface) — without the gRPC transport between them.
 
 <!-- i18n:skip -->
 
@@ -373,7 +373,7 @@ lc watch remote -P localhost:55555 --insecure
 
 ## Upstream Forwarding {#upstream-forwarding}
 
-Tap nodes can forward captured traffic to a central processor, acting as edge nodes in a hierarchical deployment:
+Tap nodes can forward captured traffic to a central processor, acting as edge nodes in a hierarchical deployment ({{#figure fig-tap-upstream-forwarding}}):
 
 An edge tap captures locally and forwards to the central processor:
 

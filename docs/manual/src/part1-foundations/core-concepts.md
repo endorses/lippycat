@@ -135,7 +135,7 @@ This analysis happens in real time during capture and is displayed in both CLI a
 
 ## The Distributed Model {#the-distributed-model}
 
-lippycat can operate as a **distributed system** for capturing traffic across multiple network segments:
+lippycat can operate as a **distributed system** for capturing traffic across multiple network segments, as shown in {{#figure fig-hunter-processor-model}}:
 
 <!-- i18n:skip -->
 

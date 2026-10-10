@@ -59,3 +59,4 @@
 - [BPF Filter Reference](appendices/bpf-reference.md)
 - [Filter Type Reference](appendices/filter-reference.md)
 - [Glossary](appendices/glossary.md)
+- [List of Figures](appendices/list-of-figures.md)

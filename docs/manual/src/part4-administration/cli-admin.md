@@ -1,6 +1,6 @@
 # CLI Administration {#cli-administration}
 
-lippycat provides a set of CLI commands for managing and inspecting distributed deployments. These commands follow a consistent verb-object pattern and output JSON for easy scripting.
+lippycat provides a set of CLI commands for managing and inspecting distributed deployments, shown in {{#figure fig-admin-command-resources}}. These commands follow a consistent verb-object pattern and output JSON for easy scripting.
 
 <!-- i18n:skip -->
 

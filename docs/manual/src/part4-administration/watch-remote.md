@@ -1,6 +1,6 @@
 # Remote TUI Monitoring {#remote-tui-monitoring}
 
-The TUI's remote mode (`lc watch remote`) connects to processors and displays live packet data from distributed hunters. It gives you a single pane of glass across multiple network segments without running capture locally.
+The TUI's remote mode (`lc watch remote`) connects to processors and displays live packet data from distributed hunters, as shown in {{#figure fig-remote-monitoring}}. It gives you a single pane of glass across multiple network segments without running capture locally.
 
 <!-- i18n:skip -->
 

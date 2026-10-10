@@ -234,7 +234,7 @@ GPU acceleration speeds up capture-side application-filter matching against valu
 
 ### Backend Selection {#backend-selection}
 
-lippycat probes available backends in priority order and selects the best one:
+lippycat probes available backends in priority order and selects the best one, as shown in {{#figure fig-gpu-backend-selection}}:
 
 <!-- i18n:skip -->
 

@@ -217,7 +217,7 @@ sudo lc hunt voip --processor processor:55555 -i eth0 \
   --tls-cert hunter.crt --tls-key hunter.key --tls-ca ca.crt
 ```
 
-**How call buffering works**:
+**How call buffering works** ({{#figure fig-voip-hunter-flow}}):
 
 <!-- i18n:skip -->
 

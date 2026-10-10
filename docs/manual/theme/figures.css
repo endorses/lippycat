@@ -21,6 +21,16 @@ figure[data-figure-number] .figure-label {
   font-weight: 600;
 }
 
+.figure-list ul {
+  padding-left: 0;
+  list-style: none;
+}
+
+.figure-list li {
+  margin: 0.65em 0;
+  line-height: 1.5;
+}
+
 @media print {
   figure[data-figure-number] {
     break-inside: avoid;

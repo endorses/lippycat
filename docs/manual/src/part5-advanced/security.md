@@ -220,7 +220,7 @@ flowchart TB
 
 </figure>
 
-All certificates are signed by the same CA. Each node trusts any certificate signed by that CA. To revoke a hunter, stop issuing it certificates and restart the processor — the revoked hunter can no longer present a valid client certificate.
+In the trust model shown in {{#figure fig-mtls-trust}}, all certificates are signed by the same CA. Each node trusts any certificate signed by that CA. To revoke a hunter, stop issuing it certificates and restart the processor — the revoked hunter can no longer present a valid client certificate.
 
 ### Enabling mTLS {#enabling-mtls}
 
@@ -578,7 +578,7 @@ SSLKEYLOGFILE=/tmp/sslkeys.pipe ./myserver
 
 ### Distributed Key Forwarding {#distributed-key-forwarding}
 
-In distributed mode, hunters automatically forward TLS session keys to the processor alongside captured packets:
+In distributed mode, hunters automatically forward TLS session keys to the processor alongside captured packets, as shown in {{#figure fig-session-key-forwarding}}:
 
 <!-- i18n:skip -->
 

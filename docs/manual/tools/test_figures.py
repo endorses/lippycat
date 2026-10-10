@@ -78,6 +78,90 @@ class FigureTests(unittest.TestCase):
         self.assertNotIn("sections", output)
         self.assertIn("Figure 1:", output["items"][0]["Chapter"]["content"])
 
+    def test_forward_nested_and_same_chapter_references(self):
+        detail = chapter(
+            "See {{#figure fig-overview}}.\n\n" + figure("fig-detail"), "Detail"
+        )
+        detail["Chapter"]["source_path"] = "foundations/nested/detail.md"
+        overview = chapter(
+            "See {{#figure fig-later}} and {{#figure fig-overview}}.\n\n" + figure(),
+            children=[detail],
+        )
+        overview["Chapter"]["source_path"] = "foundations/overview.md"
+        later = chapter(figure("fig-later"), "Later")
+        later["Chapter"]["source_path"] = "advanced/later.md"
+        output = figures.preprocess({"items": [overview, later]}, "de")
+        content = output["items"][0]["Chapter"]["content"]
+        self.assertIn("[Abbildung 3](../advanced/later.md#fig-later)", content)
+        self.assertIn("[Abbildung 1](#fig-overview)", content)
+        self.assertIn(
+            "[Abbildung 1](../overview.md#fig-overview)",
+            output["items"][0]["Chapter"]["sub_items"][0]["Chapter"]["content"],
+        )
+
+    def test_list_uses_localized_catalog_captions_and_reading_order(self):
+        overview = chapter(
+            figure(caption="Els <em>nodes</em> [A] &amp; B."),
+            children=[chapter(figure("fig-detail", "Un detall."), "Detail")],
+        )
+        index = chapter("# Figures\n\n{{#figure-list}}\n", "List")
+        index["Chapter"]["source_path"] = "appendices/list.md"
+        output = figures.preprocess({"sections": [overview, index]}, "ca")
+        content = output["sections"][1]["Chapter"]["content"]
+        self.assertIn('<div class="figure-list">\n\n', content)
+        self.assertIn(
+            "- [Figura 1: Els nodes \\[A\\] & B\\.](../overview.md#fig-overview)",
+            content,
+        )
+        self.assertIn("- [Figura 2: Un detall\\.](../detail.md#fig-detail)", content)
+        self.assertLess(content.index("Figura 1"), content.index("Figura 2"))
+        self.assertNotIn("<em>", content)
+        self.assertNotIn("{{#figure", content)
+
+    def test_reference_fingerprints_preserve_literal_examples(self):
+        examples = (
+            "`{{#figure fig-inline}}`\n"
+            "`` {{#figure fig-inline-two}} ``\n"
+            "````markdown\n{{#figure fig-code}}\n{{#figure-list}}\n````\n"
+        )
+        content = (
+            examples
+            + "See {{#figure fig-overview}}.\n\n{{#figure-list}}\n\n"
+            + figure()
+        )
+        self.assertEqual(
+            figures.reference_fingerprint(content), ["fig-overview", "figure-list"]
+        )
+        output = figures.preprocess({"sections": [chapter(content)]}, "en")["sections"][
+            0
+        ]["Chapter"]["content"]
+        self.assertTrue(output.startswith(examples))
+        self.assertIn("See [Figure 1](#fig-overview).", output)
+
+    def test_unknown_and_malformed_references_report_chapter_context(self):
+        for content, message in [
+            ("{{#figure fig-missing}}", "unknown figure fig-missing"),
+            ("{{#figure}}", "malformed figure reference"),
+            ("{{#figure fig-Capital}}", "malformed figure reference"),
+            ("{{#figure fig-overview}", "malformed figure reference"),
+            ("Text {{#figure-list}}", "figure-list marker must be on its own line"),
+        ]:
+            with (
+                self.subTest(content=content),
+                self.assertRaisesRegex(ValueError, "overview.md:1: " + message),
+            ):
+                figures.preprocess({"sections": [chapter(content)]}, "en")
+
+    def test_mermaid_reference_lookalikes_are_preserved(self):
+        content = figure().replace(
+            "    A --> B", '    A["{{#figure fig-literal}}"] --> B'
+        )
+        self.assertEqual(figures.reference_fingerprint(content), [])
+        output = figures.preprocess({"sections": [chapter(content)]}, "en")["sections"][
+            0
+        ]["Chapter"]["content"]
+        self.assertIn('    A["{{#figure fig-literal}}"] --> B', output)
+
     def test_only_wrapper_and_caption_lines_change(self):
         before = (
             "# Overview {#overview}\n\nRun `lc hunt`.\n\n"
@@ -224,6 +308,51 @@ class FigureTests(unittest.TestCase):
                 self.assertIn('class="figure-label">Abbildung 1:</span>', output)
                 self.assertIn('class="language-mermaid"', output)
                 self.assertNotIn("```mermaid", output)
+
+    @unittest.skipUnless(shutil.which("mdbook"), "mdBook is not installed")
+    def test_mdbook_resolves_cross_references_and_list_in_chapters_and_print(self):
+        with tempfile.TemporaryDirectory(
+            prefix="lippycat-figure-links-test-"
+        ) as directory:
+            root = Path(directory)
+            (root / "src" / "appendices").mkdir(parents=True)
+            (root / "src" / "SUMMARY.md").write_text(
+                "# Summary\n\n- [Overview](overview.md)\n"
+                "- [Detail](detail.md)\n- [Figures](appendices/list.md)\n"
+            )
+            (root / "src" / "overview.md").write_text(
+                "# Overview\n\nSee {{#figure fig-detail}} and {{#figure fig-overview}}.\n\n"
+                + figure()
+            )
+            (root / "src" / "detail.md").write_text(
+                "# Detail\n\n" + figure("fig-detail", "Details of the nodes.")
+            )
+            (root / "src" / "appendices" / "list.md").write_text(
+                "# Figures\n\n{{#figure-list}}\n"
+            )
+            (root / "book.toml").write_text(
+                '[book]\ntitle = "Test figures"\nlanguage = "en"\nsrc = "src"\n'
+                "[output.html]\n[preprocessor.figures]\n"
+                f"command = {json.dumps(f'{sys.executable} {SCRIPT}')}\n"
+            )
+            result = subprocess.run(
+                ["mdbook", "build", str(root)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            overview = (root / "book" / "overview.html").read_text()
+            self.assertIn('href="detail.html#fig-detail">Figure 2</a>', overview)
+            self.assertIn('href="#fig-overview">Figure 1</a>', overview)
+            index = (root / "book" / "appendices" / "list.html").read_text()
+            self.assertIn('href="../overview.html#fig-overview">Figure 1:', index)
+            self.assertIn('href="../detail.html#fig-detail">Figure 2:', index)
+            printed = (root / "book" / "print.html").read_text()
+            self.assertIn('href="#fig-detail">Figure 2</a>', printed)
+            self.assertIn('href="#fig-overview">Figure 1:', printed)
+            self.assertIn('href="#fig-detail">Figure 2:', printed)
+            self.assertNotIn("{{#figure", printed)
 
 
 if __name__ == "__main__":

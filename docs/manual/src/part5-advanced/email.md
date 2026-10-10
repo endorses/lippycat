@@ -4,7 +4,7 @@ The email analyzer supports SMTP, IMAP, and POP3 with session tracking and trans
 
 ## SMTP Analysis {#smtp-analysis}
 
-SMTP capture tracks the envelope transaction: EHLO, MAIL FROM, RCPT TO, DATA, and server responses. lippycat detects STARTTLS negotiation and authentication attempts.
+SMTP capture tracks the envelope transaction: EHLO, MAIL FROM, RCPT TO, DATA, and server responses. lippycat detects STARTTLS negotiation and authentication attempts, as illustrated in {{#figure fig-smtp-starttls-session}}.
 
 <!-- i18n:skip -->
 

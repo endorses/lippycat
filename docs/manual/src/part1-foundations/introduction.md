@@ -69,7 +69,7 @@ lc [verb] [object] [flags]
 | `lc set`     | Create or update resources (filters) |                                |
 | `lc rm`      | Remove resources (filters)           |                                |
 
-The learning path in this manual follows natural complexity:
+The learning path in this manual follows natural complexity, as shown in {{#figure fig-command-overview}}:
 
 <!-- i18n:skip -->
 

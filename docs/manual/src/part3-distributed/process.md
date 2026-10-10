@@ -97,7 +97,7 @@ Hunter health is monitored via heartbeats (5-second interval). Stale hunters are
 
 ## Output Channels {#output-channels}
 
-Every packet a processor receives can be sent to multiple destinations simultaneously. These output channels are independent — enable any combination:
+Every packet a processor receives can be sent to multiple destinations simultaneously, as shown in {{#figure fig-processor-outputs}}. These output channels are independent — enable any combination:
 
 <!-- i18n:skip -->
 
@@ -524,7 +524,7 @@ flowchart LR
 
 </figure>
 
-Each processor in the chain can write PCAP locally in addition to forwarding upstream.
+Each processor in the chain shown in {{#figure fig-processor-hierarchy}} can write PCAP locally in addition to forwarding upstream.
 
 Packet forwarding is the compatibility default. To relay normalized events
 with a recoverable per-hop admission boundary, configure each non-terminal

@@ -35,7 +35,7 @@ sequenceDiagram
 
 </figure>
 
-lippycat captures and parses the unencrypted handshake messages at the start of every TLS connection.
+lippycat captures and parses the unencrypted handshake messages at the start of every TLS connection, as illustrated in {{#figure fig-tls-handshake}}.
 
 Start TLS capture:
 

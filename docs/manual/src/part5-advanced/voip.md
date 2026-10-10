@@ -4,7 +4,7 @@ VoIP analysis is lippycat's most mature protocol mode. It tracks SIP signaling d
 
 ## SIP Signaling Flow {#sip-signaling-flow}
 
-SIP (Session Initiation Protocol) uses a request/response model to establish, modify, and tear down voice and video calls. lippycat tracks the full dialog lifecycle. A typical successful call follows this sequence:
+SIP (Session Initiation Protocol) uses a request/response model to establish, modify, and tear down voice and video calls. lippycat tracks the full dialog lifecycle. A typical successful call follows the sequence shown in {{#figure fig-sip-call-flow}}:
 
 <!-- i18n:skip -->
 
@@ -292,7 +292,7 @@ For full per-call PCAP configuration, see [Central Aggregation with `lc process`
 
 ## VoIP Data Flow {#voip-data-flow}
 
-Understanding how packets move through the VoIP analyzer helps with troubleshooting and performance tuning:
+{{#figure fig-voip-processing-flow}} shows how packets move through the VoIP analyzer, helping with troubleshooting and performance tuning:
 
 <!-- i18n:skip -->
 

@@ -16,7 +16,7 @@ are synthetic.
 
 ## Capture topology and supported scope {#capture-topology-and-supported-scope}
 
-Mirror the visible BRAS/BNG-to-AAA UDP link into a dedicated POI interface:
+Mirror the visible BRAS/BNG-to-AAA UDP link into a dedicated POI interface, as shown in {{#figure fig-radius-tap-poi}}:
 
 <!-- i18n:skip -->
 

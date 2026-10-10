@@ -4,7 +4,7 @@ The DNS analyzer correlates queries with their responses and measures resolution
 
 ## Query/Response Correlation {#queryresponse-correlation}
 
-lippycat matches DNS queries to their responses using the transaction ID (a 16-bit identifier in the DNS header). When a response is correlated, the `QueryResponseTimeMs` field shows the round-trip time in milliseconds.
+lippycat matches DNS queries to their responses using the transaction ID (a 16-bit identifier in the DNS header), as shown in {{#figure fig-dns-query-response}}. When a response is correlated, the `QueryResponseTimeMs` field shows the round-trip time in milliseconds.
 
 <!-- i18n:skip -->
 

@@ -3,14 +3,19 @@
 import copy
 import html
 import json
+import posixpath
 import re
 import sys
 from dataclasses import dataclass
+from urllib.parse import quote
 
 LABELS = {"en": "Figure", "de": "Abbildung", "ca": "Figura"}
 OPENING = re.compile(r'<figure id="(fig-[a-z][a-z0-9]*(?:-[a-z0-9]+)*)">')
 CAPTION = re.compile(r"<figcaption>(.*?)</figcaption>")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+REFERENCE = re.compile(r"\{\{#figure (fig-[a-z][a-z0-9]*(?:-[a-z0-9]+)*)\}\}")
+LIST_MARKER = "{{#figure-list}}"
+INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)")
 
 
 @dataclass(frozen=True)
@@ -19,6 +24,58 @@ class Figure:
     opening: int
     caption: int
     text: str
+
+
+@dataclass(frozen=True)
+class Reference:
+    identifier: str
+    line: int
+    start: int
+    end: int
+
+
+def parse_references(content, chapter="<content>"):
+    """Find author references in prose, preserving fenced and inline examples."""
+    references = []
+    fence = None
+    for index, line in enumerate(content.splitlines(keepends=True)):
+        if fence is not None:
+            character, length = fence
+            if re.fullmatch(rf" {{0,3}}{re.escape(character)}{{{length},}}\s*", line):
+                fence = None
+            continue
+        match = FENCE.match(line)
+        if match:
+            marker, info = match.groups()
+            if marker[0] != "`" or "`" not in info:
+                fence = (marker[0], len(marker))
+                continue
+        code = [(match.start(), match.end()) for match in INLINE_CODE.finditer(line)]
+        for candidate in re.finditer(r"\{\{#figure", line):
+            start = candidate.start()
+            if any(begin <= start < end for begin, end in code):
+                continue
+            if line.startswith(LIST_MARKER, start):
+                if line.strip() != LIST_MARKER:
+                    raise ValueError(
+                        f"{chapter}:{index + 1}: figure-list marker must be on its own line"
+                    )
+                references.append(
+                    Reference("figure-list", index, start, start + len(LIST_MARKER))
+                )
+            else:
+                match = REFERENCE.match(line, start)
+                if match is None:
+                    raise ValueError(
+                        f"{chapter}:{index + 1}: malformed figure reference"
+                    )
+                references.append(Reference(match.group(1), index, start, match.end()))
+    return references
+
+
+def reference_fingerprint(content):
+    """Ordered referenced IDs; figure-list is a sentinel for the list placeholder."""
+    return [reference.identifier for reference in parse_references(content)]
 
 
 def parse_figures(content, chapter="<content>"):
@@ -126,40 +183,88 @@ def preprocess(book, language):
         raise ValueError(f"unsupported figure language: {language!r}")
     result = copy.deepcopy(book)
     identifiers = set()
-    number = 0
+    catalog = {}
+    chapters = []
 
     def visit(sections):
-        nonlocal number
         for section in sections:
             if "Chapter" not in section:
                 continue
             chapter = section["Chapter"]
             context = chapter.get("source_path") or chapter.get("name", "<chapter>")
             content = chapter["content"]
-            lines = content.splitlines(keepends=True)
-            for figure in parse_figures(content, context):
+            parsed = parse_figures(content, context)
+            path = chapter.get("path") or chapter.get("source_path")
+            if path is None and parsed:
+                raise ValueError(f"{context}: numbered figure needs a chapter path")
+            chapters.append((chapter, context, path, parsed))
+            for figure in parsed:
                 caption_id = f"{figure.identifier}-caption"
                 if figure.identifier in identifiers or caption_id in identifiers:
                     raise ValueError(
                         f"{context}: duplicate figure identifier {figure.identifier}"
                     )
                 identifiers.update((figure.identifier, caption_id))
-                number += 1
-                opening_ending = "\n" if lines[figure.opening].endswith("\n") else ""
-                caption_ending = "\n" if lines[figure.caption].endswith("\n") else ""
-                lines[figure.opening] = (
-                    f'<figure id="{figure.identifier}" aria-labelledby="{caption_id}" '
-                    f'data-figure-number="{number}">{opening_ending}'
-                )
-                lines[figure.caption] = (
-                    f'<figcaption id="{caption_id}"><span class="figure-label">'
-                    f"{LABELS[language]} {number}:</span> {figure.text}</figcaption>{caption_ending}"
-                )
-            chapter["content"] = "".join(lines)
+                catalog[figure.identifier] = (len(catalog) + 1, path, figure.text)
             visit(chapter.get("sub_items", []))
 
     # mdBook 0.5 renamed the serialized root collection from sections to items.
     visit(result["items"] if "items" in result else result["sections"])
+
+    def href(source, target, identifier):
+        if source == target:
+            return f"#{identifier}"
+        relative = posixpath.relpath(target, posixpath.dirname(source) or ".")
+        return f"{quote(relative, safe='/.-')}#{identifier}"
+
+    for chapter, context, path, parsed in chapters:
+        content = chapter["content"]
+        references = parse_references(content, context)
+        lines = content.splitlines(keepends=True)
+        for reference in reversed(references):
+            if path is None:
+                raise ValueError(f"{context}: figure reference needs a chapter path")
+            if reference.identifier == "figure-list":
+                links = []
+                for identifier, (number, target, caption) in catalog.items():
+                    visible = " ".join(
+                        html.unescape(re.sub(r"<[^>]*>", "", caption)).split()
+                    )
+                    escaped = re.sub(r"([\\`*_{}\[\]()#+.!<>|])", r"\\\1", visible)
+                    links.append(
+                        f"- [{LABELS[language]} {number}: {escaped}]({href(path, target, identifier)})"
+                    )
+                replacement = (
+                    '<div class="figure-list">\n\n' + "\n".join(links) + "\n\n</div>"
+                )
+            else:
+                if reference.identifier not in catalog:
+                    raise ValueError(
+                        f"{context}:{reference.line + 1}: unknown figure {reference.identifier}"
+                    )
+                number, target, _caption = catalog[reference.identifier]
+                replacement = f"[{LABELS[language]} {number}]({href(path, target, reference.identifier)})"
+            line = lines[reference.line]
+            lines[reference.line] = (
+                line[: reference.start] + replacement + line[reference.end :]
+            )
+
+        # Number figures only after reference replacement; list expansions can
+        # add lines, so use original figure offsets before joining the chapter.
+        for figure in parsed:
+            number, _target, _caption = catalog[figure.identifier]
+            caption_id = f"{figure.identifier}-caption"
+            opening_ending = "\n" if lines[figure.opening].endswith("\n") else ""
+            caption_ending = "\n" if lines[figure.caption].endswith("\n") else ""
+            lines[figure.opening] = (
+                f'<figure id="{figure.identifier}" aria-labelledby="{caption_id}" '
+                f'data-figure-number="{number}">{opening_ending}'
+            )
+            lines[figure.caption] = (
+                f'<figcaption id="{caption_id}"><span class="figure-label">'
+                f"{LABELS[language]} {number}:</span> {figure.text}</figcaption>{caption_ending}"
+            )
+        chapter["content"] = "".join(lines)
     return result
 
 

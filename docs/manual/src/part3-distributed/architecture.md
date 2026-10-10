@@ -12,7 +12,7 @@ A single capture point only sees traffic on its own network segment. In real-wor
 
 ## The Hunter/Processor Model {#the-hunterprocessor-model}
 
-lippycat's distributed architecture has two node types:
+{{#figure fig-distributed-architecture}} shows how lippycat's two distributed node types connect to output channels:
 
 - **Hunters** capture packets at the network edge and forward them to a processor via gRPC. They're lightweight (~50MB RAM) and designed to run on every network segment you want to monitor.
 - **Processors** receive packets from multiple hunters, perform protocol analysis, write PCAP files, and serve TUI clients for real-time monitoring.
@@ -97,7 +97,7 @@ There's also a third node type:
 
 ### Hub-and-Spoke {#hub-and-spoke}
 
-The simplest topology. All hunters connect directly to one processor:
+In the simplest topology, all hunters connect directly to one processor ({{#figure fig-hub-and-spoke}}):
 
 <!-- i18n:skip -->
 
@@ -146,7 +146,7 @@ sudo lc hunt --processor processor:55555 -i eth0 --tls-ca ca.crt
 
 ### Hierarchical {#hierarchical}
 
-Multi-tier architecture for geographic or network segmentation. Edge processors aggregate locally and forward to regional or central processors:
+Multi-tier architecture for geographic or network segmentation. Edge processors aggregate locally and forward to regional or central processors, as shown in {{#figure fig-hierarchical-topology}}:
 
 <!-- i18n:skip -->
 
@@ -210,7 +210,7 @@ Hierarchy depth is limited to 10 levels. Keep it at 3 or fewer for optimal perfo
 
 ### Multi-Processor {#multi-processor}
 
-Distribute hunters across multiple independent processors for load distribution:
+Distribute hunters across multiple independent processors for load distribution, as shown in {{#figure fig-multi-processor-topology}}:
 
 <!-- i18n:skip -->
 
@@ -235,7 +235,7 @@ flowchart LR
 
 ### DMZ Segmentation {#dmz-segmentation}
 
-Capture from both DMZ and internal networks using hierarchical forwarding through the firewall:
+Capture from both DMZ and internal networks using hierarchical forwarding through the firewall, as shown in {{#figure fig-dmz-topology}}:
 
 <!-- i18n:skip -->
 

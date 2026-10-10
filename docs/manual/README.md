@@ -100,9 +100,18 @@ continuously in `SUMMARY.md` reading order, including nested chapters, and write
 localized labels (`Figure`, `Abbildung`, `Figura`) into the HTML. Individual
 chapters and the print page share the same numbers, including without JavaScript.
 Adding or reordering figures changes numbers; descriptive anchors remain stable.
-Link to the anchor, for example
-`[the capture architecture](part3-distributed/architecture.md#fig-distributed-architecture)`,
-rather than hard-coding a number in prose.
+For a numbered reference in prose, write `{{#figure fig-distributed-architecture}}`.
+The preprocessor turns it into a localized link such as “Figure 3”, finding its
+chapter automatically. Forward references and references across chapters are
+supported; unknown identifiers and malformed markers fail the build. Translate
+the surrounding prose while keeping the marker and identifier unchanged. Code
+examples containing these markers remain literal.
+
+The [List of Figures](src/appendices/list-of-figures.md) uses a standalone
+`{{#figure-list}}` placeholder preceded by `<!-- i18n:skip -->`. It generates links
+in reading order using the same localized captions and numbers; do not maintain
+a second list of captions or numbers. Link labels and destinations are generated
+at build time, including in the print edition and without JavaScript.
 
 Every figure must contain exactly one Mermaid diagram and a nonempty caption.
 Missing wrappers, malformed markup, and duplicate anchors fail the build with

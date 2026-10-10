@@ -221,6 +221,8 @@ sudo lc sniff -r capture.pcap --replay-loop 0 \
 
 Original packet timing is applied to virtual-interface injection. Without `--vif-replay-timing`, file replay runs as quickly as processing allows. Packets observed on the virtual interface have current kernel timestamps.
 
+If setting up the requested virtual interface fails for lack of permission, replay stops before processing packets and the command returns a nonzero exit status. Creating the interface requires `CAP_NET_ADMIN`; use `sudo` or grant the binary the required capability.
+
 ## Protocol Modes {#protocol-modes}
 
 `lc sniff` has protocol-specific subcommands that enable deep analysis. Each adds protocol-aware filtering, correlation, and output.

@@ -72,6 +72,11 @@ func sniff(cmd *cobra.Command, args []string) error {
 }
 
 func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconfig.Config, effectiveFilter string) error {
+	return sniffConfiguredWithVirtualInterface(cmd, args, radiusConfig, effectiveFilter, startVirtualInterfaceSinkContext)
+}
+
+func sniffConfiguredWithVirtualInterface(cmd *cobra.Command, args []string, radiusConfig *radiusconfig.Config, effectiveFilter string,
+	startInterface func(context.Context, vinterface.Config, bool, time.Duration) (*virtualInterfaceEnvelopeSink, error)) error {
 	// Set quiet mode in viper so it's accessible globally
 	viper.Set("sniff.quiet", quiet)
 	viper.Set("sniff.format", format)
@@ -126,14 +131,6 @@ func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconf
 				}
 			}
 		}()
-		if writeFile != "" {
-			pcapSink, err := newPCAPEnvelopeSink(writeFile)
-			if err != nil {
-				logger.Error("Failed to create PCAP sink", "file", writeFile, "error", err)
-			} else {
-				registrations = append(registrations, pipeline.SinkRegistration{Name: "pcap", Sink: pcapSink})
-			}
-		}
 		var vifSink *virtualInterfaceEnvelopeSink
 		if viper.GetBool("sniff.virtual_interface") {
 			cfg := vinterface.DefaultConfig()
@@ -149,15 +146,28 @@ func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconf
 			cfg.NetNS = viper.GetString("sniff.vif_netns")
 			cfg.DropPrivilegesUser = viper.GetString("sniff.vif_drop_privileges")
 			var err error
-			vifSink, err = startVirtualInterfaceSinkContext(ctx, cfg, viper.GetBool("sniff.vif_replay_timing"), viper.GetDuration("sniff.vif_startup_delay"))
+			vifSink, err = startInterface(ctx, cfg, viper.GetBool("sniff.vif_replay_timing"), viper.GetDuration("sniff.vif_startup_delay"))
 			if err != nil {
 				if ctx.Err() != nil {
+					runErr = err
+					return
+				}
+				if len(files) != 0 && vinterface.IsPermissionDenied(err) {
+					logger.Error("Virtual interface replay requires elevated privileges", "error", err, "interface_name", cfg.Name, "solution", "Run with sudo or add CAP_NET_ADMIN capability")
 					runErr = err
 					return
 				}
 				logger.Error("Failed to start virtual interface; continuing without it", "error", err, "interface_name", cfg.Name)
 			} else {
 				registrations = append(registrations, pipeline.SinkRegistration{Name: "virtual-interface", Sink: vifSink})
+			}
+		}
+		if writeFile != "" {
+			pcapSink, err := newPCAPEnvelopeSink(writeFile)
+			if err != nil {
+				logger.Error("Failed to create PCAP sink", "file", writeFile, "error", err)
+			} else {
+				registrations = append(registrations, pipeline.SinkRegistration{Name: "pcap", Sink: pcapSink})
 			}
 		}
 		fanout, err := pipeline.NewPacketFanout(registrations...)

@@ -61,7 +61,13 @@ func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 // startVoipSession owns outputs for the entire replay, while each pass owns its
 // tracker, buffers, and TCP reassembly. Repeated source timestamps never leak
 // into the next pass's analysis or virtual-interface pacing.
-func startVoipSession(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, isOffline bool, replay capture.OfflineReplayOptions) (runErr error) {
+func startVoipSession(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, isOffline bool, replay capture.OfflineReplayOptions) error {
+	return startVoipSessionWithManager(ctx, devices, filter, isOffline, replay, vinterface.NewManager)
+}
+
+// The manager factory belongs to this session, so tests can exercise permission
+// failures without privileged interfaces or mutable global dependencies.
+func startVoipSessionWithManager(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, isOffline bool, replay capture.OfflineReplayOptions, newManager func(vinterface.Config) (vinterface.Manager, error)) (runErr error) {
 	config := GetConfig()
 	var callOutput CallOutput = NoopCallOutput{}
 	if config.WriteVoIP {
@@ -111,14 +117,14 @@ func startVoipSession(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 		}
 
 		var err error
-		vifMgr, err := vinterface.NewManager(cfg)
+		vifMgr, err := newManager(cfg)
 		if err != nil {
 			// Provide helpful error message for common errors
-			if errors.Is(err, vinterface.ErrPermissionDenied) {
+			if vinterface.IsPermissionDenied(err) {
 				logger.Error("Virtual interface requires elevated privileges",
 					"error", err,
 					"interface_name", vifName,
-					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
+					"solution", "Run with sudo or grant CAP_NET_ADMIN (also CAP_SYS_ADMIN for network namespaces)")
 			} else if errors.Is(err, vinterface.ErrInterfaceExists) {
 				logger.Error("Virtual interface already exists",
 					"error", err,
@@ -129,16 +135,25 @@ func startVoipSession(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 					"error", err,
 					"interface_name", vifName)
 			}
+			if isOffline && vinterface.IsPermissionDenied(err) {
+				permissionErr := fmt.Errorf("create virtual interface %q: %w", vifName, err)
+				if vifMgr != nil {
+					if shutdownErr := vifMgr.Shutdown(); shutdownErr != nil {
+						permissionErr = errors.Join(permissionErr, fmt.Errorf("clean up virtual interface after creation failure: %w", shutdownErr))
+					}
+				}
+				return permissionErr
+			}
 			logger.Warn("Continuing without virtual interface")
 		} else {
 			err = vifMgr.Start()
 			if err != nil {
 				// Provide helpful error message for common errors
-				if errors.Is(err, vinterface.ErrPermissionDenied) {
+				if vinterface.IsPermissionDenied(err) {
 					logger.Error("Virtual interface requires elevated privileges",
 						"error", err,
 						"interface_name", vifName,
-						"solution", "Run with sudo or add CAP_NET_ADMIN capability")
+						"solution", "Run with sudo or grant CAP_NET_ADMIN (also CAP_SYS_ADMIN for network namespaces)")
 				} else if errors.Is(err, vinterface.ErrInterfaceExists) {
 					logger.Error("Virtual interface already exists",
 						"error", err,
@@ -149,11 +164,16 @@ func startVoipSession(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 						"error", err,
 						"interface_name", vifName)
 				}
-				logger.Warn("Continuing without virtual interface")
+				startErr := fmt.Errorf("start virtual interface %q: %w", vifName, err)
 				if shutdownErr := vifMgr.Shutdown(); shutdownErr != nil {
 					logger.Error("Failed to clean up virtual interface after start failure", "error", shutdownErr)
+					startErr = errors.Join(startErr, fmt.Errorf("clean up virtual interface after start failure: %w", shutdownErr))
 				}
 				vifMgr = nil
+				if isOffline && vinterface.IsPermissionDenied(err) {
+					return startErr
+				}
+				logger.Warn("Continuing without virtual interface")
 			}
 		}
 

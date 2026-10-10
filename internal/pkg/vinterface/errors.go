@@ -1,6 +1,9 @@
 package vinterface
 
-import "errors"
+import (
+	"errors"
+	"os"
+)
 
 var (
 	// ErrPlatformUnsupported indicates the platform doesn't support virtual interfaces.
@@ -44,3 +47,11 @@ var (
 	// ErrNetNSPermissionDenied indicates insufficient privileges for namespace operations.
 	ErrNetNSPermissionDenied = errors.New("permission denied: CAP_NET_ADMIN and CAP_SYS_ADMIN required for namespace operations")
 )
+
+// IsPermissionDenied recognizes virtual-interface and namespace authorization
+// failures, including wrapped operating-system EPERM and EACCES errors.
+func IsPermissionDenied(err error) bool {
+	return errors.Is(err, ErrPermissionDenied) ||
+		errors.Is(err, ErrNetNSPermissionDenied) ||
+		errors.Is(err, os.ErrPermission)
+}

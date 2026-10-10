@@ -35,3 +35,23 @@ each catalog; manual tests and all three editions build successfully.
 The bounded closure review is complete. Its documentation finding was corrected
 and checked in every language. No runtime findings remain. Actual privileged
 TAP/TUN creation was not exercised; lifecycle and timing checks used mock sinks.
+
+## Follow-up: permission errors during virtual-interface replay
+
+The user reported that unprivileged `lc sniff -r ... -V --replay-loop 0`
+continued printing file packets after TAP creation failed. Offline generic,
+RADIUS and VoIP replay must stop after logging a virtual-interface permission
+error, returning a nonzero command status. Other startup fallback behavior is
+outside this correction.
+
+- [x] Return permission failures before replay starts and preserve cleanup errors.
+- [x] Add regression coverage for one-pass/continuous replay and generic/RADIUS/VoIP paths; verify the unprivileged CLI failure.
+- [x] Document and translate the behavior, validate the manual, format and commit the correction.
+
+Follow-up validation passed: the full sniff package, focused VoIP and
+virtual-interface tests, VoIP permission race tests, affected-package `go vet`,
+and `make build`. Unprivileged CLI checks with a separate interface name confirmed
+exit status 1 and no packet output for generic, RADIUS and VoIP replay with counts
+1 and 0; existing generic/RADIUS PCAP output files remained intact. Replay without
+a virtual interface still processed all 1,800 demo packets successfully. Manual
+checks and all editions build; both catalogs translate all 5,713 current messages.

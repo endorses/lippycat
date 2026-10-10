@@ -55,6 +55,11 @@ Injected traffic receives current kernel timestamps. Continuous replay stops on
 errors or a pass with no packets matching the capture filter. There is no delay
 after the final pass.
 
+Virtual-interface replay stops with a nonzero exit status if interface setup
+fails for lack of permission. Creating the interface requires `CAP_NET_ADMIN`;
+run replay with `sudo` or grant the binary the required capability. No packets
+are replayed after that error.
+
 ```yaml
 sniff:
   replay_loop: 0

@@ -11,7 +11,7 @@ numbers may change when diagrams are inserted or reordered.
 - [x] Style captions for all themes, small screens, and printing; document authoring conventions.
 - [x] Verify numbering, malformed input rejection, translated invariants, and browser rendering.
 - [x] Run `make manual-check`, strict translation checking, and `make manual`.
-- [ ] Commit the verified implementation and plan.
+- [x] Commit the verified implementation and plan.
 
 Use existing Python tooling and mdBook's preprocessor protocol; no new runtime
 dependency is required. Figure numbers are generated at build time so captions
@@ -45,3 +45,6 @@ review found no material issue, and build/browser evidence covers the scoped
 requirements. No remediation batch, performance target, or external gate was
 added. Temporary review artifacts were removed. The existing local mdBook/Gettext
 version warning remains harmless; tool pins and runtime dependencies are unchanged.
+
+Implementation and the verified plan were committed as `21a0bc99`. This final
+plan update records the commit task after verifying that commit succeeded.

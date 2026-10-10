@@ -9,6 +9,11 @@ figure[data-figure-number] .mermaid {
   overflow-x: auto;
 }
 
+figure[data-figure-number] .mermaid svg {
+  display: block;
+  margin-inline: auto;
+}
+
 figure[data-figure-number] figcaption {
   margin-top: 0.8rem;
   color: var(--fg);

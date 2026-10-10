@@ -41,6 +41,15 @@ lippycat parses each SIP message and extracts:
 
 **SIP methods lippycat recognizes:** INVITE, ACK, BYE, CANCEL, REGISTER, OPTIONS, PRACK, UPDATE, INFO, REFER, SUBSCRIBE, NOTIFY, MESSAGE, PUBLISH.
 
+### Multiple legs of one call {#multiple-call-legs}
+
+A PBX or session border controller may create a new SIP leg with another Call-ID.
+For LI delivery, processor and tap can optionally group related legs using trusted SIP
+headers, SDP origin or configured address and identity heuristics. See
+[SIP Call-Leg Correlation (LI)](sip-call-leg-correlation.md) for diagrams and matching rules.
+This grouping controls X2/X3 Correlation IDs; ordinary SIP dialog tracking and RTP
+association are described in this chapter.
+
 ## Capturing SIP Traffic {#capturing-sip-traffic}
 
 Basic VoIP capture shows all SIP and RTP traffic on an interface:

@@ -5,6 +5,7 @@ filtering. These chapters cover each analyzer's behavior, metadata fields, and
 practical investigations:
 
 - [VoIP: SIP and RTP Analysis](voip.md): signaling, media streams, call quality, and per-call PCAPs.
+- [SIP Call-Leg Correlation (LI)](sip-call-leg-correlation.md): grouping related SIP legs for authorized X2/X3 delivery.
 - [DNS Analysis](dns.md): query correlation, metadata, and tunneling detection.
 - [TLS Inspection](tls.md): handshakes, certificates, and fingerprints.
 - [HTTP Analysis](http.md): requests, responses, and body capture.

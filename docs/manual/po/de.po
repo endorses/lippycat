@@ -13029,6 +13029,8 @@ msgstr ""
 
 #: src/part1-foundations/installation.md:138
 #: src/part5-advanced/performance.md:381
+#: src/part5-advanced/sip-call-leg-correlation.md:51
+#: src/part5-advanced/sip-call-leg-correlation.md:212
 msgid "Configuration"
 msgstr "Konfiguration"
 
@@ -33281,7 +33283,7 @@ msgstr ""
 msgid "Optional SIP call-leg correlation"
 msgstr "Optionale SIP-Anrufabschnittskorrelation"
 
-#: src/part5-advanced/lawful-interception.md:540
+#: src/part5-advanced/sip-call-leg-correlation.md:116
 msgid ""
 "Call-leg correlation is disabled by default. Enable selected rules under "
 "`processor.li.correlation` or `tap.li.correlation` only after verifying the "
@@ -33292,7 +33294,7 @@ msgid ""
 "direction and destinations remain unchanged."
 msgstr "Die Anrufabschnittskorrelation ist standardmäßig deaktiviert. Aktivieren Sie ausgewählte Regeln unter `processor.li.correlation` oder `tap.li.correlation` erst nach Prüfung der Signalisierung und des MDF-Profils. Ein gruppierter Anruf verwendet für X2 und X3 die FNV-1a-ID seiner zuerst gewählten Call-ID; die endgültige CIN-Interpretation und Deduplizierung liegen beim MDF. Die Gruppierung ändert nur Correlation IDs und deren abhängige Sequenzkontexte. Quellpakete, Nutzdaten, zugeordnete Aufgaben, Autorisierung, Richtung und Ziele bleiben unverändert."
 
-#: src/part5-advanced/lawful-interception.md:550
+#: src/part5-advanced/sip-call-leg-correlation.md:169
 msgid ""
 "Every group must retain a common active task generation across all member "
 "decisions. Task edits, expiry and reactivation invalidate stale eligibility. "
@@ -33305,8 +33307,8 @@ msgid ""
 "the configured call lifecycle lifetime."
 msgstr "Jede Gruppe muss über alle Mitgliedsentscheidungen hinweg eine gemeinsame aktive Aufgabengeneration behalten. Aufgabenänderungen, Ablauf und erneute Aktivierung machen veraltete Zulässigkeit ungültig. Bestehende Entscheidungen binden auch Abschnitte mit X3 zuerst und später Signalisierung. Beim Start und wenn eine Entscheidung wegen voller Kapazität nicht aufbewahrt werden kann, verhindert `decision_horizon` neue Zuordnungen; wiederhergestellte übernommene IDs gelten weiterhin. Transaktionen oder Weiterleitungsverzögerungen jenseits dieses Horizonts können den Schutz nichtpersistierter eigenständiger Entscheidungen umgehen. Aktivität einschließlich RTP-Veröffentlichung erneuert die Aufbewahrung; terminale Entscheidungen verwenden `terminal_grace`, und Inaktivität folgt der konfigurierten Lebensdauer des Anruflebenszyklus."
 
+#: src/part5-advanced/sip-call-leg-correlation.md:187
 
-#: src/part5-advanced/lawful-interception.md:552
 msgid ""
 "An empty `store_file` disables restart persistence. Adopted decisions use a "
 "dedicated authenticated encrypted store, separate from administrative LI "
@@ -33317,7 +33319,7 @@ msgid ""
 "replacement store."
 msgstr "Ein leeres `store_file` deaktiviert die Persistenz über Neustarts. Übernommene Entscheidungen verwenden einen eigenen authentifizierten verschlüsselten Speicher, getrennt von administrativem LI-Zustand und Journalen. Konfigurieren Sie `store_key_file`, `store_key_id` und optionale `store_read_keys`-Einträge `id=path`; verwenden Sie einen unabhängigen 32-Byte-Schlüssel und ein geschütztes Verzeichnis. Initialisieren Sie den Speicher offline bei gestopptem Knoten. Beschädigter oder nicht authentifizierter Speicher ist ein Startfehler und wird nicht durch einen leeren Speicher ersetzt."
 
-#: src/part5-advanced/lawful-interception.md:607
+#: src/part5-advanced/sip-call-leg-correlation.md:203
 msgid ""
 "Rotate this store offline with `lc migrate li-correlation rotate`, following "
 "the key rotation syntax of `lc migrate li-state --source-format=encrypted`. "
@@ -33342,7 +33344,7 @@ msgstr ""
 "einen Neuordnungspuffer oder einen Spool; erfolgreiche Netzwerkübertragung "
 "ist nicht die Grenze."
 
-#: src/part5-advanced/lawful-interception.md:564
+#: src/part5-advanced/sip-call-leg-correlation.md:214
 msgid ""
 "The following defaults leave every matching rule off. Add only trusted "
 "header names and explicitly enable chosen rules. "
@@ -33351,31 +33353,31 @@ msgid ""
 "`tap.li.correlation` for tap."
 msgstr "Die folgenden Standardwerte lassen alle Abgleichregeln deaktiviert. Fügen Sie nur vertrauenswürdige Kopfzeilennamen hinzu und aktivieren Sie gewählte Regeln ausdrücklich. `sdp_origin_observation_ttl` muss größer als `sdp_origin_reuse_window` sein; Dauern und Kapazitäten müssen positiv sein. Konfigurieren Sie für Tap dieselben Schlüssel unter `tap.li.correlation`."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:265
 msgid "`lc show status` exposes aggregate `li_call_correlation` telemetry when grouping is enabled: adopted rules and standalone reasons, SDP observations, group-size buckets, retained records and candidate/transaction/origin counts with configured limits, suspended origins, blind-period cause and remaining nanoseconds, persistence status, uncertain writes and unresolved writes. No Call-IDs, numbers, addresses or SIP header values are included."
 msgstr "`lc show status` zeigt bei aktivierter Gruppierung aggregierte `li_call_correlation`-Telemetrie: übernehmende Regeln und Gründe für eigenständige Abschnitte, SDP-Beobachtungen, Gruppengrößenklassen, aufbewahrte Datensätze und Kandidaten-/Transaktions-/Ursprungszahlen mit konfigurierten Grenzen, gesperrte Ursprünge, Ursache und verbleibende Nanosekunden des Blindzeitraums, Persistenzstatus sowie ungewisse und ungeklärte Schreibvorgänge. Call-IDs, Rufnummern, Adressen oder SIP-Kopfzeilenwerte sind nicht enthalten."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:272
 msgid "`unrecorded_decisions` counts reservation attempts lost at the record limit. Repeated packets may increment it repeatedly; it is not a once-per-leg outcome count."
 msgstr "`unrecorded_decisions` zählt Zuordnungsversuche, die an der Datensatzgrenze verloren gehen. Wiederholte Pakete können den Zähler mehrfach erhöhen; er ist kein Ergebniszähler mit einer Zählung pro Anrufabschnitt."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:275
 msgid "When a dedicated correlation store is owned, `li_call_correlation.storage` reports its actual state, commit outcomes, faults, key IDs and cryptographic usage. This field is absent for memory-only grouping; it never exposes store paths or key material."
 msgstr "Wenn ein eigener Korrelationsspeicher vorhanden ist, meldet `li_call_correlation.storage` dessen tatsächlichen Zustand, Commit-Ergebnisse, Fehler, Schlüssel-IDs und kryptografische Nutzung. Bei rein speicherinterner Gruppierung fehlt dieses Feld; Speicherpfade oder Schlüsselmaterial werden niemals offengelegt."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:279
 msgid "Calling and called identities come from the complete extracted From/To URI, preferring the address inside angle brackets. Extraction removes the `sip:`, `sips:` or `tel:` scheme, URI/header parameters after `;` or `?`, and a single-colon SIP host port. Comparison preserves the user or telephone value, including case and digits, and lowercases only the host after `@`; IPv6 host spelling is preserved apart from case. It never compares suffixes, strips telephone punctuation or applies operator-specific digit rewrites."
 msgstr "Anrufende und angerufene Identitäten stammen aus der vollständig extrahierten From/To-URI; die Adresse in Winkelklammern hat Vorrang. Die Extraktion entfernt das Schema `sip:`, `sips:` oder `tel:`, URI-/Kopfzeilenparameter nach `;` oder `?` sowie einen SIP-Host-Port mit einem einzelnen Doppelpunkt. Der Vergleich erhält den Benutzer- oder Telefonwert einschließlich Groß-/Kleinschreibung und Ziffern und schreibt nur den Host nach `@` klein; die IPv6-Hostschreibweise bleibt abgesehen von der Groß-/Kleinschreibung erhalten. Es werden niemals Suffixe verglichen, Telefonzeichen entfernt oder betreiberspezifische Ziffern umgeschrieben."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:287
 msgid "SDP roles are learned from retained initial transactions. A retransmitted initial INVITE can establish a previously missing offer without changing its first decision. A response-only observation remains unknown; an observed request without SDP can establish a delayed offer in a successful response. Its ACK answer requires a unique retained Call-ID, From-tag and CSeq association, even when the ACK uses a new Via branch. Unknown or ambiguous associations provide no S evidence. Raw SIP requires framed `application/sdp` content; Content-Length bounds the body, so a following pipelined message cannot become SDP evidence."
 msgstr "SDP-Rollen werden aus aufbewahrten initialen Transaktionen ermittelt. Ein wiederholtes initiales INVITE kann ein zuvor fehlendes Offer feststellen, ohne seine Erstentscheidung zu ändern. Eine ausschließlich beobachtete Antwort bleibt unbekannt; bei einer beobachteten Anfrage ohne SDP kann eine erfolgreiche Antwort ein verzögertes Offer feststellen. Dessen ACK-Answer erfordert eine eindeutige aufbewahrte Zuordnung von Call-ID, From-Tag und CSeq, auch wenn das ACK einen neuen Via-Branch verwendet. Unbekannte oder mehrdeutige Zuordnungen liefern keine S-Evidenz. Rohes SIP erfordert abgegrenzten `application/sdp`-Inhalt; Content-Length begrenzt den Body, damit eine folgende Nachricht im selben Datenstrom nicht zur SDP-Evidenz werden kann."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:296
 msgid "Restoring an adopted child preserves its original group ID and common-task context. Seeing the original root Call-ID again intersects that retained context rather than creating a broader group for the same ID. An empty intersection still preserves already selected IDs but cannot admit another leg through correlation. Reactivated task generations do not restore lost eligibility."
 msgstr "Die Wiederherstellung eines zugeordneten Kindes erhält dessen ursprüngliche Gruppen-ID und Kontext gemeinsamer Aufgaben. Wird die ursprüngliche Root-Call-ID erneut gesehen, wird dieser aufbewahrte Kontext geschnitten, statt eine breitere Gruppe für dieselbe ID anzulegen. Eine leere Schnittmenge erhält bereits ausgewählte IDs, kann aber keinen weiteren Abschnitt durch Korrelation aufnehmen. Erneut aktivierte Aufgabengenerationen stellen verlorene Zulässigkeit nicht wieder her."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:178
 msgid "Common-task membership includes the administrative state incarnation as well as XID and activation generation. Persistent deployments use the authenticated administrative store incarnation; stateless deployments use a fresh runtime incarnation. Replacing administrative storage or restarting without it therefore cannot make a reused XID and generation join a stale restored group. Retained adopted decisions still reuse their selected IDs, but new legs cannot join through stale task contexts."
 msgstr "Die Zugehörigkeit zu gemeinsamen Aufgaben umfasst neben XID und Aktivierungsgeneration auch die Inkarnation des administrativen Zustands. Persistente Deployments verwenden die authentifizierte Inkarnation des administrativen Speichers; zustandslose Deployments verwenden eine neue Laufzeitinkarnation. Das Ersetzen des administrativen Speichers oder ein Neustart ohne diesen kann daher nicht bewirken, dass eine wiederverwendete XID und Generation einer veralteten wiederhergestellten Gruppe beitreten. Aufbewahrte zugeordnete Entscheidungen verwenden weiterhin ihre ausgewählten IDs, aber neue Abschnitte können nicht über veraltete Aufgabenkontexte beitreten."
 
@@ -33403,7 +33405,7 @@ msgstr ""
 "Start des konfigurierten Speichers lösen niemals einen automatischen Wechsel "
 "zum Betrieb ohne Speicher aus."
 
-#: src/part5-advanced/lawful-interception.md:547
+#: src/part5-advanced/sip-call-leg-correlation.md:123
 msgid ""
 "A retained first decision always wins. For a new eligible initial "
 "transaction, the order is trusted session headers (H) and parent Call-ID "
@@ -33428,7 +33430,7 @@ msgstr ""
 "getrennt. Jede Methode wird unabhängig aktiviert. Bereits veröffentlichte "
 "Gruppen werden niemals nachträglich zusammengeführt."
 
-#: src/part5-advanced/lawful-interception.md:555
+#: src/part5-advanced/sip-call-leg-correlation.md:131
 msgid ""
 "`session_headers` accepts arbitrary valid SIP header names, matched case-"
 "insensitively. Session-ID selects the initiating UUID: local in a request, "
@@ -33461,7 +33463,7 @@ msgstr ""
 "übergeordneten Call-ID; unbekannte, spätere oder selbstreferenzierende "
 "Verweise können ein veröffentlichtes Kind nicht neu gruppieren."
 
-#: src/part5-advanced/lawful-interception.md:567
+#: src/part5-advanced/sip-call-leg-correlation.md:143
 msgid ""
 "R1 compares initial INVITE transport addresses within `address_window` and "
 "before the relevant final response. `node_aliases` is a list of disjoint "
@@ -33490,7 +33492,7 @@ msgstr ""
 "Ankunftsfolge A,C,B in einer Kette A → B → C können einen Anruf aufgeteilt "
 "lassen."
 
-#: src/part5-advanced/lawful-interception.md:577
+#: src/part5-advanced/sip-call-leg-correlation.md:153
 msgid ""
 "S compares the full SDP origin `(username, sess-id, nettype, addrtype, "
 "unicast-address)`; version is revision metadata. Offer and answer roles "
@@ -33531,7 +33533,7 @@ msgstr ""
 "Zurücksetzen macht sie dauerhaft ungültig; neue Historie kann ältere "
 "Kandidaten nicht wieder gültig machen."
 
-#: src/part5-advanced/lawful-interception.md:703
+#: src/part5-advanced/sip-call-leg-correlation.md:302
 msgid ""
 "Matching windows use packet capture timestamps; a missing timestamp falls "
 "back to processor time. Retention and observation expiry use processor time. "
@@ -33590,7 +33592,7 @@ msgid ""
 "checked again when deferred packets resume."
 msgstr "Prozessor und Tap stellen Pakete für ausstehende Entscheidungen außerhalb der Paketpipeline zurück, begrenzt auf höchstens `max_candidates` Pakete und 32 MiB angerechnete Paketdaten. Überlauf weist zusätzliche Pakete dieses ausstehenden Call-Legs zurück, statt eine andere ID zu veröffentlichen; ein neuer Call-Leg ohne reservierbare Rückstellkapazität bleibt eigenständig. Aufgabenautorisierung und Zielzulassung werden beim Fortsetzen zurückgestellter Pakete erneut geprüft."
 
-#: src/part5-advanced/lawful-interception.md:730
+#: src/part5-advanced/sip-call-leg-correlation.md:370
 msgid ""
 "Configured storage must be available, initialized, authenticated and "
 "correctly bound at startup. Recover offline by restoring an authenticated "
@@ -33608,7 +33610,7 @@ msgstr ""
 "wechselt niemals automatisch in diesen Modus oder ersetzt einen beschädigten "
 "Speicher."
 
-#: src/part5-advanced/lawful-interception.md:736
+#: src/part5-advanced/sip-call-leg-correlation.md:376
 msgid ""
 "First-time grouping requires an observed initial INVITE request or retained "
 "evidence for that exact transaction. A response-only leg reserves standalone "
@@ -33670,8 +33672,8 @@ msgid ""
 "evidence cannot authorize media between maintenance ticks."
 msgstr "Die Wiederholungswartung führt globale Ablaufscans für Replay-Schutzdatensätze und Quarantäne durch, begrenzt durch konfigurierte Kapazitäten. Die SIP-Verarbeitung prüft logische Fristen nur für die betroffene Lebenszeit, den exakten Schutzdatensatz und die Anrufwiederherstellung; abgelaufene Hinweise können zwischen Wartungsschritten keine Medien autorisieren."
 
+#: src/part5-advanced/sip-call-leg-correlation.md:362
 
-#: src/part5-advanced/lawful-interception.md:724
 msgid ""
 "Activity and terminal-retention changes are coalesced into the next "
 "maintenance write. Canonical persisted content determines whether a snapshot "
@@ -33695,7 +33697,7 @@ msgstr ""
 "Veröffentlichungsbuchführung läuft nach Freigabe der "
 "Ausleitungszulassungssperren und erhält die teilweise Annahme durch Ziele."
 
-#: src/part5-advanced/lawful-interception.md:744
+#: src/part5-advanced/sip-call-leg-correlation.md:384
 msgid ""
 "`unresolved_writes` is an aggregate condition count: one per pending adopted "
 "decision plus one when any uncertain snapshot remains unresolved. It does "
@@ -33723,7 +33725,7 @@ msgstr ""
 "über die Statuskodierung hinweg stabil; die Telemetrie enthält nur "
 "aggregierte Zähler."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:219
 msgid ""
 "`wait_timeout` defaults to `5s` and fixes the wait deadline when an "
 "adoption is reserved; later packets do not renew it. Deadline expiry or "
@@ -33741,7 +33743,7 @@ msgstr ""
 "stabil; Autorisierung, Abbruch und der ursprüngliche Produktablauf gelten "
 "weiterhin."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:225
 msgid ""
 "`shutdown_timeout` defaults to `10s` and supplies one shared correlation "
 "shutdown budget for maintenance, pending decisions and close. It is "
@@ -33950,7 +33952,7 @@ msgstr ""
 "abgelehnte Beweise können zwischen Wartungsläufen keine Medien "
 "autorisieren."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:310
 msgid ""
 "A single store owner performs storage I/O outside the correlator decision "
 "mutex. Each adoption has one fixed `wait_timeout` deadline, starting when "
@@ -33997,7 +33999,7 @@ msgstr ""
 "Ablehnung kann die Ausleitung verhindern; Korrelation verlängert die "
 "Produktlebensdauer nicht."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:332
 msgid ""
 "Once released, the selected ID cannot change even if the delayed write "
 "reports NotCommitted. The physical owner remains exclusive until I/O "
@@ -34050,7 +34052,7 @@ msgstr ""
 "Schließaufrufe teilen diese spätere Bereinigung und können keine "
 "konkurrierenden Schreiber starten."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:388
 msgid ""
 "`deferred_packets` and `deferred_bytes` report the current pending-packet "
 "handoff usage; `deferred_rejected` is retained for status compatibility; "
@@ -34170,7 +34172,7 @@ msgstr ""
 "Quarantänewiederherstellung für nachfolgende Überlastintervalle "
 "konservativ deaktiviert, statt Generationen umlaufen zu lassen."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:317
 msgid ""
 "Processor and tap retain at most `max_candidates` deferred packets "
 "(default 10,000) and 32 MiB of accounted packet data globally outside "
@@ -34213,7 +34215,7 @@ msgstr ""
 "Ablehnung kann die Ausleitung verhindern; Korrelation verlängert die "
 "Produktlebensdauer nicht."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:339
 msgid ""
 "`shutdown_timeout` defaults to 10 seconds and bounds the shared "
 "correlation shutdown wait, including maintenance and close. Both timeout "
@@ -34256,7 +34258,7 @@ msgstr ""
 "Anruflebensdauer während eines zeitlich begrenzten Leerens erhält; "
 "Callbacks nach dem Schließen allein zuzulassen reicht nicht aus."
 
-#: src/part5-advanced/lawful-interception.md
+#: src/part5-advanced/sip-call-leg-correlation.md:354
 msgid ""
 "If the shutdown budget expires, independent processor cleanup continues "
 "with an error and warning. The active storage operation cannot be "
@@ -34275,3 +34277,607 @@ msgstr ""
 "Ressourcen seien schon freigegeben. Wiederholte Schließaufrufe teilen "
 "diese spätere Bereinigung und können keine konkurrierenden Schreiber "
 "starten."
+
+#: src/SUMMARY.md:50 src/part5-advanced/sip-call-leg-correlation.md:1
+msgid "SIP Call-Leg Correlation (LI)"
+msgstr "SIP-Anrufabschnittskorrelation (LI)"
+
+#: src/part5-advanced/voip.md:44
+msgid "Multiple legs of one call"
+msgstr "Mehrere Abschnitte eines Anrufs"
+
+#: src/part5-advanced/voip.md:46
+msgid "A PBX or session border controller may create a new SIP leg with another Call-ID. For LI delivery, processor and tap can optionally group related legs using trusted SIP headers, SDP origin or configured address and identity heuristics. See [SIP Call-Leg Correlation (LI)](sip-call-leg-correlation.md) for diagrams and matching rules. This grouping controls X2/X3 Correlation IDs; ordinary SIP dialog tracking and RTP association are described in this chapter."
+msgstr ""
+"Eine PBX oder ein Session Border Controller kann einen neuen SIP-Abschnitt "
+"mit einer anderen Call-ID erzeugen. Für die LI-Ausleitung können Prozessor "
+"und Tap verwandte Abschnitte optional anhand vertrauenswürdiger SIP-Header, "
+"des SDP-Ursprungs oder konfigurierter Adress- und Identitätsheuristiken "
+"gruppieren. Diagramme und Abgleichregeln finden Sie unter "
+"[SIP-Anrufabschnittskorrelation (LI)](sip-call-leg-correlation.md). Diese "
+"Gruppierung steuert X2/X3-Correlation-IDs; die gewöhnliche "
+"SIP-Dialogverfolgung und RTP-Zuordnung werden in diesem Kapitel beschrieben."
+
+#: src/part5-advanced/lawful-interception.md:540
+msgid "A call can have several SIP legs with different Call-IDs. Optional call-leg correlation in processor and tap can give those legs one shared X2/X3 Correlation ID, while preserving packet selection and task authorization. All matching methods are disabled by default; the MDF owns final CIN interpretation and deduplication."
+msgstr ""
+"Ein Anruf kann mehrere SIP-Abschnitte mit unterschiedlichen Call-IDs haben. "
+"Die optionale Anrufabschnittskorrelation in Prozessor und Tap kann diesen "
+"Abschnitten eine gemeinsame X2/X3-Correlation-ID geben und dabei "
+"Paketauswahl und Aufgabenautorisierung erhalten. Alle Abgleichmethoden sind "
+"standardmäßig deaktiviert; die endgültige CIN-Interpretation und "
+"Deduplizierung liegen beim MDF."
+
+#: src/part5-advanced/lawful-interception.md:545
+msgid "See [SIP Call-Leg Correlation (LI)](sip-call-leg-correlation.md) for visual examples, the matching hierarchy, configurable SIP headers, SDP-origin matching, configuration, limits and restart behavior."
+msgstr ""
+"Visuelle Beispiele, die Abgleichhierarchie, konfigurierbare SIP-Header, den "
+"SDP-Ursprungsabgleich, Konfiguration, Grenzen und Neustartverhalten finden "
+"Sie unter [SIP-Anrufabschnittskorrelation (LI)](sip-call-leg-correlation.md)."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:3
+msgid "A call passing through a PBX or session border controller can appear as several SIP legs with different Call-IDs. Optional LI call-leg correlation lets a processor or tap recognize related legs and select one shared X2/X3 Correlation ID for them. Each leg keeps its own SIP identity and source packets."
+msgstr ""
+"Ein Anruf, der eine PBX oder einen Session Border Controller durchläuft, "
+"kann als mehrere SIP-Abschnitte mit unterschiedlichen Call-IDs erscheinen. "
+"Die optionale LI-Anrufabschnittskorrelation ermöglicht einem Prozessor oder "
+"Tap, verwandte Abschnitte zu erkennen und eine gemeinsame "
+"X2/X3-Correlation-ID für sie auszuwählen. Jeder Abschnitt behält seine "
+"eigene SIP-Identität und seine Quellpakete."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:8
+msgid "This page explains LI delivery grouping. See [VoIP: SIP and RTP Analysis](voip.md) for SIP dialog tracking and RTP association, and [Lawful Interception](lawful-interception.md#x2x3-delivery) for the surrounding authorization and delivery setup. Monitoring/TUI call grouping is a separate mechanism and does not use this LI matching hierarchy."
+msgstr ""
+"Diese Seite erklärt die Gruppierung für die LI-Ausleitung. Unter [VoIP: SIP- "
+"und RTP-Analyse](voip.md) finden Sie die SIP-Dialogverfolgung und "
+"RTP-Zuordnung; unter [Rechtmäßige "
+"Telekommunikationsüberwachung](lawful-interception.md#x2x3-delivery) die "
+"zugehörige Autorisierungs- und Ausleitungseinrichtung. Die Anrufgruppierung "
+"für Monitoring/TUI ist ein separater Mechanismus und verwendet diese "
+"LI-Abgleichhierarchie nicht."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:13
+msgid "From separate legs to one delivery group"
+msgstr "Von getrennten Abschnitten zu einer Ausleitungsgruppe"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:15
+msgid ""
+"The example shows three observed legs of one call. A PBX and an SBC "
+"originate new legs, so Call-ID alone cannot link the entire path. When "
+"enabled evidence identifies one eligible group, lippycat joins the new leg "
+"to it. The first selected Call-ID supplies the group's Correlation ID. In "
+"this example, leg A is selected first; the letters are illustrative "
+"identifiers."
+msgstr ""
+"Das Beispiel zeigt drei beobachtete Abschnitte eines Anrufs. Eine PBX und "
+"ein SBC erzeugen neue Abschnitte, sodass die Call-ID allein den gesamten "
+"Pfad nicht verknüpfen kann. Wenn aktivierte Hinweise eine zulässige Gruppe "
+"identifizieren, ordnet lippycat den neuen Abschnitt dieser Gruppe zu. Die "
+"erste ausgewählte Call-ID liefert die Correlation-ID der Gruppe. In diesem "
+"Beispiel wird Abschnitt A zuerst ausgewählt; die Buchstaben sind "
+"beispielhafte Kennungen."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:39
+msgid "Grouping preserves a common active LI task generation across all members. It does not authorize another leg or broaden an interception task. X2 and X3 retain their own products and use the shared ID; lippycat does not allocate the MDF's final CIN. If a leg already has a retained decision, later evidence cannot move it to another group. Published groups are never merged retrospectively."
+msgstr ""
+"Die Gruppierung erhält eine gemeinsame aktive LI-Aufgabengeneration über "
+"alle Mitglieder hinweg. Sie autorisiert keinen weiteren Abschnitt und "
+"erweitert keine Überwachungsaufgabe. X2 und X3 behalten ihre eigenen "
+"Produkte und verwenden die gemeinsame ID; lippycat vergibt nicht die "
+"endgültige CIN des MDF. Hat ein Abschnitt bereits eine aufbewahrte "
+"Entscheidung, können spätere Hinweise ihn keiner anderen Gruppe zuordnen. "
+"Veröffentlichte Gruppen werden niemals rückwirkend zusammengeführt."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:45
+msgid "Signals and their priority"
+msgstr "Signale und ihre Priorität"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:47
+msgid "Each matching method is independently configurable and disabled by default. The table lists the order for a new eligible initial transaction. H and P form one trusted tier: lippycat checks their agreement before considering weaker signals."
+msgstr ""
+"Jede Abgleichmethode ist unabhängig konfigurierbar und standardmäßig "
+"deaktiviert. Die Tabelle zeigt die Reihenfolge für eine neue zulässige "
+"initiale Transaktion. H und P bilden eine gemeinsame vertrauenswürdige "
+"Stufe: lippycat prüft ihre Übereinstimmung, bevor schwächere Signale "
+"berücksichtigt werden."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:51
+msgid "Priority"
+msgstr "Priorität"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:51
+msgid "Signal"
+msgstr "Signal"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:51
+msgid "What must agree"
+msgstr "Erforderliche Übereinstimmung"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:53
+msgid "1: H / P"
+msgstr "1: H / P"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:53
+msgid "Trusted SIP session header or explicit parent Call-ID"
+msgstr "Vertrauenswürdiger SIP-Sitzungsheader oder explizite übergeordnete Call-ID"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:53
+msgid "Extracted session key of the same header type, or an exact retained parent Call-ID; all trusted associations must identify one eligible group"
+msgstr ""
+"Extrahierter Sitzungsschlüssel desselben Headertyps oder eine exakte "
+"aufbewahrte übergeordnete Call-ID; alle vertrauenswürdigen Zuordnungen "
+"müssen eine zulässige Gruppe identifizieren"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:53
+msgid "`session_headers`, `parent_call_id_headers`"
+msgstr "`session_headers`, `parent_call_id_headers`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:54
+msgid "2: S"
+msgstr "2: S"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:54
+msgid "SDP origin"
+msgstr "SDP-Ursprung"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:54
+msgid "Full origin tuple and the same offer/answer role, with usable retained origin history"
+msgstr ""
+"Vollständiges Ursprungstupel und dieselbe Offer/Answer-Rolle mit nutzbarem "
+"aufbewahrtem Ursprungsverlauf"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:54
+msgid "`sdp_origin_matching`"
+msgstr "`sdp_origin_matching`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:55
+msgid "3: R1"
+msgstr "3: R1"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:55
+msgid "Address chain with the same called identity"
+msgstr "Adresskette mit derselben angerufenen Identität"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:55
+msgid "Adjacent signaling addresses, overlapping setup, capture-time window and exact called identity"
+msgstr ""
+"Benachbarte Signalisierungsadressen, überlappender Rufaufbau, "
+"Mitschnittzeitfenster und exakte angerufene Identität"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:55
+msgid "`address_chaining`, `address_window`, `node_aliases`"
+msgstr "`address_chaining`, `address_window`, `node_aliases`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:56
+msgid "4: R2"
+msgstr "4: R2"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:56
+msgid "Calling/called identity pair"
+msgstr "Paar aus anrufender und angerufener Identität"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:56
+msgid "Exact pair inside a symmetric capture-time window, with no eligible address-chain candidate"
+msgstr ""
+"Exaktes Paar innerhalb eines symmetrischen Mitschnittzeitfensters ohne "
+"zulässigen Adresskettenkandidaten"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:56
+msgid "`number_chaining`, `number_window`"
+msgstr "`number_chaining`, `number_window`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:57
+msgid "5: rewritten R1"
+msgstr "5: R1 mit umgeschriebenen Identitäten"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:57
+msgid "Address chain with rewritten identities"
+msgstr "Adresskette mit umgeschriebenen Identitäten"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:57
+msgid "Exactly one eligible address-chain candidate and no address candidate with the same called identity"
+msgstr ""
+"Genau ein zulässiger Adresskettenkandidat und kein Adresskandidat mit "
+"derselben angerufenen Identität"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:57
+msgid "`address_chaining_rewritten`, `address_window`, `node_aliases`"
+msgstr "`address_chaining_rewritten`, `address_window`, `node_aliases`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:59
+msgid "For H, `session_headers` can name Session-ID, P-Charging-Vector or a proprietary header. The standard headers use their specific UUID or `icid-value` extraction; proprietary headers use the complete trimmed value. P uses `parent_call_id_headers` to name headers that explicitly carry another leg's Call-ID. Configuration order does not make one trusted header override a conflicting one."
+msgstr ""
+"Für H kann `session_headers` Session-ID, P-Charging-Vector oder einen "
+"proprietären Header nennen. Die Standardheader verwenden ihre spezifische "
+"UUID- bzw. `icid-value`-Extraktion; proprietäre Header verwenden den "
+"vollständigen Wert ohne umgebenden Leerraum. P verwendet "
+"`parent_call_id_headers` für Header, die ausdrücklich die Call-ID eines "
+"anderen Abschnitts enthalten. Die Konfigurationsreihenfolge bewirkt nicht, "
+"dass ein vertrauenswürdiger Header einen widersprüchlichen überschreibt."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:65
+msgid "S uses SDP's `o=` origin, not media addresses from `c=` or `m=` lines. R1 compares signaling transport addresses, optionally treating configured aliases as one node. R1 and R2 compare complete canonical SIP identities rather than telephone-number suffixes. SDP reuse protections and the exact extraction rules are described below."
+msgstr ""
+"S verwendet den SDP-Ursprung `o=`, nicht die Medienadressen aus `c=`- oder "
+"`m=`-Zeilen. R1 vergleicht Signalisierungs-Transportadressen und behandelt "
+"konfigurierte Aliasse optional als einen Knoten. R1 und R2 vergleichen "
+"vollständige kanonische SIP-Identitäten statt Rufnummernsuffixen. Die "
+"Schutzmechanismen gegen SDP-Wiederverwendung und die genauen "
+"Extraktionsregeln werden unten beschrieben."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:70
+msgid "How the decision is made"
+msgstr "Wie die Entscheidung getroffen wird"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:72
+msgid ""
+"A retained decision takes precedence over every signal. A new leg needs an "
+"observed initial INVITE request before it can join a group. Response-only "
+"capture and an X3-first leg cannot use later evidence to replace their "
+"retained standalone decisions. New adoption also depends on retained state, "
+"capacity, the decision horizon and storage availability."
+msgstr ""
+"Eine aufbewahrte Entscheidung hat Vorrang vor jedem Signal. Ein neuer "
+"Abschnitt benötigt eine beobachtete initiale INVITE-Anfrage, bevor er einer "
+"Gruppe beitreten kann. Ein Mitschnitt ausschließlich von Antworten und ein "
+"zuerst über X3 beobachteter Abschnitt können spätere Hinweise nicht nutzen, "
+"um ihre aufbewahrten eigenständigen Entscheidungen zu ersetzen. Eine neue "
+"Zuordnung hängt außerdem vom aufbewahrten Zustand, der Kapazität, dem "
+"Entscheidungshorizont und der Speicherverfügbarkeit ab."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:78
+msgid "The diagram shows the retained-decision check, eligibility check and matching sequence. Every candidate must be live and belong to a resolved group sharing an active task context with the new leg. Disabled methods are skipped. A successful match stops the search; signals are not added together as a confidence score."
+msgstr ""
+"Das Diagramm zeigt die Prüfung auf eine aufbewahrte Entscheidung, die "
+"Zulässigkeitsprüfung und die Abgleichreihenfolge. Jeder Kandidat muss noch "
+"gültig sein und zu einer Gruppe mit geklärtem Zustand gehören, die einen "
+"aktiven Aufgabenkontext mit dem neuen Abschnitt teilt. Deaktivierte Methoden "
+"werden übersprungen. Ein erfolgreicher Abgleich beendet die Suche; Signale "
+"werden nicht zu einem Konfidenzwert addiert."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:107
+msgid "Conflicting trusted evidence stops matching rather than falling through to a heuristic. Missing or ambiguous SDP evidence permits weaker matching. R1 and R2 ambiguity is between groups; rewritten R1 requires exactly one address candidate even when several candidates would belong to the same group. A parent reference that cannot be resolved also stops matching. The address and identity heuristics can group unrelated calls, so enable them only after checking the signaling behavior of the deployment."
+msgstr ""
+"Widersprüchliche vertrauenswürdige Hinweise stoppen den Abgleich, statt auf "
+"eine Heuristik zurückzufallen. Fehlende oder mehrdeutige SDP-Hinweise "
+"erlauben schwächere Abgleiche. Die Mehrdeutigkeit von R1 und R2 betrifft "
+"verschiedene Gruppen; R1 mit umgeschriebenen Identitäten erfordert genau "
+"einen Adresskandidaten, auch wenn mehrere Kandidaten derselben Gruppe "
+"angehören würden. Ein nicht auflösbarer Verweis auf einen übergeordneten "
+"Abschnitt stoppt den Abgleich ebenfalls. Die Adress- und "
+"Identitätsheuristiken können unbeteiligte Anrufe gruppieren; aktivieren Sie "
+"sie daher erst, nachdem Sie das Signalisierungsverhalten der Installation "
+"geprüft haben."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:114
+msgid "Matching and eligibility reference"
+msgstr "Referenz zu Abgleich und Zulässigkeit"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:185
+msgid "Dedicated store and restart continuity"
+msgstr "Eigener Speicher und Neustartkontinuität"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:263
+msgid "Status and evidence lifecycle"
+msgstr "Status und Lebenszyklus der Hinweise"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:308
+msgid "Pending decisions and shutdown"
+msgstr "Ausstehende Entscheidungen und Herunterfahren"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:360
+msgid "Durable snapshots and recovery"
+msgstr "Dauerhafte Snapshots und Wiederherstellung"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:382
+msgid "Counter definitions"
+msgstr "Zählerdefinitionen"
+
+#: src/appendices/config-reference.md:634
+msgid "Optional SIP call-leg grouping uses `processor.li.correlation` or `tap.li.correlation`, with every matching rule disabled by default. The [call-leg correlation reference](../part5-advanced/sip-call-leg-correlation.md#correlation-configuration) lists all keys, matching precedence, bounds, restart limitations and dedicated encrypted-store setup. Configuration is independent of task authorization and source packet selection. Response-only legs require retained initial-request evidence; storage backlog leaves new adoptions standalone. Configured-store startup errors never trigger automatic store-free fallback."
+msgstr ""
+"Die optionale SIP-Anrufabschnittsgruppierung verwendet "
+"`processor.li.correlation` oder `tap.li.correlation`; alle Abgleichregeln "
+"sind standardmäßig deaktiviert. Die [Referenz zur "
+"Anrufabschnittskorrelation](../part5-advanced/sip-call-leg-correlation.md#correlation-configuration) "
+"enthält alle Schlüssel, Abgleichprioritäten, Grenzen, "
+"Neustarteinschränkungen und die Einrichtung des eigenen verschlüsselten "
+"Speichers. Die Konfiguration ist unabhängig von Aufgabenautorisierung und "
+"Quellpaketauswahl. Nur in Antworten beobachtete Call-Legs erfordern "
+"gespeicherte Hinweise auf die initiale Anfrage; Speicherrückstand lässt neue "
+"Übernahmen eigenständig. Fehler beim Start des konfigurierten Speichers "
+"lösen niemals einen automatischen Wechsel zum Betrieb ohne Speicher aus."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:48
+msgid ""
+"Each matching method is independently configurable and disabled by default. "
+"The table lists the order for a new eligible initial transaction. Trusted "
+"session headers and parent Call-ID references form one tier: lippycat checks "
+"their agreement before considering weaker signals."
+msgstr ""
+"Jede Abgleichmethode ist unabhängig konfigurierbar und standardmäßig "
+"deaktiviert. Die Tabelle zeigt die Reihenfolge für eine neue zulässige "
+"initiale Transaktion. Vertrauenswürdige Sitzungsheader und übergeordnete "
+"Call-ID-Verweise bilden eine gemeinsame Stufe: lippycat prüft ihre "
+"Übereinstimmung, bevor schwächere Signale berücksichtigt werden."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:55
+msgid "Trusted session headers and parent Call-ID references"
+msgstr "Vertrauenswürdige Sitzungsheader und übergeordnete Call-ID-Verweise"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:56
+#: src/part5-advanced/sip-call-leg-correlation.md:388
+msgid "SDP origin matching"
+msgstr "SDP-Ursprungsabgleich"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:57
+#: src/part5-advanced/sip-call-leg-correlation.md:389
+msgid "Address chaining with the same called identity"
+msgstr "Adressverkettung mit derselben angerufenen Identität"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:58
+#: src/part5-advanced/sip-call-leg-correlation.md:390
+msgid "Exact calling/called identity matching"
+msgstr "Exakter Abgleich anrufender/angerufener Identitäten"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:59
+#: src/part5-advanced/sip-call-leg-correlation.md:391
+msgid "Address chaining with rewritten identities"
+msgstr "Adressverkettung mit umgeschriebenen Identitäten"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:61
+msgid ""
+"For trusted session-header matching, `session_headers` can name Session-ID, "
+"P-Charging-Vector or a proprietary header. The standard headers use their "
+"specific UUID or `icid-value` extraction; proprietary headers use the "
+"complete trimmed value. Parent Call-ID matching uses "
+"`parent_call_id_headers` to name headers that explicitly carry another leg's "
+"Call-ID. Configuration order does not make one trusted header override a "
+"conflicting one."
+msgstr ""
+"Für den Abgleich vertrauenswürdiger Sitzungsheader kann `session_headers` "
+"Session-ID, P-Charging-Vector oder einen proprietären Header nennen. Die "
+"Standardheader verwenden ihre spezifische UUID- bzw. "
+"`icid-value`-Extraktion; proprietäre Header verwenden den vollständigen Wert "
+"ohne umgebenden Leerraum. Der Abgleich übergeordneter Call-IDs verwendet "
+"`parent_call_id_headers` für Header, die ausdrücklich die Call-ID eines "
+"anderen Abschnitts enthalten. Die Konfigurationsreihenfolge bewirkt nicht, "
+"dass ein vertrauenswürdiger Header einen widersprüchlichen überschreibt."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:68
+msgid ""
+"SDP origin matching uses SDP's `o=` origin, not media addresses from `c=` or "
+"`m=` lines. Address chaining compares signaling transport addresses, "
+"optionally treating configured aliases as one node. Address chaining with "
+"the same called identity and exact calling/called identity matching compare "
+"complete canonical SIP identities rather than telephone-number suffixes. SDP "
+"reuse protections and the exact extraction rules are described below."
+msgstr ""
+"Der SDP-Ursprungsabgleich verwendet den SDP-Ursprung `o=`, nicht die "
+"Medienadressen aus `c=`- oder `m=`-Zeilen. Adressverkettung vergleicht "
+"Signalisierungs-Transportadressen und behandelt konfigurierte Aliasse "
+"optional als einen Knoten. Adressverkettung mit derselben angerufenen "
+"Identität und der exakte Abgleich anrufender/angerufener Identitäten "
+"vergleichen vollständige kanonische SIP-Identitäten statt "
+"Rufnummernsuffixen. Die Schutzmechanismen gegen SDP-Wiederverwendung und die "
+"genauen Extraktionsregeln werden unten beschrieben."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:101
+msgid ""
+"Conflicting trusted evidence stops matching rather than falling through to a "
+"heuristic. Missing or ambiguous SDP evidence permits weaker matching. "
+"Address chaining with the same called identity and exact calling/called "
+"identity matching treat multiple eligible groups as ambiguous. Address "
+"chaining with rewritten identities requires exactly one address candidate "
+"even when several candidates would belong to the same group. A parent "
+"reference that cannot be resolved also stops matching. The address and "
+"identity heuristics can group unrelated calls, so enable them only after "
+"checking the signaling behavior of the deployment."
+msgstr ""
+"Widersprüchliche vertrauenswürdige Hinweise stoppen den Abgleich, statt auf "
+"eine Heuristik zurückzufallen. Fehlende oder mehrdeutige SDP-Hinweise "
+"erlauben schwächere Abgleiche. Adressverkettung mit derselben angerufenen "
+"Identität und der exakte Abgleich anrufender/angerufener Identitäten "
+"behandeln mehrere zulässige Gruppen als mehrdeutig. Adressverkettung mit "
+"umgeschriebenen Identitäten erfordert genau einen Adresskandidaten, auch "
+"wenn mehrere Kandidaten derselben Gruppe angehören würden. Ein nicht "
+"auflösbarer Verweis auf einen übergeordneten Abschnitt stoppt den Abgleich "
+"ebenfalls. Die Adress- und Identitätsheuristiken können unbeteiligte Anrufe "
+"gruppieren; aktivieren Sie sie daher erst, nachdem Sie das "
+"Signalisierungsverhalten der Installation geprüft haben."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:118
+msgid ""
+"A retained first decision always wins. For a new eligible initial "
+"transaction, the order is trusted session headers and parent Call-ID "
+"references, SDP origin matching, address chaining with the same called "
+"identity, exact calling/called identity matching, then address chaining with "
+"rewritten identities. Disagreement or ambiguity in trusted headers or parent "
+"references, or an exact association without a common active task, leaves the "
+"leg separate without trying weaker evidence. Unusable or ambiguous SDP "
+"origin evidence falls through; ambiguous weaker matches leave the leg "
+"separate. Enable each method independently. Already published groups are "
+"never merged retrospectively."
+msgstr ""
+"Eine aufbewahrte Erstentscheidung hat immer Vorrang. Bei einer neuen "
+"zulässigen initialen Transaktion gilt folgende Reihenfolge: "
+"vertrauenswürdige Sitzungsheader und übergeordnete Call-ID-Verweise, "
+"SDP-Ursprungsabgleich, Adressverkettung mit derselben angerufenen Identität, "
+"exakter Abgleich anrufender/angerufener Identitäten, danach Adressverkettung "
+"mit umgeschriebenen Identitäten. Widerspruch oder Mehrdeutigkeit in "
+"vertrauenswürdigen Headern oder übergeordneten Verweisen oder eine exakte "
+"Zuordnung ohne gemeinsame aktive Aufgabe lassen den Abschnitt getrennt, ohne "
+"schwächere Hinweise zu prüfen. Unbrauchbare oder mehrdeutige "
+"SDP-Ursprungshinweise erlauben den Rückgriff auf schwächere Regeln; "
+"mehrdeutige schwächere Treffer lassen den Abschnitt getrennt. Jede Methode "
+"wird unabhängig aktiviert. Bereits veröffentlichte Gruppen werden niemals "
+"nachträglich zusammengeführt."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:140
+msgid ""
+"Address chaining compares initial INVITE transport addresses within "
+"`address_window` and before the relevant final response. `node_aliases` is a "
+"list of disjoint address lists, each representing one node; it does not "
+"rewrite calling or called identities. Compare complete canonical identities, "
+"never number suffixes or deployment-specific digit substitutions. Exact "
+"calling/called identity matching requires the exact pair within "
+"`number_window` and no address match; its capture-time window is symmetric, "
+"including the boundary, so reversed arrival can match. Address chaining with "
+"rewritten identities requires one eligible address candidate and no "
+"called-number candidate. These heuristics can falsely group unrelated calls; "
+"missing observations and A,C,B arrival in an A → B → C chain can leave one "
+"call split."
+msgstr ""
+"Adressverkettung vergleicht Transportadressen initialer INVITEs innerhalb "
+"von `address_window` und vor der zugehörigen endgültigen Antwort. "
+"`node_aliases` ist eine Liste disjunkter Adresslisten, die jeweils einen "
+"Knoten darstellen; anrufende oder angerufene Identitäten werden nicht "
+"umgeschrieben. Verglichen werden vollständige kanonische Identitäten, "
+"niemals Rufnummernsuffixe oder deploymentspezifische Ziffernersetzungen. Der "
+"exakte Abgleich anrufender/angerufener Identitäten erfordert das exakte Paar "
+"innerhalb von `number_window` und keinen Adresstreffer; sein auf "
+"Mitschnittzeiten bezogenes Fenster ist einschließlich der Grenze "
+"symmetrisch, sodass auch umgekehrte Ankunftsreihenfolge passen kann. "
+"Adressverkettung mit umgeschriebenen Identitäten erfordert einen zulässigen "
+"Adresskandidaten und keinen Kandidaten mit gleicher angerufener Nummer. "
+"Diese Heuristiken können unabhängige Anrufe fälschlich gruppieren; fehlende "
+"Beobachtungen und die Ankunftsfolge A,C,B in einer Kette A → B → C können "
+"einen Anruf aufgeteilt lassen."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:150
+msgid ""
+"SDP origin matching compares the full SDP origin `(username, sess-id, "
+"nettype, addrtype, unicast-address)`; version is revision metadata. Offer "
+"and answer roles remain separate; an unknown role supplies no evidence. "
+"Distinct initial transactions update an independent bounded history before "
+"matching. Reuse spanning more than `sdp_origin_reuse_window`, or "
+"contradictory trusted values of the same header type, suspends that origin. "
+"Retransmissions neither refresh observation TTL nor renew suspension. "
+"Ordinary suspension deadlines are fixed; distinct use during a period renews "
+"it once at expiry. The exact transaction set is bounded to 256 entries per "
+"origin and role. Exhausting that set or the per-origin trusted-key bound "
+"quarantines only that origin; any traffic, including retransmissions, "
+"restarts its traffic-free observation-TTL quiet period because distinctness "
+"can no longer be established. This overload policy is separate from ordinary "
+"suspension. Tracked-origin capacity exhaustion disables SDP-origin matching "
+"globally instead of evicting incomplete history. Candidate evidence carries "
+"an observation generation: expiry, release or reset invalidates it "
+"permanently, and fresh history cannot revive an older candidate."
+msgstr ""
+"Der SDP-Ursprungsabgleich vergleicht den vollständigen SDP-Ursprung "
+"`(username, sess-id, nettype, addrtype, unicast-address)`; die Version ist "
+"Revisionsmetadatum. Offer- und Answer-Rollen bleiben getrennt; eine "
+"unbekannte Rolle liefert keine Evidenz. Unterschiedliche initiale "
+"Transaktionen aktualisieren vor dem Abgleich einen unabhängigen begrenzten "
+"Verlauf. Wiederverwendung über mehr als `sdp_origin_reuse_window` oder "
+"widersprüchliche vertrauenswürdige Werte desselben Kopfzeilentyps sperren "
+"diesen Ursprung. Wiederholungen erneuern weder die Beobachtungs-TTL noch die "
+"Sperre. Gewöhnliche Sperrfristen bleiben fest; eine unterschiedliche Nutzung "
+"während eines Zeitraums verlängert die Sperre bei Ablauf einmal. Die exakte "
+"Transaktionsmenge ist auf 256 Einträge je Origin und Rolle begrenzt. Ihre "
+"Erschöpfung oder die Überschreitung der originbezogenen Grenze für "
+"vertrauenswürdige Schlüssel isoliert nur diesen Origin; jeglicher Verkehr, "
+"einschließlich Wiederholungen, startet dessen verkehrsfreie Ruhefrist über "
+"die Beobachtungs-TTL neu, da unterschiedliche Transaktionen nicht mehr "
+"sicher erkennbar sind. Diese Überlastregel ist von der gewöhnlichen Sperre "
+"getrennt. Die Erschöpfung der Kapazität für erfasste Origins deaktiviert den "
+"SDP-Ursprungsabgleich global, statt unvollständige Historie zu verdrängen. "
+"Kandidatenhinweise tragen eine Beobachtungsgeneration: Ablauf, Freigabe oder "
+"Zurücksetzen macht sie dauerhaft ungültig; neue Historie kann ältere "
+"Kandidaten nicht wieder gültig machen."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:284
+msgid ""
+"SDP roles are learned from retained initial transactions. A retransmitted "
+"initial INVITE can establish a previously missing offer without changing its "
+"first decision. A response-only observation remains unknown; an observed "
+"request without SDP can establish a delayed offer in a successful response. "
+"Its ACK answer requires a unique retained Call-ID, From-tag and CSeq "
+"association, even when the ACK uses a new Via branch. Unknown or ambiguous "
+"associations provide no SDP-origin evidence. Raw SIP requires framed "
+"`application/sdp` content; Content-Length bounds the body, so a following "
+"pipelined message cannot become SDP evidence."
+msgstr ""
+"SDP-Rollen werden aus aufbewahrten initialen Transaktionen ermittelt. Ein "
+"wiederholtes initiales INVITE kann ein zuvor fehlendes Offer feststellen, "
+"ohne seine Erstentscheidung zu ändern. Eine ausschließlich beobachtete "
+"Antwort bleibt unbekannt; bei einer beobachteten Anfrage ohne SDP kann eine "
+"erfolgreiche Antwort ein verzögertes Offer feststellen. Dessen ACK-Answer "
+"erfordert eine eindeutige aufbewahrte Zuordnung von Call-ID, From-Tag und "
+"CSeq, auch wenn das ACK einen neuen Via-Branch verwendet. Unbekannte oder "
+"mehrdeutige Zuordnungen liefern keine SDP-Ursprungsevidenz. Rohes SIP "
+"erfordert abgegrenzten `application/sdp`-Inhalt; Content-Length begrenzt den "
+"Body, damit eine folgende Nachricht im selben Datenstrom nicht zur "
+"SDP-Evidenz werden kann."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:373
+msgid ""
+"First-time grouping requires an observed initial INVITE request or retained "
+"evidence for that exact transaction. A response-only leg reserves standalone "
+"even when trusted session headers or SDP origin would otherwise match; CSeq "
+"values (including zero) and response To-tags cannot prove that a response "
+"belongs to an initial INVITE. Responses to re-INVITEs, unknown transactions "
+"and response-first capture do not change retained decisions."
+msgstr ""
+"Die erstmalige Gruppierung erfordert eine beobachtete initiale "
+"INVITE-Anfrage oder gespeicherte Hinweise für genau diese Transaktion. Ein "
+"nur in Antworten beobachteter Call-Leg wird eigenständig reserviert, auch "
+"wenn vertrauenswürdige Sitzungsheader oder der SDP-Ursprung sonst passen "
+"würden; CSeq-Werte einschließlich null und To-Tags in Antworten beweisen "
+"nicht, dass eine Antwort zu einem initialen INVITE gehört. Antworten auf "
+"re-INVITEs, unbekannte Transaktionen und zuerst erfasste Antworten ändern "
+"gespeicherte Entscheidungen nicht."
+
+#: src/part5-advanced/sip-call-leg-correlation.md:381
+msgid ""
+"The adopted-rule counters in `lc show status` retain short implementation "
+"codes. Use this mapping when reading the `adopted` map under "
+"`li_call_correlation`:"
+msgstr ""
+"Die Zähler für angewendete Zuordnungsregeln in `lc show status` behalten "
+"kurze Implementierungscodes bei. Verwenden Sie diese Zuordnung beim Lesen "
+"der Map `adopted` unter `li_call_correlation`:"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:384
+msgid "Status code"
+msgstr "Statuscode"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:384
+msgid "Matching method"
+msgstr "Abgleichmethode"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:386
+msgid "`H`"
+msgstr "`H`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:386
+msgid "Trusted session headers"
+msgstr "Vertrauenswürdige Sitzungsheader"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:387
+msgid "`P`"
+msgstr "`P`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:387
+msgid "Parent Call-ID references"
+msgstr "Übergeordnete Call-ID-Verweise"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:388
+msgid "`S`"
+msgstr "`S`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:389
+msgid "`R1`"
+msgstr "`R1`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:390
+msgid "`R2`"
+msgstr "`R2`"
+
+#: src/part5-advanced/sip-call-leg-correlation.md:391
+msgid "`R1_rewritten`"
+msgstr "`R1_rewritten`"
+
+#: src/part5-advanced/protocol-deep-dives.md:8
+msgid "[SIP Call-Leg Correlation (LI)](sip-call-leg-correlation.md): grouping related SIP legs for authorized X2/X3 delivery."
+msgstr "[SIP-Anrufabschnittskorrelation (LI)](sip-call-leg-correlation.md): Gruppierung verwandter SIP-Abschnitte für die autorisierte X2/X3-Ausleitung."

@@ -38,15 +38,16 @@
 
 - [Security](part5-advanced/security.md)
 - [Performance Optimization](part5-advanced/performance.md)
+- [Lawful Interception](part5-advanced/lawful-interception.md)
 - [Protocol Deep Dives](part5-advanced/protocol-deep-dives.md)
   - [VoIP: SIP and RTP Analysis](part5-advanced/voip.md)
+  - [SIP Call-Leg Correlation (LI)](part5-advanced/sip-call-leg-correlation.md)
   - [DNS Analysis](part5-advanced/dns.md)
   - [TLS Inspection](part5-advanced/tls.md)
   - [HTTP Analysis](part5-advanced/http.md)
   - [Email Protocol Analysis](part5-advanced/email.md)
   - [RADIUS Capture and POI](part5-advanced/radius.md)
 - [Structured Protocol Logs](part5-advanced/structured-protocol-logs.md)
-- [Lawful Interception](part5-advanced/lawful-interception.md)
 - [Troubleshooting](part5-advanced/troubleshooting.md)
 
 ---

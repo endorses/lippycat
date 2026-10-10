@@ -182,21 +182,21 @@ address. For example: “Starten Sie den Prozessor mit folgendem Befehl.”
 Use clear technical German and retain established acronyms such as CLI, TUI,
 PCAP, TLS, SIP, and RTP. Keep these terms consistent:
 
-| English                  | German                                         |
-| ------------------------ | ---------------------------------------------- |
-| packet capture (process) | Paketerfassung                                 |
-| capture (result)         | Paketmitschnitt / Mitschnitt                   |
-| capture file             | Mitschnittdatei / PCAP-Datei                   |
-| packet                   | Paket                                          |
-| processor                | Prozessor                                      |
-| hunter node              | Hunter-Knoten                                  |
-| tap node                 | Tap-Knoten                                     |
-| network interface        | Netzwerkschnittstelle                          |
-| network segment          | Netzwerksegment                                |
-| protocol analysis        | Protokollanalyse                               |
-| LI delivery              | Ausleitung                                     |
-| data/event delivery      | Übermittlung                                   |
-| lawful interception      | rechtmäßige Telekommunikationsüberwachung (LI) |
+| English                  | German                                                                            |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| packet capture (process) | Paketerfassung                                                                    |
+| capture (result)         | Paketmitschnitt / Mitschnitt                                                      |
+| capture file             | Mitschnittdatei / PCAP-Datei                                                      |
+| packet                   | Paket                                                                             |
+| processor                | Prozessor                                                                         |
+| hunter node              | Hunter-Knoten                                                                     |
+| tap node                 | Tap-Knoten                                                                        |
+| network interface        | Netzwerkschnittstelle                                                             |
+| network segment          | Netzwerksegment                                                                   |
+| protocol analysis        | Protokollanalyse                                                                  |
+| LI delivery              | Ausleitung                                                                        |
+| data/event delivery      | Übermittlung                                                                      |
+| lawful interception      | rechtmäßige Telekommunikationsüberwachung (englisch Lawful Interception, kurz LI) |
 
 Distinguish the process from its result: use **Paketerfassung** or **Pakete
 erfassen** for the activity, and **Paketmitschnitt**, **Mitschnitt**, or
@@ -216,6 +216,10 @@ when referring to their UI labels.
 Translate **operational** according to the technical context. For the section
 covering setup, certificate rotation, and logging, translate **Operational
 Considerations** as **Hinweise zu Einrichtung und Wartung**.
+
+At first mention in a translated chapter, include **Lawful Interception** alongside
+the translated term and **LI**, so the origin of the abbreviation is clear. Later
+mentions can use the translated term or **LI**.
 
 For lawful interception, translate **delivery** as **Ausleitung** (for example,
 “X2-IRI-Ausleitung” and “X3-CC-Ausleitung”). Use **Übermittlung** for general

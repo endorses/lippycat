@@ -3,37 +3,29 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 (() => {
-    const darkThemes = ['ayu', 'navy', 'coal'];
-    const lightThemes = ['light', 'rust'];
+  const darkThemes = ["ayu", "navy", "coal"];
+  const classList = document.getElementsByTagName("html")[0].classList;
+  const isLightTheme = () =>
+    !darkThemes.some((theme) => classList.contains(theme));
+  const initiallyLight = isLightTheme();
 
-    const classList = document.getElementsByTagName('html')[0].classList;
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: initiallyLight ? "default" : "dark",
+    // SVG text avoids fixed-size HTML label boxes clipping on mobile browsers.
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
+    // Keep connecting lines from showing through the SVG label backgrounds.
+    themeCSS: ".edgeLabel rect { opacity: 1; }",
+  });
 
-    let lastThemeWasLight = true;
-    for (const cssClass of classList) {
-        if (darkThemes.includes(cssClass)) {
-            lastThemeWasLight = false;
-            break;
-        }
+  // Reload across light/dark themes so Mermaid picks up the new colors.
+  new MutationObserver(() => {
+    if (isLightTheme() !== initiallyLight) {
+      window.location.reload();
     }
-
-    const theme = lastThemeWasLight ? 'default' : 'dark';
-    mermaid.initialize({ startOnLoad: true, theme });
-
-    // Simplest way to make mermaid re-render the diagrams in the new theme is via refreshing the page
-
-    for (const darkTheme of darkThemes) {
-        document.getElementById(darkTheme).addEventListener('click', () => {
-            if (lastThemeWasLight) {
-                window.location.reload();
-            }
-        });
-    }
-
-    for (const lightTheme of lightThemes) {
-        document.getElementById(lightTheme).addEventListener('click', () => {
-            if (!lastThemeWasLight) {
-                window.location.reload();
-            }
-        });
-    }
+  }).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
 })();

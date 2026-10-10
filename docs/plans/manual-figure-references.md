@@ -10,7 +10,7 @@ figure catalog so numbers, captions, and destinations stay synchronized.
 - [x] Document authoring syntax and validate translation marker preservation.
 - [x] Verify forward/cross-chapter links, list entries, print behavior, and language switching in tests and the browser.
 - [x] Run `make manual-check`, strict translation checking, and `make manual`.
-- [ ] Commit the verified implementation and plan.
+- [x] Commit the verified implementation and plan.
 
 The original numbered-figure implementation is already closed. This plan covers
 only the requested references and appendix extension; existing diagram content
@@ -31,3 +31,6 @@ editions and their print output, verified language switching and navigation
 without JavaScript, and checked desktop English and 320-pixel German navy
 layouts. Screenshot review found no clipped entries. Formatter checks and
 `git diff --check` passed. Temporary browser artifacts were removed after review.
+
+Implementation and plan committed as `16f121a8` on
+`docs/manual-numbered-figures`; the working tree was clean after the commit.

@@ -32755,6 +32755,33 @@ msgstr ""
 "Startsynchronisierung gleicht `GetAllDetails` den Zustand nach dem Neustart "
 "ab (siehe [ADMF-Zustandssynchronisierung](#admf-state-synchronization))."
 
+#: src/part2-local-capture/watch-local.md:9
+msgid ""
+"![lippycat live capture with protocol-colored packets and the selected "
+"packet's details, layers, and hex dump](../assets/live-packet-details.png)"
+msgstr ""
+"![Live-Paketerfassung mit lippycat, nach Protokoll eingefärbten Paketen "
+"sowie Details, Protokollschichten und Hexdump des ausgewählten Pakets](../"
+"assets/live-packet-details.png)"
+
+#: src/part2-local-capture/watch-local.md:11
+msgid ""
+"<figcaption>Live packet capture with the packet details pane enabled.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Live-Paketerfassung mit eingeblendetem Detailbereich.</"
+"figcaption>\n"
+
+#: src/part2-local-capture/watch-local.md:111
+msgid ""
+"Press `d` on the Capture tab to toggle the packet details pane shown in "
+"{{#figure fig-live-packet-details}}. It shows the selected packet's "
+"metadata, protocol layers, and hex dump."
+msgstr ""
+"Drücken Sie im Capture-Tab `d`, um den in {{#figure fig-live-packet-"
+"details}} gezeigten Detailbereich ein- oder auszublenden. Er zeigt die "
+"Metadaten, Protokollschichten und den Hexdump des ausgewählten Pakets."
+
 #~ msgid "Maximum concurrent goroutines for call processing."
 #~ msgstr "Maximale Anzahl gleichzeitiger Goroutinen zur Anrufverarbeitung."
 

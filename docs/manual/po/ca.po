@@ -35792,3 +35792,31 @@ msgstr ""
 "Amb la sincronització d’inici activada, `GetAllDetails` reconcilia l’estat "
 "després del reinici (vegeu [Sincronització de l’estat ADMF](#admf-state-"
 "synchronization))."
+
+#: src/part2-local-capture/watch-local.md:9
+msgid ""
+"![lippycat live capture with protocol-colored packets and the selected "
+"packet's details, layers, and hex dump](../assets/live-packet-details.png)"
+msgstr ""
+"![Captura en directe amb lippycat, paquets acolorits segons el protocol i "
+"detalls, capes i bolcat hexadecimal del paquet seleccionat](../assets/live-"
+"packet-details.png)"
+
+#: src/part2-local-capture/watch-local.md:11
+msgid ""
+"<figcaption>Live packet capture with the packet details pane enabled.</"
+"figcaption>\n"
+msgstr ""
+"<figcaption>Captura de paquets en directe amb el panell de detalls del "
+"paquet activat.</figcaption>\n"
+
+#: src/part2-local-capture/watch-local.md:111
+msgid ""
+"Press `d` on the Capture tab to toggle the packet details pane shown in "
+"{{#figure fig-live-packet-details}}. It shows the selected packet's "
+"metadata, protocol layers, and hex dump."
+msgstr ""
+"Premeu `d` a la pestanya Capture per mostrar o amagar el panell de detalls "
+"del paquet que es mostra a {{#figure fig-live-packet-details}}. Mostra les "
+"metadades, les capes de protocol i el bolcat hexadecimal del paquet "
+"seleccionat."

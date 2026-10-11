@@ -95,6 +95,27 @@ The skip comments keep wrappers and diagram code unchanged across languages;
 translate the caption text while preserving its `<figcaption>` tags. Keep captions
 on one source line. Do not type figure numbers into the source.
 
+Screenshots can use the same wrapper with one Markdown image instead of a diagram:
+
+```markdown
+<!-- i18n:skip -->
+
+<figure id="fig-packet-capture">
+
+![Live packet capture with the packet details pane enabled.](images/packet-capture.png)
+
+<figcaption>Live packet capture with the packet details pane enabled.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
+```
+
+Give the image nonempty descriptive alt text, and translate it along with the
+caption while preserving the image path. Keep the complete image on its own line.
+Images are centered and shrink to fit the chapter width. Unnumbered images, such
+as the introductory demo, can remain outside figure wrappers.
+
 The figures preprocessor runs after Gettext and before Mermaid. It numbers figures
 continuously in `SUMMARY.md` reading order, including nested chapters, and writes
 localized labels (`Figure`, `Abbildung`, `Figura`) into the HTML. Individual
@@ -113,7 +134,8 @@ in reading order using the same localized captions and numbers; do not maintain
 a second list of captions or numbers. Link labels and destinations are generated
 at build time, including in the print edition and without JavaScript.
 
-Every figure must contain exactly one Mermaid diagram and a nonempty caption.
+Every figure must contain exactly one Mermaid diagram or Markdown image and a
+nonempty caption, placed after the diagram or image.
 Missing wrappers, malformed markup, and duplicate anchors fail the build with
 chapter context. When adding a language, add its figure label in `tools/figures.py`.
 Caption text is searchable, and caption styling follows the current theme and

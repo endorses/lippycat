@@ -9,9 +9,15 @@ figure[data-figure-number] .mermaid {
   overflow-x: auto;
 }
 
-figure[data-figure-number] .mermaid svg {
+figure[data-figure-number] .mermaid svg,
+figure[data-figure-number] img {
   display: block;
   margin-inline: auto;
+}
+
+figure[data-figure-number] img {
+  max-width: 100%;
+  height: auto;
 }
 
 figure[data-figure-number] figcaption {

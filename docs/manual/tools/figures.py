@@ -1,4 +1,4 @@
-"""Number semantic Mermaid figures before mdBook renders the manual."""
+"""Number semantic diagram and image figures before mdBook renders the manual."""
 
 import copy
 import html
@@ -16,6 +16,11 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 REFERENCE = re.compile(r"\{\{#figure (fig-[a-z][a-z0-9]*(?:-[a-z0-9]+)*)\}\}")
 LIST_MARKER = "{{#figure-list}}"
 INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)")
+IMAGE = re.compile(
+    r"!\[(?P<alt>(?:\\.|[^\]\\])*)\]"
+    r"\((?:<[^<>\n]+>|[^\s()]+)"
+    r"(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\)"
+)
 
 
 @dataclass(frozen=True)
@@ -84,7 +89,7 @@ def parse_figures(content, chapter="<content>"):
     identifiers = set()
     current = None
     fence = None
-    diagram_count = 0
+    media_count = 0
     caption = None
 
     def fail(message, line):
@@ -110,12 +115,18 @@ def parse_figures(content, chapter="<content>"):
                 if current is None:
                     fail("Mermaid diagram must be wrapped in a numbered figure", index)
                 if caption is not None:
-                    fail("figure caption must follow its diagram", index)
-                diagram_count += 1
-                if diagram_count > 1:
-                    fail("figure must contain exactly one Mermaid diagram", index)
+                    fail("figure caption must follow its diagram or image", index)
+                media_count += 1
+                if media_count > 1:
+                    fail(
+                        "figure must contain exactly one Mermaid diagram or image",
+                        index,
+                    )
             elif current is not None:
-                fail("figure may contain only a Mermaid diagram and its caption", index)
+                fail(
+                    "figure may contain only a Mermaid diagram or image and its caption",
+                    index,
+                )
             fence = (marker[0], len(marker), mermaid)
             continue
 
@@ -130,8 +141,19 @@ def parse_figures(content, chapter="<content>"):
                 fail(f"duplicate figure identifier {identifier}", index)
             identifiers.add(identifier)
             current = (identifier, index)
-            diagram_count = 0
+            media_count = 0
             caption = None
+        elif current is not None and stripped.startswith("!["):
+            matched = IMAGE.fullmatch(stripped)
+            if matched is None:
+                fail("use one complete Markdown image on its own line", index)
+            if not html.unescape(matched.group("alt")).strip():
+                fail("figure image must have nonempty alt text", index)
+            if caption is not None:
+                fail("figure caption must follow its diagram or image", index)
+            media_count += 1
+            if media_count > 1:
+                fail("figure must contain exactly one Mermaid diagram or image", index)
         elif "<figcaption" in stripped or "</figcaption" in stripped:
             if current is None:
                 fail("figure caption is outside a figure", index)
@@ -144,20 +166,27 @@ def parse_figures(content, chapter="<content>"):
             visible = html.unescape(re.sub(r"<[^>]*>", "", text)).strip()
             if not visible:
                 fail("figure caption must not be empty", index)
-            if diagram_count != 1:
-                fail("figure caption must follow exactly one Mermaid diagram", index)
+            if media_count != 1:
+                fail(
+                    "figure caption must follow exactly one Mermaid diagram or image",
+                    index,
+                )
             caption = (index, text)
         elif "</figure" in stripped:
             if stripped != "</figure>" or current is None:
                 fail("unmatched or malformed figure closing tag", index)
-            if diagram_count != 1 or caption is None:
+            if media_count != 1 or caption is None:
                 fail(
-                    "figure requires exactly one Mermaid diagram and one caption", index
+                    "figure requires exactly one Mermaid diagram or image and one caption",
+                    index,
                 )
             figures.append(Figure(*current, *caption))
             current = None
         elif current is not None and stripped not in ("", "<!-- i18n:skip -->"):
-            fail("figure may contain only a Mermaid diagram and its caption", index)
+            fail(
+                "figure may contain only a Mermaid diagram or image and its caption",
+                index,
+            )
 
     if current is not None:
         fail("unclosed figure or Mermaid fence", current[1])

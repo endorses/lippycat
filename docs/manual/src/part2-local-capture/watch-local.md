@@ -2,6 +2,18 @@
 
 `lc watch` provides an interactive Terminal User Interface (TUI) for real-time packet monitoring. If `lc sniff` is like tcpdump, then `lc watch` is like Wireshark — but in your terminal.
 
+<!-- i18n:skip -->
+
+<figure id="fig-live-packet-details">
+
+![lippycat live capture with protocol-colored packets and the selected packet's details, layers, and hex dump](../assets/live-packet-details.png)
+
+<figcaption>Live packet capture with the packet details pane enabled.</figcaption>
+
+<!-- i18n:skip -->
+
+</figure>
+
 ## Live Capture Mode {#live-capture-mode}
 
 ### Starting Live Capture {#starting-live-capture}
@@ -95,6 +107,8 @@ The Capture tab is the main view. Navigate with vim-style keys:
 | `v`             | Toggle view mode (packets / protocol-specific) |
 | `x`             | Flush/clear all packets                        |
 | `w`             | Save packets to PCAP                           |
+
+Press `d` on the Capture tab to toggle the packet details pane shown in {{#figure fig-live-packet-details}}. It shows the selected packet's metadata, protocol layers, and hex dump.
 
 ### Filtering in the TUI {#filtering-in-the-tui}
 

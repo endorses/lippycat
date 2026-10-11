@@ -1,4 +1,4 @@
-"""Checks for localized figure numbering and validated Mermaid author markup."""
+"""Checks for localized figure numbering and validated diagram/image markup."""
 
 import json
 import shutil
@@ -18,6 +18,14 @@ def figure(identifier="fig-overview", caption="Overview of the nodes."):
         f'<figure id="{identifier}">\n\n'
         "<!-- i18n:skip -->\n\n"
         "```mermaid\ngraph LR\n    A --> B\n```\n\n"
+        f"<figcaption>{caption}</figcaption>\n\n</figure>\n"
+    )
+
+
+def image_figure(identifier="fig-capture", caption="Live capture with details."):
+    return (
+        f'<figure id="{identifier}">\n\n'
+        "![Live packet list with packet details.](images/capture.png)\n\n"
         f"<figcaption>{caption}</figcaption>\n\n</figure>\n"
     )
 
@@ -79,6 +87,68 @@ class FigureTests(unittest.TestCase):
         output = figures.preprocess({"items": [chapter(figure())]}, "en")
         self.assertNotIn("sections", output)
         self.assertIn("Figure\u00a01:", output["items"][0]["Chapter"]["content"])
+
+    def test_image_figures_share_numbering_references_and_localized_list(self):
+        captions = {
+            "en": "Live capture with details.",
+            "de": "Live-Erfassung mit Paketdetails.",
+            "ca": "Captura en directe amb detalls.",
+        }
+        for language, label in figures.LABELS.items():
+            with self.subTest(language=language):
+                image = image_figure(caption=captions[language])
+                original = (
+                    "See {{#figure fig-capture}}.\n\n"
+                    + figure()
+                    + "\n"
+                    + image
+                    + "\n{{#figure-list}}\n"
+                )
+                output = figures.preprocess({"items": [chapter(original)]}, language)[
+                    "items"
+                ][0]["Chapter"]["content"]
+                self.assertIn(f"[{label}\u00a02](#fig-capture)", output)
+                self.assertIn(f"{label}\u00a02:</span> {captions[language]}", output)
+                self.assertIn(
+                    f"- [{label}\u00a02: {captions[language][:-1]}\\.](#fig-capture)",
+                    output,
+                )
+                self.assertIn(
+                    "![Live packet list with packet details.](images/capture.png)",
+                    output,
+                )
+                self.assertEqual(
+                    figures.annotation_fingerprint(original),
+                    ["fig-overview", "fig-capture"],
+                )
+
+    def test_unnumbered_images_remain_unchanged(self):
+        content = "![Introduction demo.](images/demo.gif)\n"
+        self.assertEqual(figures.parse_figures(content), [])
+        self.assertEqual(
+            figures.preprocess({"items": [chapter(content)]}, "en")["items"][0][
+                "Chapter"
+            ]["content"],
+            content,
+        )
+
+    def test_image_alt_escapes_and_optional_title(self):
+        for markup in (
+            r'![Packet \[details\].](images/capture.png "Capture")',
+            "![Packet details.](<images/packet capture.png>)",
+        ):
+            with self.subTest(markup=markup):
+                self.assertEqual(
+                    len(
+                        figures.parse_figures(
+                            image_figure().replace(
+                                "![Live packet list with packet details.](images/capture.png)",
+                                markup,
+                            )
+                        )
+                    ),
+                    1,
+                )
 
     def test_forward_nested_and_same_chapter_references(self):
         detail = chapter(
@@ -221,6 +291,25 @@ class FigureTests(unittest.TestCase):
             "additional body": figure().replace("</figure>", "Extra text.\n</figure>"),
             "other code": figure().replace("```mermaid", "```sh"),
             "caption first": '<figure id="fig-first">\n<figcaption>First.</figcaption>\n',
+            "duplicate image": image_figure().replace(
+                "<figcaption>", "![Another image.](other.png)\n\n<figcaption>"
+            ),
+            "mixed media": figure().replace(
+                "<figcaption>", "![Another image.](other.png)\n\n<figcaption>"
+            ),
+            "mixed media image first": image_figure().replace(
+                "<figcaption>", "```mermaid\ngraph LR\n A --> B\n```\n\n<figcaption>"
+            ),
+            "empty alt": image_figure().replace(
+                "Live packet list with packet details.", " &nbsp; "
+            ),
+            "malformed image": image_figure().replace("capture.png)", "capture.png"),
+            "two images on a line": image_figure().replace(
+                "capture.png)", "capture.png) ![Other.](other.png)"
+            ),
+            "image after caption": image_figure().replace(
+                "</figure>", "![Other.](other.png)\n\n</figure>"
+            ),
         }
         for name, content in examples.items():
             with (
@@ -293,7 +382,9 @@ class FigureTests(unittest.TestCase):
             (root / "src" / "SUMMARY.md").write_text(
                 "# Summary\n\n- [Overview](overview.md)\n"
             )
-            (root / "src" / "overview.md").write_text("# Overview\n\n" + figure())
+            (root / "src" / "overview.md").write_text(
+                "# Overview\n\n" + figure() + "\n" + image_figure()
+            )
             (root / "book.toml").write_text(
                 '[book]\ntitle = "Test figures"\nlanguage = "de"\nsrc = "src"\n'
                 "[output.html]\n[preprocessor.figures]\n"
@@ -312,6 +403,12 @@ class FigureTests(unittest.TestCase):
                 self.assertIn('class="figure-label">Abbildung\u00a01:</span>', output)
                 self.assertIn('class="language-mermaid"', output)
                 self.assertNotIn("```mermaid", output)
+                self.assertIn('<figure id="fig-capture" aria-labelledby=', output)
+                self.assertIn('class="figure-label">Abbildung\u00a02:</span>', output)
+                self.assertIn(
+                    '<img src="images/capture.png" alt="Live packet list with packet details."',
+                    output,
+                )
 
     @unittest.skipUnless(shutil.which("mdbook"), "mdBook is not installed")
     def test_mdbook_resolves_cross_references_and_list_in_chapters_and_print(self):

@@ -17,24 +17,26 @@ Capture and analyze traffic on any interface. Filter by protocol, host, port, or
 Track SIP calls end-to-end, correlate RTP streams, and write per-call PCAP files. Monitor call quality metrics and detect issues in real time.
 
 **Security Monitoring**
-Inspect TLS handshakes, detect protocol anomalies, and capture traffic for forensic analysis. Supports ESP-NULL decapsulation for encrypted tunnel inspection.
+Inspect TLS handshakes, detect protocol anomalies, and capture traffic for forensic analysis. Supports ESP-NULL decapsulation for inspecting unencrypted traffic carried inside IPsec.
 
 **Distributed Capture**
 Deploy lightweight hunter nodes across network segments and aggregate traffic at a central <span data-term="processor">processor</span>. Monitor everything from a single TUI.
 
 ## Comparison with Similar Tools {#comparison-with-similar-tools}
 
-| Feature             | tcpdump | Wireshark | tshark    | lippycat |
-| ------------------- | ------- | --------- | --------- | -------- |
-| CLI capture         | Yes     | No        | Yes       | Yes      |
-| Interactive TUI     | No      | GUI       | No        | Yes      |
-| Protocol analysis   | Basic   | Extensive | Extensive | Focused* |
-| Distributed capture | No      | No        | No        | Yes      |
-| Per-call VoIP PCAP  | No      | No        | No        | Yes      |
-| GPU acceleration    | No      | No        | No        | Yes      |
-| Remote monitoring   | No      | No        | No        | Yes      |
+| Feature             | tcpdump | Wireshark | tshark    | termshark  | lippycat  |
+| ------------------- | ------- | --------- | --------- | ---------- | --------- |
+| CLI capture         | Yes     | No        | Yes       | Via tshark | Yes       |
+| Interactive TUI     | No      | GUI       | No        | Yes        | Yes       |
+| Protocol analysis   | Basic   | Extensive | Extensive | Via tshark | Focused\* |
+| Distributed capture | No      | No        | No        | No         | Yes       |
+| Per-call VoIP PCAP  | No      | No        | No        | No         | Yes       |
+| GPU acceleration    | No      | No        | No        | No         | Yes       |
+| Remote monitoring   | No      | No        | No        | No         | Yes       |
 
 _lippycat_ focuses on DNS, TLS, HTTP, email, RADIUS, and VoIP protocols with deep analysis for each.
+
+[termshark](https://github.com/gcla/termshark) provides a Wireshark-inspired terminal interface backed by tshark for live capture and PCAP inspection. It can run on a remote host over SSH; the remote monitoring row refers to built-in connections to capture and processing nodes.
 
 **When to use lippycat over alternatives:**
 
@@ -48,6 +50,7 @@ _lippycat_ focuses on DNS, TLS, HTTP, email, RADIUS, and VoIP protocols with dee
 - You need to dissect obscure or proprietary protocols (Wireshark)
 - You need a quick one-liner packet dump (tcpdump)
 - You need extensive protocol statistics (tshark)
+- You want Wireshark-style packet inspection in a terminal using tshark's protocol dissectors (termshark)
 
 ## Command Overview {#command-overview}
 

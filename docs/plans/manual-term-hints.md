@@ -295,3 +295,29 @@ each language. All 60 extracted reference destinations per edition exist,
 including their section anchors. Desktop and mobile screenshots confirm readable
 inline links. `make manual-check manual` builds every edition, and strict checking
 confirms German and Catalan each retain 5,714/5,714 translated current messages.
+
+## Follow-up: termshark comparison and VoIP/ESP glossary entries
+
+Extend the introduction's comparison with termshark, explaining its tshark-backed
+terminal interface and distinguishing inspection over SSH from native capture-node
+monitoring. Add localized glossary definitions and automatic hints for VoIP and ESP,
+including the ESP-NULL alias and its unencrypted payload behavior. Align the
+introduction's ESP-NULL description with that distinction.
+
+- [x] Update the English introduction, glossary, and hint matching policy.
+- [x] Translate new and changed messages in German and Catalan.
+- [x] Verify termshark's comparison column and localized VoIP/ESP definitions and hints.
+- [x] Run manual checks, strict translation validation, and build every edition.
+- [x] Format the changes and plan.
+- [x] Commit the changes and plan.
+
+Validation: `make manual-check manual` passes all 44 Python checks and builds
+English, German, and Catalan. Strict translation validation confirms 5,722/5,722
+current messages translated in each catalog. All 15 existing browser checks pass;
+an additional temporary smoke check verifies the six-column comparison table,
+VoIP/ESP glossary entries, desktop hover, and mobile taps/reference navigation in
+every edition. Termshark's capabilities were checked against its
+[official user guide](https://github.com/gcla/termshark/blob/master/docs/UserGuide.md);
+ESP and ESP-NULL terminology were checked against
+[RFC 4303](https://www.rfc-editor.org/info/rfc4303/) and
+[RFC 2410](https://www.rfc-editor.org/info/rfc2410/).

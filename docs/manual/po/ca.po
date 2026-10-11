@@ -12483,6 +12483,24 @@ msgstr ""
 "advanced/dns.md)."
 
 #: src/appendices/glossary.md:22
+msgid "<span id=\"term-esp\" data-glossary-term=\"esp\">**ESP**</span>"
+msgstr "<span id=\"term-esp\" data-glossary-term=\"esp\">**ESP**</span>"
+
+#: src/appendices/glossary.md:22
+msgid ""
+"Encapsulating Security Payload. An IPsec protocol that protects IP traffic "
+"with encryption and/or integrity authentication. ESP-NULL uses no payload "
+"encryption, so lippycat can decapsulate it for SIP/RTP analysis; this does "
+"not decrypt encrypted ESP. See [ESP-NULL Decapsulation](../part2-local-"
+"capture/sniff.md#esp-null-decapsulation)."
+msgstr ""
+"Encapsulating Security Payload. Un protocol IPsec que protegeix el trànsit "
+"IP amb xifratge i/o autenticació de la integritat. ESP-NULL no xifra la "
+"càrrega útil, de manera que lippycat la pot desencapsular per analitzar SIP/"
+"RTP; això no desxifra ESP xifrat. Consulteu [desencapsulació ESP-NULL](../"
+"part2-local-capture/sniff.md#esp-null-decapsulation)."
+
+#: src/appendices/glossary.md:22
 msgid "<span id=\"term-etsi\" data-glossary-term=\"etsi\">**ETSI**</span>"
 msgstr "<span id=\"term-etsi\" data-glossary-term=\"etsi\">**ETSI**</span>"
 
@@ -13162,6 +13180,23 @@ msgstr ""
 "utilitzada per a injecció o reproducció de paquets, o comunicació entre "
 "màquines virtuals. Es pot utilitzar com a interfície de captura. Consulteu "
 "[captura CLI amb `lc sniff`](../part2-local-capture/sniff.md)."
+
+#: src/appendices/glossary.md:64
+msgid "<span id=\"term-voip\" data-glossary-term=\"voip\">**VoIP**</span>"
+msgstr "<span id=\"term-voip\" data-glossary-term=\"voip\">**VoIP**</span>"
+
+#: src/appendices/glossary.md:64
+msgid ""
+"Voice over Internet Protocol. Voice communication carried over IP networks, "
+"commonly using SIP for signaling and RTP for media. lippycat tracks calls, "
+"analyzes media quality, and writes per-call PCAP files. See [VoIP: SIP and "
+"RTP Analysis](../part5-advanced/voip.md)."
+msgstr ""
+"Voice over Internet Protocol (veu sobre IP). Comunicació de veu transportada "
+"per xarxes IP, habitualment amb SIP per a la senyalització i RTP per als "
+"mitjans. lippycat segueix les trucades, analitza la qualitat dels mitjans i "
+"escriu fitxers PCAP per trucada. Consulteu [VoIP: anàlisi SIP i RTP](../"
+"part5-advanced/voip.md)."
 
 #: src/appendices/glossary.md:63
 msgid "<span id=\"term-wal\" data-glossary-term=\"wal\">**WAL**</span>"
@@ -13946,15 +13981,16 @@ msgstr ""
 "correlacioneu fluxos RTP i escriviu fitxers PCAP per trucada. Superviseu les "
 "mètriques de qualitat de les trucades i detecteu problemes en temps real."
 
-#: src/part1-foundations/introduction.md:17
+#: src/part1-foundations/introduction.md:19
 msgid ""
 "**Security Monitoring** Inspect TLS handshakes, detect protocol anomalies, "
 "and capture traffic for forensic analysis. Supports ESP-NULL decapsulation "
-"for encrypted tunnel inspection."
+"for inspecting unencrypted traffic carried inside IPsec."
 msgstr ""
 "**Monitoratge de seguretat** Inspeccioneu les negociacions TLS, detecteu "
-"anomalies dels protocols i captureu trànsit per a l'anàlisi forense. Admet "
-"la desencapsulació ESP-NULL per inspeccionar túnels xifrats."
+"anomalies dels protocols i captureu trànsit per a l’anàlisi forense. Admet "
+"la desencapsulació ESP-NULL per inspeccionar trànsit no xifrat transportat "
+"dins d’IPsec."
 
 #: src/part1-foundations/introduction.md:20
 msgid ""
@@ -13987,6 +14023,10 @@ msgstr "lippycat"
 msgid "tcpdump"
 msgstr "tcpdump"
 
+#: src/part1-foundations/introduction.md:27
+msgid "termshark"
+msgstr "termshark"
+
 #: src/part1-foundations/introduction.md:25
 msgid "tshark"
 msgstr "tshark"
@@ -14015,6 +14055,11 @@ msgstr "Captura CLI"
 #: src/part5-advanced/troubleshooting.md:648
 msgid "No"
 msgstr "No"
+
+#: src/part1-foundations/introduction.md:29
+#: src/part1-foundations/introduction.md:31
+msgid "Via tshark"
+msgstr "Mitjançant tshark"
 
 #: src/part1-foundations/introduction.md:27
 #: src/part1-foundations/introduction.md:28
@@ -14086,6 +14131,19 @@ msgstr ""
 "_lippycat_ se centra en els protocols DNS, TLS, HTTP, correu electrònic, "
 "RADIUS i VoIP, amb una anàlisi detallada de cadascun."
 
+#: src/part1-foundations/introduction.md:39
+msgid ""
+"[termshark](https://github.com/gcla/termshark) provides a Wireshark-inspired "
+"terminal interface backed by tshark for live capture and PCAP inspection. It "
+"can run on a remote host over SSH; the remote monitoring row refers to built-"
+"in connections to capture and processing nodes."
+msgstr ""
+"[termshark](https://github.com/gcla/termshark) ofereix una interfície de "
+"terminal inspirada en Wireshark que utilitza tshark per a la captura en "
+"directe i la inspecció de fitxers PCAP. Es pot executar en un host remot a "
+"través de SSH; la fila de monitoratge remot es refereix a connexions "
+"integrades amb nodes de captura i processament."
+
 #: src/part1-foundations/introduction.md:37
 msgid "**When to use lippycat over alternatives:**"
 msgstr "**Quan convé utilitzar lippycat en lloc d'altres opcions:**"
@@ -14123,6 +14181,14 @@ msgstr ""
 #: src/part1-foundations/introduction.md:48
 msgid "You need extensive protocol statistics (tshark)"
 msgstr "Necessiteu estadístiques àmplies de protocols (tshark)"
+
+#: src/part1-foundations/introduction.md:53
+msgid ""
+"You want Wireshark-style packet inspection in a terminal using tshark's "
+"protocol dissectors (termshark)"
+msgstr ""
+"Voleu inspeccionar paquets al terminal a l’estil de Wireshark amb els "
+"dissectors de protocols de tshark (termshark)"
 
 #: src/part1-foundations/introduction.md:50
 msgid "Command Overview"

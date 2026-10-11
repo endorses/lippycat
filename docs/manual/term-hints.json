@@ -74,6 +74,15 @@
     "caseSensitive": true,
     "aliases": {}
   },
+  "esp": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {
+      "en": ["ESP-NULL"],
+      "de": ["ESP-NULL"],
+      "ca": ["ESP-NULL"]
+    }
+  },
   "etsi": {
     "automatic": true,
     "caseSensitive": true,
@@ -287,6 +296,13 @@
       "en": ["VIF", "virtual interface"],
       "de": ["VIF", "virtuelle Schnittstelle"],
       "ca": ["VIF", "interfície virtual"]
+    }
+  },
+  "voip": {
+    "automatic": true,
+    "caseSensitive": true,
+    "aliases": {
+      "de": ["VoIP-Analyse"]
     }
   },
   "wal": {

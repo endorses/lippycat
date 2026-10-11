@@ -35504,3 +35504,11 @@ msgstr ""
 "un estat de sortida diferent de zero. Crear la interfície requereix "
 "`CAP_NET_ADMIN`; feu servir `sudo` o concediu a l’executable la capacitat "
 "necessària."
+
+#: src/part1-foundations/introduction.md:3
+msgid ""
+"![Live packet capture in lippycat with colored protocol rows and packet "
+"details](../assets/packet-stream.gif)"
+msgstr ""
+"![Captura de paquets en directe amb lippycat, files acolorides segons el "
+"protocol i detalls del paquet](../assets/packet-stream.gif)"

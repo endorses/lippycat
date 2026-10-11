@@ -35609,3 +35609,11 @@ msgstr ""
 "Paketverarbeitung und der Befehl gibt einen Exit-Status ungleich null zurück. "
 "Zum Erstellen der Schnittstelle ist `CAP_NET_ADMIN` erforderlich; verwenden "
 "Sie `sudo` oder erteilen Sie der Binärdatei die erforderliche Capability."
+
+#: src/part1-foundations/introduction.md:3
+msgid ""
+"![Live packet capture in lippycat with colored protocol rows and packet "
+"details](../assets/packet-stream.gif)"
+msgstr ""
+"![Live-Paketerfassung in lippycat mit farbigen Protokollzeilen und "
+"Paketdetails](../assets/packet-stream.gif)"

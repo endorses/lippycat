@@ -1,5 +1,7 @@
 # Introduction {#introduction}
 
+![Live packet capture in lippycat with colored protocol rows and packet details](../assets/packet-stream.gif)
+
 ## What is lippycat? {#what-is-lippycat}
 
 lippycat is a network traffic capture and analysis tool built for modern infrastructure. It captures packets from network interfaces or PCAP files and provides both CLI and TUI (Terminal User Interface) modes for real-time monitoring and analysis.

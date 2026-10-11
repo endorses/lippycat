@@ -1,14 +1,18 @@
 # lippycat 🫦🐱
 
-[![Version](https://img.shields.io/badge/version-0.13.0-blue)](CHANGELOG.md)
-[![Go Version](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go)](go.mod)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-linux-lightgrey?logo=linux)](#installation)
+<p align="center">
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.13.0-blue" alt="Version"></a>
+  <a href="go.mod"><img src="https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go" alt="Go Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="#installation"><img src="https://img.shields.io/badge/platform-linux-lightgrey?logo=linux" alt="Platform"></a>
+</p>
 
-[![Protocols](https://img.shields.io/badge/protocols-VoIP%20%7C%20DNS%20%7C%20HTTP%20%7C%20TLS%20%7C%20Email-purple)](#features)
-[![GPU](https://img.shields.io/badge/GPU-CUDA%20%7C%20SIMD-green)](docs/GPU_ACCELERATION.md)
-[![TLS/mTLS](https://img.shields.io/badge/TLS%2FmTLS-supported-success)](docs/SECURITY.md)
-[![Distributed](https://img.shields.io/badge/architecture-distributed-blue)](docs/DISTRIBUTED_MODE.md)
+<p align="center">
+  <a href="#features"><img src="https://img.shields.io/badge/protocols-VoIP%20%7C%20DNS%20%7C%20HTTP%20%7C%20TLS%20%7C%20Email-purple" alt="Protocols"></a>
+  <a href="docs/GPU_ACCELERATION.md"><img src="https://img.shields.io/badge/GPU-CUDA%20%7C%20SIMD-green" alt="GPU"></a>
+  <a href="docs/SECURITY.md"><img src="https://img.shields.io/badge/TLS%2FmTLS-supported-success" alt="TLS/mTLS"></a>
+  <a href="docs/DISTRIBUTED_MODE.md"><img src="https://img.shields.io/badge/architecture-distributed-blue" alt="Distributed"></a>
+</p>
 
 Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, HTTP, TLS/JA3, Email (SMTP/IMAP/POP3), and RADIUS analysis with distributed capture capabilities.
 

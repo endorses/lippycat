@@ -63,3 +63,19 @@ vhs validate docs/demos/packet-stream.tape
 ```
 
 Validation parses the tape without capturing traffic or launching the TUI.
+
+## Optimize the GIF
+
+After recording, use `gifsicle` to reduce the palette and optimize changed frame
+regions with moderate lossy compression:
+
+```bash
+gifsicle -O3 --colors 64 --lossy=30 docs/demos/packet-stream.gif \
+  -o docs/demos/packet-stream.optimized.gif
+mv docs/demos/packet-stream.optimized.gif docs/demos/packet-stream.gif
+```
+
+For the current recording this reduces the download from 9.7 MiB to 4.4 MiB,
+preserving its 1800 × 900 dimensions, duration, and looping. Compare the protocol
+colors and text before committing a newly recorded version. The README and manual
+share this file, so both benefit from the smaller download.

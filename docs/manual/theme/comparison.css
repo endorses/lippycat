@@ -1,0 +1,33 @@
+/* Keep the tool comparison within the chapter width, including translated text.
+   mdBook's table wrapper retains horizontal scrolling on smaller screens. */
+#comparison-with-similar-tools + .table-wrapper table {
+  width: 100%;
+  min-width: 60rem;
+  table-layout: fixed;
+  font-size: 0.875em;
+  line-height: 1.4;
+}
+
+#comparison-with-similar-tools + .table-wrapper :is(th, td) {
+  padding: 0.4rem 0.6rem;
+}
+
+#comparison-with-similar-tools + .table-wrapper th:first-child {
+  width: 22%;
+}
+
+#comparison-with-similar-tools + .table-wrapper td {
+  hyphens: auto;
+  overflow-wrap: anywhere;
+}
+
+#comparison-with-similar-tools + .table-wrapper th a {
+  color: inherit;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+#comparison-with-similar-tools + .table-wrapper th a:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 3px;
+}

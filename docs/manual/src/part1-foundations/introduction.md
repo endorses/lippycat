@@ -24,19 +24,19 @@ Deploy lightweight hunter nodes across network segments and aggregate traffic at
 
 ## Comparison with Similar Tools {#comparison-with-similar-tools}
 
-| Feature             | tcpdump | Wireshark | tshark    | termshark  | lippycat  |
-| ------------------- | ------- | --------- | --------- | ---------- | --------- |
-| CLI capture         | Yes     | No        | Yes       | Via tshark | Yes       |
-| Interactive TUI     | No      | GUI       | No        | Yes        | Yes       |
-| Protocol analysis   | Basic   | Extensive | Extensive | Via tshark | Focused\* |
-| Distributed capture | No      | No        | No        | No         | Yes       |
-| Per-call VoIP PCAP  | No      | No        | No        | No         | Yes       |
-| GPU acceleration    | No      | No        | No        | No         | Yes       |
-| Remote monitoring   | No      | No        | No        | No         | Yes       |
+| Feature             | [tcpdump](https://www.tcpdump.org/) | [Wireshark](https://www.wireshark.org/) | [tshark](https://www.wireshark.org/docs/man-pages/tshark.html) | [termshark](https://github.com/gcla/termshark) | [lippycat](https://github.com/endorses/lippycat) |
+| ------------------- | ----------------------------------- | --------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------ |
+| CLI capture         | Yes                                 | No                                      | Yes                                                            | Via tshark                                     | Yes                                              |
+| Interactive TUI     | No                                  | GUI                                     | No                                                             | Yes                                            | Yes                                              |
+| Protocol analysis   | Basic                               | Extensive                               | Extensive                                                      | Via tshark                                     | Focused\*                                        |
+| Distributed capture | No                                  | No                                      | No                                                             | No                                             | Yes                                              |
+| Per-call VoIP PCAP  | No                                  | No                                      | No                                                             | No                                             | Yes                                              |
+| GPU acceleration    | No                                  | No                                      | No                                                             | No                                             | Yes                                              |
+| Remote monitoring   | No                                  | No                                      | No                                                             | No                                             | Yes                                              |
 
 _lippycat_ focuses on DNS, TLS, HTTP, email, RADIUS, and VoIP protocols with deep analysis for each.
 
-[termshark](https://github.com/gcla/termshark) provides a Wireshark-inspired terminal interface backed by tshark for live capture and PCAP inspection. It can run on a remote host over SSH; the remote monitoring row refers to built-in connections to capture and processing nodes.
+termshark provides a Wireshark-inspired terminal interface backed by tshark for live capture and PCAP inspection. It can run on a remote host over SSH; the remote monitoring row refers to built-in connections to capture and processing nodes.
 
 **When to use lippycat over alternatives:**
 

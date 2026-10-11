@@ -21,7 +21,8 @@
       "Copy to clipboard": "Copia al porta-retalls",
       "Copied!": "Copiat!"
     },
-    "selectorLabel": "Selecciona la llengua"
+    "selectorLabel": "Selecciona la llengua",
+    "externalLinkLabel": "s’obre en una pestanya nova"
   },
   {
     "code": "en",
@@ -29,7 +30,8 @@
     "path": "en/",
     "title": "lippycat 🫦🐱 Manual",
     "description": "Comprehensive guide to network traffic capture and analysis with lippycat",
-    "selectorLabel": "Select language"
+    "selectorLabel": "Select language",
+    "externalLinkLabel": "opens in a new tab"
   },
   {
     "code": "de",
@@ -53,6 +55,7 @@
       "Copy to clipboard": "In die Zwischenablage kopieren",
       "Copied!": "Kopiert!"
     },
-    "selectorLabel": "Sprache auswählen"
+    "selectorLabel": "Sprache auswählen",
+    "externalLinkLabel": "öffnet in einem neuen Tab"
   }
 ]

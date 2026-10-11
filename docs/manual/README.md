@@ -119,6 +119,14 @@ chapter context. When adding a language, add its figure label in `tools/figures.
 Caption text is searchable, and caption styling follows the current theme and
 keeps figures together for printing when page space permits.
 
+## External links
+
+External web links open in a new tab. Text links receive a decorative ↗ marker,
+and their accessible labels announce the behavior using each edition's
+`externalLinkLabel` in `languages.json`. Icon-only links keep their existing icon.
+Internal chapter and section links retain normal navigation. The enhancement
+also handles links added after the page loads and preserves existing `rel` values.
+
 ## Glossary hints
 
 The assembled manual shows glossary definitions on hover or keyboard focus.

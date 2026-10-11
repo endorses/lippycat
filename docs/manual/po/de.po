@@ -13236,6 +13236,26 @@ msgid "tshark"
 msgstr "tshark"
 
 #: src/part1-foundations/introduction.md:27
+msgid "[Wireshark](https://www.wireshark.org/)"
+msgstr "[Wireshark](https://www.wireshark.org/)"
+
+#: src/part1-foundations/introduction.md:27
+msgid "[lippycat](https://github.com/endorses/lippycat)"
+msgstr "[lippycat](https://github.com/endorses/lippycat)"
+
+#: src/part1-foundations/introduction.md:27
+msgid "[tcpdump](https://www.tcpdump.org/)"
+msgstr "[tcpdump](https://www.tcpdump.org/)"
+
+#: src/part1-foundations/introduction.md:27
+msgid "[termshark](https://github.com/gcla/termshark)"
+msgstr "[termshark](https://github.com/gcla/termshark)"
+
+#: src/part1-foundations/introduction.md:27
+msgid "[tshark](https://www.wireshark.org/docs/man-pages/tshark.html)"
+msgstr "[tshark](https://www.wireshark.org/docs/man-pages/tshark.html)"
+
+#: src/part1-foundations/introduction.md:27
 msgid "CLI capture"
 msgstr "CLI-Erfassung"
 
@@ -13337,16 +13357,16 @@ msgstr ""
 
 #: src/part1-foundations/introduction.md:39
 msgid ""
-"[termshark](https://github.com/gcla/termshark) provides a Wireshark-inspired "
-"terminal interface backed by tshark for live capture and PCAP inspection. It "
-"can run on a remote host over SSH; the remote monitoring row refers to built-"
-"in connections to capture and processing nodes."
+"termshark provides a Wireshark-inspired terminal interface backed by tshark "
+"for live capture and PCAP inspection. It can run on a remote host over SSH; "
+"the remote monitoring row refers to built-in connections to capture and "
+"processing nodes."
 msgstr ""
-"[termshark](https://github.com/gcla/termshark) bietet eine von Wireshark "
-"inspirierte Terminaloberfläche, die tshark zur Live-Erfassung und "
-"Untersuchung von PCAP-Dateien nutzt. Es kann über SSH auf einem entfernten "
-"Host ausgeführt werden; die Zeile zur Fernüberwachung bezieht sich auf "
-"integrierte Verbindungen zu Erfassungs- und Verarbeitungsknoten."
+"termshark bietet eine von Wireshark inspirierte Terminaloberfläche, die "
+"tshark zur Live-Erfassung und Untersuchung von PCAP-Dateien nutzt. Es kann "
+"über SSH auf einem entfernten Host ausgeführt werden; die Zeile zur "
+"Fernüberwachung bezieht sich auf integrierte Verbindungen zu Erfassungs- und "
+"Verarbeitungsknoten."
 
 #: src/part1-foundations/introduction.md:37
 msgid "**When to use lippycat over alternatives:**"

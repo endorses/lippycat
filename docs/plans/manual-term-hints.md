@@ -321,3 +321,38 @@ every edition. Termshark's capabilities were checked against its
 ESP and ESP-NULL terminology were checked against
 [RFC 4303](https://www.rfc-editor.org/info/rfc4303/) and
 [RFC 2410](https://www.rfc-editor.org/info/rfc2410/).
+
+## Follow-up: comparison table width and consistent tool links
+
+Compact the introduction's tool comparison for the manual's normal chapter width,
+including longer German translations. Use scoped column widths, tighter padding,
+and wrapping, while retaining horizontal scrolling on small screens. Link each
+tool name in the table header and remove the repeated termshark link in the
+paragraph below it. Keep translations and link targets aligned across editions.
+
+- [x] Apply scoped comparison styling and consistent header links.
+- [x] Update and format German and Catalan translations.
+- [x] Verify desktop fit, readable rendering, keyboard links, and mobile scrolling in every edition.
+- [x] Validate translation completeness and build all manual editions.
+- [x] Format the update and plan.
+- [x] Commit the update and plan.
+
+The user additionally requested external links throughout the manual to open in
+a new tab, with an icon for text links. Add a decorative ↗ marker, translated
+accessible labels, and `noopener noreferrer`, preserving internal navigation and
+existing icon-only controls. Cover dynamically added links and idempotent
+initialization. Labels belong to the existing language manifest UI configuration.
+
+- [x] Apply external link behavior consistently across manual editions.
+- [x] Verify new-tab behavior, external text icons, translated accessible labels, internal links, and dynamic links.
+
+Validation: all 44 Python checks pass, every manual edition builds, and strict
+translation checking confirms 5,722/5,722 current messages translated in each
+catalog. Local Chromium checks in English, German, and Catalan verify that all
+columns fit at 750 px and 640 px chapter widths, header links follow keyboard Tab
+order, and mobile scrolling exposes the last column. Reviewed navy-theme renders
+confirm readable text and link icons. External-link checks verify translated
+accessible labels, a new tab with a null opener using intercepted navigation,
+preserved `rel` values, one icon after repeated initialization, dynamically added
+text/image links, and unchanged internal link targets. Temporary QA artifacts are
+removed after validation.

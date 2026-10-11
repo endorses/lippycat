@@ -35,6 +35,18 @@
   let restoringFocus = false;
   let triggerNumber = 0;
 
+  function referenceUrl(href) {
+    const url = new URL(href, editionRoot);
+    if (
+      url.origin !== editionRoot.origin ||
+      url.protocol !== editionRoot.protocol ||
+      !url.pathname.startsWith(editionRoot.pathname)
+    ) {
+      throw new Error("Term hints: reference outside the current edition");
+    }
+    return url.href;
+  }
+
   function insideInteraction(element) {
     return (
       element && (activeTrigger?.contains(element) || popup?.contains(element))
@@ -128,7 +140,21 @@
         (item) => item.id === trigger.dataset.termHint,
       );
       title.textContent = term.label;
-      definition.textContent = term.definition;
+      definition.replaceChildren();
+      const parts = term.definitionParts || [{ text: term.definition }];
+      for (const part of parts) {
+        if (part.href === undefined) definition.append(part.text);
+        else {
+          const link = document.createElement("a");
+          link.textContent = part.text;
+          link.href = referenceUrl(part.href);
+          definition.append(link);
+        }
+      }
+      const linked = parts.some((part) => part.href !== undefined);
+      popup.setAttribute("role", linked ? "dialog" : "tooltip");
+      if (linked) popup.setAttribute("aria-labelledby", title.id);
+      else popup.removeAttribute("aria-labelledby");
       popup.scrollTop = 0;
       activeTrigger = trigger;
       // Keep the definition next to its term in the reading order.
@@ -145,7 +171,7 @@
     popup = document.createElement("span");
     popup.id = "manual-term-hint-popup";
     popup.setAttribute("role", "tooltip");
-    // Definitions stay out of the Tab order, including scrollable containers.
+    // The container stays out of the Tab order; reference links remain reachable.
     popup.tabIndex = -1;
     popup.hidden = true;
     title = document.createElement("span");
@@ -200,6 +226,9 @@
     trigger.id = `manual-term-hint-trigger-${++triggerNumber}`;
     trigger.setAttribute("aria-controls", popup.id);
     trigger.setAttribute("aria-expanded", "false");
+    if (term.definitionParts?.some((part) => part.href !== undefined)) {
+      trigger.setAttribute("aria-haspopup", "dialog");
+    }
     trigger.addEventListener("pointerenter", (event) => {
       if (event.pointerType !== "mouse" || Date.now() < suppressMouseUntil)
         return;
@@ -366,6 +395,19 @@
               term.label &&
               typeof term.definition === "string" &&
               term.definition &&
+              (term.definitionParts === undefined ||
+                (Array.isArray(term.definitionParts) &&
+                  term.definitionParts.length > 0 &&
+                  term.definitionParts.every(
+                    (part) =>
+                      typeof part.text === "string" &&
+                      part.text.length > 0 &&
+                      (part.href === undefined ||
+                        (typeof part.href === "string" &&
+                          referenceUrl(part.href))),
+                  ) &&
+                  term.definitionParts.map((part) => part.text).join("") ===
+                    term.definition)) &&
               typeof term.caseSensitive === "boolean" &&
               Array.isArray(term.aliases) &&
               term.aliases.every(

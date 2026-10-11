@@ -62,6 +62,16 @@
   font-weight: bold;
 }
 
+#manual-term-hint-definition a {
+  color: var(--links);
+  text-decoration: underline;
+}
+
+#manual-term-hint-definition a:focus-visible {
+  outline: 2px solid var(--links);
+  outline-offset: 3px;
+}
+
 @media print {
   #manual-term-hint-popup {
     display: none !important;

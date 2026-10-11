@@ -57,7 +57,12 @@ const dictionary = {
     {
       id: "capture",
       label: "Packet Capture",
-      definition: "Long alias definition.",
+      definition: "Long alias definition. See later section.",
+      definitionParts: [
+        { text: "Long alias definition. See " },
+        { text: "later section", href: "nested/target.html#later-section" },
+        { text: "." },
+      ],
       aliases: ["Packet Capture"],
       caseSensitive: true,
     },
@@ -300,7 +305,47 @@ async function main() {
       await page.keyboard.press("Escape");
       await waitClosed();
     });
-    await test("hint contains only its localized label and definition", async () => {
+    await test("reference links resolve from nested chapters and support keyboard navigation", async () => {
+      await loadFixture("nested/deep/chapter.html");
+      await page.mouse.move(0, 0);
+      await term("capture").focus();
+      await waitOpen();
+      const link = page.locator(`${popup} a`);
+      assert.equal(await link.textContent(), "later section");
+      assert.equal(
+        await link.getAttribute("href"),
+        `${origin}/fixture/en/nested/target.html#later-section`,
+      );
+      assert.equal(await page.locator(popup).getAttribute("role"), "dialog");
+      assert.equal(
+        await term("capture").getAttribute("aria-haspopup"),
+        "dialog",
+      );
+      await page.keyboard.press("Tab");
+      assert.equal(
+        await link.evaluate((el) => el === document.activeElement),
+        true,
+      );
+      await page.waitForTimeout(250);
+      assert.equal(await visible(), true);
+      await page.keyboard.press("Escape");
+      await waitClosed();
+      assert.equal(
+        await term("capture").evaluate((el) => el === document.activeElement),
+        true,
+      );
+      await term("capture").hover();
+      await waitOpen();
+      await link.hover();
+      await page.waitForTimeout(250);
+      assert.equal(await visible(), true);
+      await link.click();
+      await page.waitForURL(
+        `${origin}/fixture/en/nested/target.html#later-section`,
+      );
+      await loadFixture();
+    });
+    await test("plain hint contains only its localized label and definition", async () => {
       await term("pcap").click();
       await waitOpen();
       assert.deepEqual(
@@ -504,6 +549,28 @@ async function main() {
       );
       assert.ok(errors.some((value) => /term|hint|dictionary/i.test(value)));
       await page.unroute("**/term-hints.json");
+      for (const href of [
+        "javascript:alert(1)",
+        "https://example.com/outside.html",
+        "../outside.html",
+      ]) {
+        const unsafe = JSON.parse(JSON.stringify(dictionary));
+        unsafe.terms.find(
+          (entry) => entry.id === "capture",
+        ).definitionParts[1].href = href;
+        await page.route("**/term-hints.json", (route) =>
+          route.fulfill({
+            contentType: "application/json",
+            body: JSON.stringify(unsafe),
+          }),
+        );
+        await page.goto(`${origin}/fixture/en/nested/chapter.html`);
+        await page.waitForFunction(() => window.ManualTermHints);
+        await page.evaluate(() => window.ManualTermHints.initialize());
+        assert.equal(await page.locator(trigger).count(), 0);
+        assert.equal(await page.locator(`${popup} a`).count(), 0);
+        await page.unroute("**/term-hints.json");
+      }
       page.off("console", listener);
       const disabled = await browser.newContext({ javaScriptEnabled: false });
       try {
@@ -558,6 +625,40 @@ async function main() {
           );
           await button.tap();
           await mobile.locator(popup).waitFor({ state: "hidden" });
+          await page.locator(selector).click();
+          await waitOpen();
+          const reference = page.locator(`${popup} a`);
+          const chapterName = {
+            en: "Core Concepts",
+            de: "Grundbegriffe",
+            ca: "Conceptes bàsics",
+          }[language.code];
+          // Catalan uses sentence-case references within running prose.
+          assert.equal(
+            await reference.textContent(),
+            language.code === "ca" ? "conceptes bàsics" : chapterName,
+          );
+          await page.locator(selector).focus();
+          await page.keyboard.press("Tab");
+          assert.equal(
+            await reference.evaluate((el) => el === document.activeElement),
+            true,
+          );
+          await page.keyboard.press("Enter");
+          const destination = `${origin}/book/${language.path}part1-foundations/core-concepts.html`;
+          await page.waitForURL(destination);
+          assert.equal(
+            await page.locator("main h1").textContent(),
+            chapterName,
+          );
+          await button.tap();
+          await mobile.locator(popup).waitFor({ state: "visible" });
+          await mobile.locator(`${popup} a`).tap();
+          await mobile.waitForURL(destination);
+          assert.equal(
+            await mobile.locator("main h1").textContent(),
+            chapterName,
+          );
         }
       } finally {
         await mobileContext.close();
@@ -608,9 +709,13 @@ async function main() {
         );
         assert.equal(
           await page
-            .locator(`${popup} a, ${popup} button, ${popup} .term-hint-actions`)
+            .locator(`${popup} button, ${popup} .term-hint-actions`)
             .count(),
           0,
+        );
+        assert.equal(
+          await page.locator(`${popup} a`).count(),
+          bpf.definitionParts.filter((part) => part.href).length,
         );
         assert.equal(data.ui, undefined);
         assert.equal(bpf.href, undefined);
@@ -676,9 +781,7 @@ async function main() {
           await mobile.locator(popup).waitFor({ state: "visible" });
           assert.equal(
             await mobile
-              .locator(
-                `${popup} a, ${popup} button, ${popup} .term-hint-actions`,
-              )
+              .locator(`${popup} button, ${popup} .term-hint-actions`)
               .count(),
             0,
           );

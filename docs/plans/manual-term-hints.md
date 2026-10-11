@@ -81,11 +81,12 @@ Use a keyboard-operable trigger and one reusable popup. Hover and focus show a
 preview without moving focus; click, tap, Enter, or Space pins it open. Pointer
 movement from the term into the popup must not dismiss it.
 
-The popup includes only the localized term and definition. Following the user's
-simplification request, it uses a descriptive ARIA tooltip rather than a dialog.
-The trigger references its definition with `aria-describedby` and exposes
-open/closed state. The tooltip has no links, buttons, or Tab stops. Focus stays on
-the triggering term; Escape dismisses it, and Tab proceeds through the chapter.
+The popup includes only the localized term and definition, including the glossary's
+inline reference links. Definitions with links use a labeled, nonmodal ARIA dialog;
+plain definitions use a descriptive tooltip. The trigger references its definition
+with `aria-describedby` and exposes open/closed state. Focus stays on the triggering
+term; Tab reaches reference links before continuing through the chapter. Escape
+from a reference link dismisses the popup and returns focus to the term.
 Overflowing definitions can be scrolled with arrow keys, Page Up/Down, or Home/End
 while the term has focus. Do not intercept mdBook shortcuts outside the active
 interaction.
@@ -270,3 +271,27 @@ Strict translation checking confirms German and Catalan each have 5,714/5,714
 current messages translated. Existing exclusions and boundary guards remain
 covered, and repeated initialization preserves the chapter text without creating
 nested triggers.
+
+## Follow-up: clickable definition references
+
+The glossary already refers to chapters and sections through Markdown links.
+Preserve those links in the generated hints, keeping destinations inside the
+current language edition and rendering text and anchors without raw HTML.
+This adds only the references within the definition; the removed glossary shortcut
+and close button remain absent. Match the German references to Core Concepts to
+the chapter's translated name, `Grundbegriffe`.
+
+- [x] Preserve localized inline reference links during glossary extraction.
+- [x] Render reachable reference links with appropriate keyboard and popup behavior.
+- [x] Correct German reference labels and verify unchanged English and Catalan labels.
+- [x] Validate dictionaries, browser interaction, translation completeness, and every manual edition.
+- [x] Format the implementation and plan.
+- [x] Commit the implementation and plan.
+
+Validation: all 44 Python checks and 15 Chromium browser checks pass. Browser
+checks cover reference navigation from nested chapters, focus and Escape behavior,
+rejected unsafe destinations, and keyboard/touch navigation to Core Concepts in
+each language. All 60 extracted reference destinations per edition exist,
+including their section anchors. Desktop and mobile screenshots confirm readable
+inline links. `make manual-check manual` builds every edition, and strict checking
+confirms German and Catalan each retain 5,714/5,714 translated current messages.

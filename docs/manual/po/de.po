@@ -11710,7 +11710,7 @@ msgid ""
 msgstr ""
 "Eine benannte Regel (z. B. `sip_user`, `dns_domain`, `ip_address`), die "
 "bestimmt, welche Pakete ein Hunter erfasst und weiterleitet. Filter werden "
-"vom Prozessor über gRPC an die Hunter übertragen. Siehe [Grundkonzepte](../"
+"vom Prozessor über gRPC an die Hunter übertragen. Siehe [Grundbegriffe](../"
 "part1-foundations/core-concepts.md)."
 
 #: src/appendices/glossary.md:24
@@ -11925,7 +11925,7 @@ msgid ""
 msgstr ""
 "Die Standard-C-Bibliothek zur Netzwerkpaketerfassung auf Unix-ähnlichen "
 "Systemen. lippycat verwendet libpcap (über gopacket) zum Lesen von Paketen "
-"aus Schnittstellen und PCAP-Dateien. Siehe [Grundkonzepte](../part1-"
+"aus Schnittstellen und PCAP-Dateien. Siehe [Grundbegriffe](../part1-"
 "foundations/core-concepts.md)."
 
 #: src/appendices/glossary.md:37
@@ -12052,7 +12052,7 @@ msgid ""
 msgstr ""
 "Packet Capture. Ein Standarddateiformat (`.pcap`) zur Speicherung erfasster "
 "Netzwerkpakete, kompatibel mit Werkzeugen wie Wireshark und tcpdump. Siehe "
-"[Grundkonzepte](../part1-foundations/core-concepts.md)."
+"[Grundbegriffe](../part1-foundations/core-concepts.md)."
 
 #: src/appendices/glossary.md:45 src/part3-distributed/process.md:119
 msgid "**Per-Call PCAP**"

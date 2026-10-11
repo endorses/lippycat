@@ -46,6 +46,109 @@ class DictionaryTests(unittest.TestCase):
         self.assertEqual(data["terms"][0]["definition"], "Captura & anàlisi: .pcap.")
         self.assertEqual(data["terms"][1]["definition"], "Many patterns. One pass.")
         self.assertEqual(data["terms"][1]["aliases"], ["Aho–Corasick"])
+        self.assertEqual(
+            data["terms"][0]["definitionParts"],
+            [{"text": "Captura & anàlisi: .pcap."}],
+        )
+
+    def test_multiple_formatted_reference_labels_preserve_definition_text(self):
+        html = glossary(
+            row(
+                "pcap",
+                "PCAP",
+                ' Capture. See <a href="../part1/core.html#capture">'
+                "<strong>Core</strong> <code>concepts</code></a> and "
+                '<a href="./bpf.html">BPF &amp; filters</a>. ',
+            )
+        )
+        term = term_hints.dictionary(html, edition(), {"pcap": rule()})["terms"][0]
+        self.assertEqual(
+            term["definitionParts"],
+            [
+                {"text": "Capture. See "},
+                {"text": "Core concepts", "href": "part1/core.html#capture"},
+                {"text": " and "},
+                {"text": "BPF & filters", "href": "appendices/bpf.html"},
+                {"text": "."},
+            ],
+        )
+        self.assertEqual(
+            "".join(part["text"] for part in term["definitionParts"]),
+            term["definition"],
+        )
+
+    def test_whitespace_normalization_spans_link_and_block_boundaries(self):
+        term = term_hints.dictionary(
+            glossary(
+                row(
+                    "pcap",
+                    "PCAP",
+                    '<p>  Capture.\n See <a href="#details">\n <em>More</em> '
+                    " details\t </a>  here.</p><p>Next<br>paragraph.</p>",
+                )
+            ),
+            edition(),
+            {"pcap": rule()},
+        )["terms"][0]
+        self.assertEqual(
+            term["definition"], "Capture. See More details here. Next paragraph."
+        )
+        self.assertEqual(
+            "".join(part["text"] for part in term["definitionParts"]),
+            term["definition"],
+        )
+        self.assertEqual(
+            [part["href"] for part in term["definitionParts"] if "href" in part],
+            ["appendices/glossary.html#details"],
+        )
+
+    def test_reference_destinations_normalize_relative_root_and_fragment_links(self):
+        for href, expected in [
+            ("../part1/core.html", "part1/core.html"),
+            ("./bpf.html#tcp", "appendices/bpf.html#tcp"),
+            ("/part1/core.html#terms", "part1/core.html#terms"),
+            ("#term-pcap", "appendices/glossary.html#term-pcap"),
+            ("../part1/../part2/watch.html", "part2/watch.html"),
+            ("../part1/core%20concepts.html", "part1/core%20concepts.html"),
+        ]:
+            with self.subTest(href=href):
+                self.assertEqual(term_hints.manual_reference(href), expected)
+
+    def test_unsafe_definition_reference_destinations_are_rejected(self):
+        for href in [
+            "javascript:alert(1)",
+            "https://example.com/core.html",
+            "//example.com/core.html",
+            "file:///tmp/core.html",
+            "data:text/html,hello",
+            "../../outside.html",
+            "/../outside.html",
+            "../%2e%2e/outside.html",
+            "../%5coutside.html",
+            "../part1/core.html\n",
+            "../part1/core%00.html",
+            "../part1/core.html?redirect=outside",
+            "../images/core.svg",
+            "",
+        ]:
+            with self.subTest(href=href), self.assertRaises(ValueError):
+                term_hints.dictionary(
+                    glossary(row("pcap", "PCAP", f'See <a href="{href}">More</a>.')),
+                    edition(),
+                    {"pcap": rule()},
+                )
+
+    def test_nested_definition_links_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "nested links"):
+            term_hints.Glossary(
+                glossary(
+                    row(
+                        "pcap",
+                        "PCAP",
+                        '<a href="first.html">First <a href="second.html">Second</a></a>',
+                    )
+                )
+            )
 
     def test_localized_label_and_only_current_language_aliases(self):
         policy = {
@@ -147,7 +250,14 @@ class DictionaryTests(unittest.TestCase):
                 self.assertEqual(set(data), {"language", "terms"})
                 self.assertEqual(
                     set(data["terms"][0]),
-                    {"id", "label", "definition", "aliases", "caseSensitive"},
+                    {
+                        "id",
+                        "label",
+                        "definition",
+                        "definitionParts",
+                        "aliases",
+                        "caseSensitive",
+                    },
                 )
 
     def test_unknown_explicit_id_rejected_with_chapter_context(self):

@@ -124,8 +124,10 @@ keeps figures together for printing when page space permits.
 The assembled manual shows glossary definitions on hover or keyboard focus.
 Click, tap, Enter, or Space keeps a definition open; activate the term again,
 press Escape, or click elsewhere to dismiss it. The popup contains only the term
-and its definition in the current edition's language. Focus stays on the term;
-Tab proceeds to the next chapter control. For an overflowing definition, use the
+and its definition in the current edition's language, preserving the glossary's
+links to related chapters and sections. Focus stays on the term; Tab reaches any
+reference links before the next chapter control. Escape from a reference link
+returns focus to the term. For an overflowing definition, use the
 arrow keys, Page Up/Down, or Home/End while the term has focus to scroll its text.
 
 Definitions have a single source: the glossary table in
@@ -177,7 +179,9 @@ context. No additional translated popup controls are required when adding an
 edition.
 
 `make manual` generates an edition-specific `term-hints.json` beside each edition's
-HTML after mdBook renders it. These dictionaries and the book output are ignored.
+HTML after mdBook renders it. Definitions include plain text and structured text/link
+parts, with reference destinations resolved within the current edition. These
+dictionaries and the book output are ignored.
 Use `make manual-serve` to preview hints; a bare `mdbook build` does not run this
 post-build step. JavaScript-disabled readers still have the complete glossary.
 

@@ -3,8 +3,67 @@
 import json
 import re
 from html.parser import HTMLParser
+from urllib.parse import quote, unquote, urlsplit
 
 TERM_ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
+
+
+def manual_reference(href):
+    """Resolve a glossary link within the current manual edition only."""
+    if not href or any(char.isspace() or ord(char) < 32 for char in href):
+        raise ValueError(f"Unsafe glossary reference: {href!r}")
+    parsed = urlsplit(href)
+    if parsed.scheme or parsed.netloc or parsed.query or "\\" in href:
+        raise ValueError(f"Unsafe glossary reference: {href!r}")
+    path = unquote(parsed.path)
+    if "\\" in path or any(ord(char) < 32 for char in path):
+        raise ValueError(f"Unsafe glossary reference: {href!r}")
+    components = [] if path.startswith("/") else ["appendices"]
+    for component in path.split("/"):
+        if component in ("", "."):
+            continue
+        if component == "..":
+            if not components:
+                raise ValueError(f"Glossary reference escapes manual edition: {href!r}")
+            components.pop()
+        else:
+            components.append(component)
+    if not path:
+        components = ["appendices", "glossary.html"]
+    normalized = "/".join(components)
+    if not normalized.endswith(".html"):
+        raise ValueError(f"Glossary reference must target a manual HTML page: {href!r}")
+    reference = quote(normalized, safe="/-._~")
+    if parsed.fragment:
+        reference += "#" + parsed.fragment
+    return reference
+
+
+def normalized_parts(parts):
+    """Normalize whitespace across text/link boundaries without losing labels."""
+    result = []
+    pending_space = None
+
+    def append(text, href):
+        if result and result[-1].get("href") == href:
+            result[-1]["text"] += text
+        else:
+            part = {"text": text}
+            if href is not None:
+                part["href"] = href
+            result.append(part)
+
+    for text, href in parts:
+        for char in text:
+            if char.isspace():
+                if pending_space is None:
+                    pending_space = (href,)
+            else:
+                if pending_space is not None and result:
+                    append(" ", pending_space[0])
+                pending_space = None
+                append(char, href)
+    return result
 
 
 class Annotations(HTMLParser):
@@ -44,6 +103,9 @@ class Glossary(HTMLParser):
         self.key = None
         self.data_row = False
         self.terms = {}
+        self.definition_parts = {}
+        self.parts = None
+        self.href = None
         self.feed(text)
 
     def handle_starttag(self, tag, attributes):
@@ -59,9 +121,15 @@ class Glossary(HTMLParser):
         if tag in ("td", "th") and self.cells is not None:
             self.cell = []
             self.cells.append(self.cell)
+            self.parts = []
+            self.href = None
             self.data_row = self.data_row or tag == "td"
+        if tag == "a" and self.cell is not None and len(self.cells) == 2:
+            if self.href is not None:
+                raise ValueError("Glossary definitions cannot contain nested links")
+            self.href = manual_reference(attributes.get("href"))
         if tag in ("br", "p", "div", "li") and self.cell is not None:
-            self.cell.append(" ")
+            self.handle_data(" ")
         if "data-glossary-term" not in attributes:
             return
         key = attributes["data-glossary-term"]
@@ -79,9 +147,15 @@ class Glossary(HTMLParser):
         if tag == "main":
             self.in_main = False
         if tag in ("p", "div", "li") and self.cell is not None:
-            self.cell.append(" ")
+            self.handle_data(" ")
+        if tag == "a":
+            self.href = None
         if tag in ("td", "th"):
+            if self.key is not None and len(self.cells) == 2:
+                self.definition_parts[self.key] = normalized_parts(self.parts)
             self.cell = None
+            self.parts = None
+            self.href = None
         if tag == "tr" and self.cells is not None:
             if self.data_row and self.key is None:
                 raise ValueError("Glossary row missing data-glossary-term identifier")
@@ -102,6 +176,7 @@ class Glossary(HTMLParser):
     def handle_data(self, data):
         if self.in_main and self.cell is not None:
             self.cell.append(data)
+            self.parts.append((data, self.href))
 
 
 def load_policy(path, language_codes):
@@ -140,7 +215,8 @@ def load_policy(path, language_codes):
 
 
 def dictionary(glossary_html, edition, policy):
-    terms = Glossary(glossary_html).terms
+    glossary = Glossary(glossary_html)
+    terms = glossary.terms
     missing = sorted(set(policy) - set(terms))
     extra = sorted(set(terms) - set(policy))
     if missing or extra:
@@ -173,6 +249,7 @@ def dictionary(glossary_html, edition, policy):
                 "id": key,
                 "label": label,
                 "definition": definition,
+                "definitionParts": glossary.definition_parts[key],
                 "aliases": aliases,
                 "caseSensitive": rule["caseSensitive"],
             }

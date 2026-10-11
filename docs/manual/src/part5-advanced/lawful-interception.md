@@ -445,9 +445,11 @@ Disable keepalives:
 
 ### ADMF State Synchronization {#admf-state-synchronization}
 
-When lippycat restarts, all in-memory task and destination state is lost. To recover without waiting for the ADMF to re-push each task individually, the processor queries the ADMF for current state on startup using the standard `GetAllDetails` operation defined in ETSI TS 103 221-1.
+When `--li-state-file` is configured, lippycat saves task and destination definitions in an encrypted administrative snapshot and restores them at startup. This snapshot is separate from the managed-filter store: encrypting filters does not enable administrative persistence. With the default empty `--li-state-file`, task and destination definitions are held only in memory and must be supplied again by the ADMF after a restart. See [Enabling LI](#enabling-li) for storage setup.
 
-**Startup sync** is enabled by default. As shown in {{#figure fig-admf-state-synchronization}}, after sending the startup notification, the processor calls `GetAllDetails` on the ADMF, which returns all tasks and destinations assigned to this network element. The processor registers each destination and activates each task, recreating the full filter and delivery state automatically.
+**Persisted state is not authorization.** Restored tasks remain disarmed or unconfirmed until the ADMF confirms current authorization through synchronization or a fresh authenticated X1 activation. Restoring definitions alone cannot resume interception or authorize buffered replay. Runtime TLS configuration and keys come from the current configuration, not the administrative snapshot.
+
+**Startup sync** is enabled by default when an ADMF endpoint is configured. As shown in {{#figure fig-admf-state-synchronization}}, the processor reports its startup and queries the ADMF using the standard `GetAllDetails` operation defined in ETSI TS 103 221-1. The response supplies the tasks and destinations assigned to this network element. The processor reconciles that state with any restored definitions, confirms eligible tasks, and applies current authorization to filtering and delivery. Startup notification and state synchronization run independently; acknowledging the notification does not authorize interception.
 
 <!-- i18n:skip -->
 
@@ -459,12 +461,18 @@ When lippycat restarts, all in-memory task and destination state is lost. To rec
 sequenceDiagram
     participant P as Processor
     participant A as ADMF
-    P->>A: ReportNEIssue (Startup)
-    P->>A: GetAllDetailsRequest
-    A-->>P: GetAllDetailsResponse<br/>(tasks + destinations + NE status)
-    Note over P: Register destinations
-    Note over P: Activate tasks & push filters
-    P->>P: Normal operation resumes
+    opt Administrative persistence configured
+        P->>P: Restore encrypted tasks and destinations
+        Note over P: Restored tasks remain disarmed
+    end
+    par Startup notification
+        P->>A: ReportNEIssue (Startup)
+    and Authoritative state synchronization
+        P->>A: GetAllDetailsRequest
+        A-->>P: GetAllDetailsResponse<br/>(tasks + destinations + NE status)
+        Note over P: Reconcile destinations and task definitions
+        P->>P: Arm only currently authorized tasks
+    end
 ```
 
 <figcaption>Processor state synchronization with the ADMF.</figcaption>
@@ -475,9 +483,11 @@ sequenceDiagram
 
 The sync is designed for graceful degradation:
 
-- **ADMF unreachable:** The sync times out (default 30 seconds) and the processor continues startup. The ADMF can push tasks later via `ActivateTask`.
-- **ADMF does not support GetAllDetails:** Some minimal ADMF implementations only support pushing state. When the ADMF returns an `UnsupportedOperation` error, the processor logs a warning and continues normally.
-- **Individual task failures:** If a specific task or destination fails to activate (for example, due to an unsupported target type), it is skipped with a warning and the remaining items are processed.
+- **ADMF unreachable:** Each attempt uses the configured timeout (default 30 seconds). The processor continues startup and retries transient failures after 1 second with exponential backoff capped at 30 seconds, independently of periodic reconciliation. Restored tasks remain disarmed until their current authorization is confirmed.
+- **ADMF does not support GetAllDetails:** Some minimal ADMF implementations only support pushing state. An `UnsupportedOperation` response marks startup sync as unsupported and stops its retries. Restored task candidates remain disarmed and must be provisioned through authenticated X1 activation.
+- **Individual task or destination failures:** Valid entries are applied, while failed entries are reported and keep startup recovery pending. Startup retries continue alongside periodic reconciliation; a failed entry does not prevent valid entries from being processed.
+
+Use `lc show status` to inspect `li_startup_sync` and `li_reconciliation` for recovery progress, failures, and reconciliation results. Confirmation of a restored task does not automatically approve buffered delivery; see [Bounded delivery and restart recovery](#bounded-delivery-and-restart-recovery).
 
 **Configuration flags:**
 
@@ -500,15 +510,19 @@ To disable startup sync (for example, in environments where the ADMF always push
 - Tasks present in the ADMF but missing locally are activated.
 - Tasks present locally but missing from the ADMF are deactivated, and their filters removed. A `DeactivateTask` that never arrives would otherwise leave an intercept running with no authorisation and no expiry.
 
-Teardown is deliberately conservative, because wrongly removing a live warrant is as serious as over-collecting. Nothing is removed when:
+Deactivating tasks based on absence is deliberately conservative, because wrongly removing a live warrant is as serious as over-collecting. Tasks are not deactivated when:
 
 - the ADMF request fails (an outage never reaches the teardown path);
-- any task in the response fails to parse, since the picture is then incomplete;
+- task membership cannot be determined reliably because the task list is missing or task identifiers are invalid or duplicated;
 - the response contains zero tasks while tasks are active locally — the ADMF recovery procedure answers this way while its tables are rebuilt, so clearing the last task requires an explicit `DeactivateTask`.
 
 A task must also be absent from two consecutive polls before it is removed (`ReconcileOrphanPolls`), which costs one interval of over-collection and removes single-poll flukes. Every automatic deactivation is logged at WARN with the XID.
 
-The same reconciliation runs during startup sync, where it acts on the first response: filters persist to disk and are reloaded before the registry exists, so a stale filter would otherwise be re-armed on every restart. Filters not owned by LI are never touched.
+Task presence is determined from validated identifiers separately from definition validity: a task with an invalid definition but a valid unique identifier still counts as present. That definition failure does not prevent removal of other tasks whose absence is reliably established.
+
+Startup synchronization also reconciles persisted LI filters against current ADMF state. Loading a filter or an administrative snapshot does not establish current authorization; stale LI selectors must not resume interception merely because they survived a restart. Filters not owned by LI are never touched.
+
+Startup reconciliation can remove absent tasks after its first usable response; periodic reconciliation uses the consecutive-poll safeguard above. General orphan-filter cleanup requires successfully applied task and destination definitions. With a partial snapshot, only filters explicitly owned by a rejected task with no active local owner are eligible for cleanup; uncertain orphans are retained.
 
 Reconcile every five minutes (the default):
 
@@ -747,7 +761,7 @@ To rotate certificates:
 
 1. Generate new certificates (or obtain them from your organizational PKI).
 2. Update the processor configuration to reference the new certificate files.
-3. Perform a graceful restart of the processor. Active tasks are automatically restored: the processor sends a shutdown notification, and on restart queries the ADMF via `GetAllDetails` to restore all task and destination state (see [ADMF State Synchronization](#admf-state-synchronization)).
+3. Perform a graceful restart of the processor. If `--li-state-file` is configured, saved task and destination definitions are restored, but tasks remain disarmed until current ADMF authorization is confirmed. Otherwise, the ADMF must supply the definitions again. With startup sync enabled, `GetAllDetails` reconciles the state after restart (see [ADMF State Synchronization](#admf-state-synchronization)).
 4. Verify connectivity to ADMF and MDF after restart.
 
 For production environments, consider using a Hardware Security Module (HSM) for private key storage and an automated certificate lifecycle management system.

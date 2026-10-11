@@ -17,6 +17,7 @@ scripts/*
 !scripts/bump-version.sh
 !scripts/check-build-matrix.sh
 !scripts/verify-no-li.sh
+!scripts/demo-traffic/
 bin/
 docs/manual/book/
 

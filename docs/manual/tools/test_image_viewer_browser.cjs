@@ -97,6 +97,17 @@ async function main() {
       }, `${dialog} img`);
       assert.match(await image.getAttribute("src"), /^blob:/);
       const initial = (await image.boundingBox()).width;
+      assert.equal(await page.locator(action("zoomOut")).isEnabled(), true);
+      await page.locator(action("zoomOut")).click();
+      assert.ok((await image.boundingBox()).width < initial);
+      for (let i = 0; i < 8; i++) await page.keyboard.press("-");
+      assert.equal(await page.locator(action("zoomOut")).isDisabled(), true);
+      assert.ok(
+        Math.abs((await image.boundingBox()).width / initial - 0.25) < 0.001,
+      );
+      await page.locator(action("reset")).click();
+      assert.ok(Math.abs((await image.boundingBox()).width - initial) < 1);
+      assert.equal(await page.locator(action("zoomOut")).isEnabled(), true);
       await page.locator(action("zoomIn")).click();
       assert.ok((await image.boundingBox()).width > initial);
       await page.locator(action("zoomOut")).click();

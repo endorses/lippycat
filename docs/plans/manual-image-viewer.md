@@ -31,3 +31,10 @@ containment/restoration, mobile taps, print visibility, and nonbreaking referenc
 Both reported examples fill one viewport dimension at 2048×1152 without cropping;
 zoom reset and mobile resize checks pass in all three editions. Manual checks,
 all edition builds, and the viewer browser suite pass.
+
+## Zoom-out follow-up
+
+- [x] Allow zooming down to 25% of the fitted size; Fit to screen returns to 100%.
+- [x] Verify the minus control starts enabled, shrinks below fitted size, stops at
+      the lower bound, and becomes enabled again after reset in every edition.
+- [x] Format the changes and run the manual checks and builds.

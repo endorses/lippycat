@@ -119,7 +119,7 @@
 
   function setZoom(value) {
     if (!dimensions) return;
-    zoom = Math.max(1, Math.min(8, value));
+    zoom = Math.max(0.25, Math.min(8, value));
     const { viewport, canvas, image } = viewer;
     const centerX =
       (viewport.scrollLeft + viewport.clientWidth / 2) /
@@ -141,7 +141,7 @@
       canvas.offsetWidth * centerX - viewport.clientWidth / 2;
     viewport.scrollTop =
       canvas.offsetHeight * centerY - viewport.clientHeight / 2;
-    viewer.zoomOut.disabled = zoom <= 1;
+    viewer.zoomOut.disabled = zoom <= 0.25;
     viewer.zoomIn.disabled = zoom >= 8;
   }
 

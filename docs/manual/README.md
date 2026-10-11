@@ -161,8 +161,9 @@ particular occurrence when it needs an explanation:
 ```
 
 Translate the visible word while retaining `data-term` and its identifier. Explicit
-annotations are always eligible; only the first automatic occurrence per term in
-a chapter is enhanced. To suppress automatic matching in a passage, use:
+annotations are always eligible; every eligible automatic occurrence is enhanced,
+so hints are available when readers follow links to chapter subsections. To
+suppress automatic matching in a passage, use:
 
 ```html
 <span data-no-term-hints>Text without automatic glossary hints.</span>

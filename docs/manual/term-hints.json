@@ -191,7 +191,9 @@
   "pcap": {
     "automatic": true,
     "caseSensitive": true,
-    "aliases": {}
+    "aliases": {
+      "de": ["PCAP-Datei", "PCAP-Dateien"]
+    }
   },
   "per-call-pcap": {
     "automatic": true,

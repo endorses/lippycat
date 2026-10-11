@@ -64,9 +64,9 @@ inside longer identifiers, paths, or flag names. Preserve the original text.
 
 Exclude existing links, inline and fenced code, headings, diagrams, scripts,
 styles, navigation, form controls, glossary definitions, and generated hint UI.
-Repeated initialization must not create nested or duplicate triggers. Initially,
-enhance only the first automatic occurrence of each term in a chapter to avoid
-excessive keyboard stops; explicit annotations always remain available.
+Repeated initialization must not create nested or duplicate triggers. Enhance
+every eligible automatic occurrence so terms remain available when readers jump
+to a subsection; explicit annotations also remain available.
 
 Provide a documented explicit marker such as
 `<span data-term="processor">processor</span>` and an opt-out marker such as
@@ -246,3 +246,27 @@ translation checking confirms German and Catalan each have 5,599/5,599 current
 messages translated. The browser suite covers hover, touch, keyboard interaction,
 dark themes, and the actual translated editions. Formatting and staged whitespace
 checks pass. The merge is local; no remote branch is published by this operation.
+
+## Follow-up: hints throughout a chapter
+
+Readers entering a chapter through a subsection link need definitions beside the
+terms in that section. The user's request supersedes the original first-occurrence
+matching policy. Apply automatic hints to every eligible occurrence, preserving
+structural exclusions, boundary matching, localized definitions, and idempotent
+initialization.
+
+Recognize the manual's German `PCAP-Datei` and `PCAP-Dateien` forms through explicit
+aliases, keeping the existing guards for flags, identifiers, and paths.
+
+- [x] Remove the first-occurrence restriction and update contributor guidance.
+- [x] Verify repeated terms within and across paragraphs, subsection entry, keyboard navigation, touch interaction, and repeated initialization.
+- [x] Validate translations, build every edition, and format the correction.
+- [x] Commit the correction and this plan update.
+
+Validation: all 14 Chromium browser checks pass, including actual introduction
+subsection links and repeated mobile hints in English, German, and Catalan.
+`make manual-check manual` passes all 39 Python checks and builds every edition.
+Strict translation checking confirms German and Catalan each have 5,714/5,714
+current messages translated. Existing exclusions and boundary guards remain
+covered, and repeated initialization preserves the chapter text without creating
+nested triggers.

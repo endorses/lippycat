@@ -289,11 +289,6 @@
       trigger.append(...marker.childNodes);
       marker.replaceWith(trigger);
     }
-    const seen = new Set(
-      Array.from(main.querySelectorAll("[data-term-hint-automatic]")).map(
-        (trigger) => trigger.dataset.termHint,
-      ),
-    );
     const aliases = dictionary.terms
       .flatMap((term) => term.aliases.map((alias) => ({ alias, term })))
       .sort((a, b) => b.alias.length - a.alias.length);
@@ -324,11 +319,7 @@
             ? alias === match[0]
             : alias.toLowerCase() === match[0].toLowerCase(),
         );
-        if (
-          !found ||
-          seen.has(found.term.id) ||
-          !hasBoundaries(text, match.index, pattern.lastIndex)
-        ) {
+        if (!found || !hasBoundaries(text, match.index, pattern.lastIndex)) {
           continue;
         }
         fragment ||= document.createDocumentFragment();
@@ -337,7 +328,6 @@
         trigger.textContent = match[0];
         fragment.append(trigger);
         offset = pattern.lastIndex;
-        seen.add(found.term.id);
       }
       if (fragment) {
         fragment.append(text.slice(offset));

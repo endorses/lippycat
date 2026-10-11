@@ -18,11 +18,13 @@ const trigger = ".term-hint-trigger";
 const popup = "#manual-term-hint-popup";
 const fixtureText = `<h1>PCAP heading</h1>
 <p id="boundaries">PCAPish éPCAP PCAPé PCAP\u0301 \u0301PCAP x_PCAP PCAP_x /PCAP/file PCAP/file --PCAP PCAP-flag pcap PCAPs é PCAP, PCAP.</p>
+<p id="compound-aliases">PCAP-Datei PCAP-Dateien /PCAP-Datei/file --PCAP-Dateien xPCAP-Datei PCAP-Dateien_suffix</p>
 <p id="longest">Packet Capture and Packet. TLS TLS.</p>
 <p id="explicit"><span data-term="processor">localized processor</span> <span data-term="processor">another processor</span></p>
 <p id="excluded"><a href="#">PCAP</a> <code>PCAP</code> <span data-no-term-hints>PCAP <span data-term="processor">processor</span></span></p>
 <pre>PCAP TLS</pre><div class="mermaid">PCAP TLS</div><script type="text/plain">PCAP</script><style>/* PCAP */</style>
-<button id="outside">Outside</button><p id="new-content"></p><div aria-hidden="true" style="height:2000px"></div>`;
+<button id="outside">Outside</button><p id="new-content"></p><div aria-hidden="true" style="height:2000px"></div>
+<h2 id="later-section">Later section</h2><p id="repeated">PCAP and PCAP. TLS and TLS.</p>`;
 
 function fixture(url) {
   const lang = url.pathname.split("/")[2] || "en";
@@ -42,7 +44,7 @@ const dictionary = {
       id: "pcap",
       label: "PCAP",
       definition: "Packet Capture, a capture file format.",
-      aliases: ["PCAP"],
+      aliases: ["PCAP", "PCAP-Datei", "PCAP-Dateien"],
       caseSensitive: true,
     },
     {
@@ -150,15 +152,23 @@ async function main() {
     );
   const waitOpen = () => page.locator(popup).waitFor({ state: "visible" });
   try {
-    await test("Unicode, identifier, flag and path boundaries; first occurrence; longest aliases", async () => {
+    await test("Unicode, identifier, flag and path boundaries; every occurrence; longest aliases", async () => {
       await loadFixture();
       assert.deepEqual(
         await page.locator("#boundaries " + trigger).allTextContents(),
-        ["PCAP"],
+        ["PCAP", "PCAP"],
       );
       assert.deepEqual(
         await page.locator("#longest " + trigger).allTextContents(),
-        ["Packet Capture", "Packet", "TLS"],
+        ["Packet Capture", "Packet", "TLS", "TLS"],
+      );
+      assert.deepEqual(
+        await page.locator("#compound-aliases " + trigger).allTextContents(),
+        ["PCAP-Datei", "PCAP-Dateien"],
+      );
+      assert.deepEqual(
+        await page.locator("#repeated " + trigger).allTextContents(),
+        ["PCAP", "PCAP", "TLS", "TLS"],
       );
       assert.equal(
         await page.locator(`${trigger}[data-term-hint="processor"]`).count(),
@@ -186,6 +196,25 @@ async function main() {
       assert.equal(dictionaryRequests, requests);
       assert.equal(await page.locator(`${trigger} ${trigger}`).count(), 0);
       assert.equal(await page.locator("main").innerText(), text);
+    });
+    await test("subsection entry exposes repeated hints for hover and keyboard focus", async () => {
+      await loadFixture("nested/chapter.html#later-section");
+      const later = page.locator(`#repeated ${trigger}[data-term-hint="pcap"]`);
+      assert.equal(await later.count(), 2);
+      const earlier = await term("pcap").boundingBox();
+      assert.ok(earlier.y < 0, "the first occurrence is above the viewport");
+      await later.first().hover();
+      await waitOpen();
+      assert.equal(
+        await page.locator("#manual-term-hint-definition").textContent(),
+        dictionary.terms[0].definition,
+      );
+      await later.last().focus();
+      await waitOpen();
+      assert.equal(await later.last().getAttribute("aria-expanded"), "true");
+      await page.keyboard.press("Escape");
+      await waitClosed();
+      await loadFixture();
     });
     await test("hover preview remains open while entering popup and closes on leaving", async () => {
       await term("pcap").hover();
@@ -220,6 +249,8 @@ async function main() {
       await waitClosed();
     });
     await test("keyboard tooltip description, pin toggles, dismissal and prose Tab order", async () => {
+      // Keep the mouse away from terms so this checks focus-only dismissal.
+      await page.mouse.move(0, 0);
       await term("pcap").focus();
       await waitOpen();
       assert.equal(
@@ -260,7 +291,10 @@ async function main() {
       await term("pcap").focus();
       await page.keyboard.press("Tab");
       assert.equal(
-        await term("capture").evaluate((el) => el === document.activeElement),
+        await page
+          .locator(`${trigger}[data-term-hint="pcap"]`)
+          .nth(1)
+          .evaluate((el) => el === document.activeElement),
         true,
       );
       await page.keyboard.press("Escape");
@@ -302,7 +336,7 @@ async function main() {
         await mobile.goto(`${origin}/fixture/en/nested/chapter.html`);
         const button = mobile
           .locator(`${trigger}[data-term-hint="pcap"]`)
-          .first();
+          .last();
         await button.tap();
         await mobile.locator(popup).waitFor({ state: "visible" });
         await button.tap();
@@ -485,6 +519,48 @@ async function main() {
         );
       } finally {
         await disabled.close();
+      }
+    });
+    await test("introduction subsection links have localized repeated hints on desktop and mobile", async () => {
+      const mobileContext = await browser.newContext({
+        hasTouch: true,
+        viewport: { width: 390, height: 844 },
+      });
+      try {
+        const mobile = await mobileContext.newPage();
+        for (const language of languages) {
+          const url = `${origin}/book/${language.path}part1-foundations/introduction.html#use-cases`;
+          const data = JSON.parse(
+            fs.readFileSync(path.join(book, language.path, "term-hints.json")),
+          );
+          const pcap = data.terms.find((entry) => entry.id === "pcap");
+          const selector = `#use-cases + p ${trigger}[data-term-hint="pcap"]`;
+          await page.goto(url);
+          await page.locator(selector).waitFor();
+          assert.ok(
+            (await page.locator(`${trigger}[data-term-hint="pcap"]`).count()) >=
+              2,
+            `${language.code}: PCAP has hints in multiple sections`,
+          );
+          await page.locator(selector).hover();
+          await waitOpen();
+          assert.equal(
+            await page.locator("#manual-term-hint-definition").textContent(),
+            pcap.definition,
+          );
+          await mobile.goto(url);
+          const button = mobile.locator(selector);
+          await button.tap();
+          await mobile.locator(popup).waitFor({ state: "visible" });
+          assert.equal(
+            await mobile.locator("#manual-term-hint-definition").textContent(),
+            pcap.definition,
+          );
+          await button.tap();
+          await mobile.locator(popup).waitFor({ state: "hidden" });
+        }
+      } finally {
+        await mobileContext.close();
       }
     });
     await test("built editions have localized definitions, valid glossary fragments, clean search and print", async () => {

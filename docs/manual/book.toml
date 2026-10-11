@@ -17,6 +17,7 @@ additional-js = [
     "mermaid.min.js",
     "mermaid-init.js",
     "theme/language-selector.js",
+    "theme/sidebar.js",
     "theme/term-hints.js",
     "theme/external-links.js",
     "theme/image-viewer.js",

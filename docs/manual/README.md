@@ -241,12 +241,17 @@ PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
   CHROMIUM_EXECUTABLE=/usr/bin/chromium \
   node docs/manual/tools/test_image_viewer_browser.cjs
+PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
+  CHROMIUM_EXECUTABLE=/usr/bin/chromium \
+  node docs/manual/tools/test_sidebar_browser.cjs
 ```
 
 The browser suites serve local fixtures and the generated manual, check mouse,
 keyboard, touch, translations, exclusions, themes, and failure behavior, and close
 their servers and browsers when finished. The image viewer suite also verifies
 zoom, focus restoration, print behavior, and nonbreaking figure references.
+The sidebar suite checks outside taps and clicks below the mobile breakpoint,
+desktop persistence, and the existing toggle and accessibility state.
 Follow their output for screenshot artifacts and remove temporary QA files after
 review.
 

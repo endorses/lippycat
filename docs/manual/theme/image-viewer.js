@@ -128,7 +128,6 @@
       (viewport.scrollTop + viewport.clientHeight / 2) /
       (canvas.offsetHeight || 1);
     const fit = Math.min(
-      1,
       Math.max(1, viewport.clientWidth - 32) / dimensions.width,
       Math.max(1, viewport.clientHeight - 32) / dimensions.height,
     );

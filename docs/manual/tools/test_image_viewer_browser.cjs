@@ -35,6 +35,28 @@ const server = http.createServer((request, response) => {
   response.end(fs.readFileSync(file));
 });
 
+async function assertFitted(page) {
+  await page.waitForFunction((selector) => {
+    const image = document.querySelector(`${selector} img`);
+    return image?.complete && image.naturalWidth > 0;
+  }, dialog);
+  assert.ok(
+    await page.locator(dialog).evaluate((node) => {
+      const image = node.querySelector("img").getBoundingClientRect();
+      const viewport = node.querySelector(".manual-image-viewer-viewport");
+      const width = viewport.clientWidth - 32;
+      const height = viewport.clientHeight - 32;
+      return (
+        image.width <= width + 1 &&
+        image.height <= height + 1 &&
+        (Math.abs(image.width - width) < 1 ||
+          Math.abs(image.height - height) < 1)
+      );
+    }),
+    "Fit to screen must fill the available width or height without cropping",
+  );
+}
+
 async function main() {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const browser = await chromium.launch({
@@ -139,6 +161,23 @@ async function main() {
       assert.ok(
         await diagram.evaluate((node) => node === document.activeElement),
       );
+      await page.setViewportSize({ width: 2048, height: 1152 });
+      await page
+        .locator("#fig-multi-processor-topology svg[data-image-viewer]")
+        .click();
+      await assertFitted(page);
+      await page.locator(action("zoomIn")).click();
+      await page.locator(action("reset")).click();
+      await assertFitted(page);
+      if (screenshots)
+        await page.screenshot({
+          path: path.join(
+            screenshots,
+            `${language.code}-multi-processor-fit.png`,
+          ),
+        });
+      await page.keyboard.press("Escape");
+      await page.locator(`${dialog}[open]`).waitFor({ state: "hidden" });
 
       // Reproduce a paragraph with too little space at the end of the line.
       assert.ok(
@@ -175,6 +214,22 @@ async function main() {
       await page.goto(
         `${base}${language.path}part1-foundations/introduction.html`,
       );
+      await page
+        .locator("#fig-command-overview svg[data-image-viewer]")
+        .click();
+      await assertFitted(page);
+      if (screenshots)
+        await page.screenshot({
+          path: path.join(
+            screenshots,
+            `${language.code}-command-overview-fit.png`,
+          ),
+        });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await assertFitted(page);
+      await page.keyboard.press("Escape");
+      await page.locator(`${dialog}[open]`).waitFor({ state: "hidden" });
+      await page.setViewportSize({ width: 1440, height: 1000 });
       const gif = page.locator(
         'main img[src$="packet-stream.gif"][data-image-viewer]',
       );

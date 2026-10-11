@@ -19,3 +19,15 @@ Validation passed: 44 Python checks, complete German/Catalan translations
 and the image viewer suite across all three languages and all five themes.
 Browser checks cover SVG and GIF viewing, zoom and keyboard scrolling, focus
 containment/restoration, mobile taps, print visibility, and nonbreaking references.
+
+## Fit-to-screen follow-up
+
+- [x] Allow diagrams and images to scale above their original dimensions while
+      preserving aspect ratio and fitting within the viewer.
+- [x] Verify the command overview and multi-processor examples fill the available
+      width or height, including after resizing and resetting zoom.
+- [x] Format changes and run the manual checks and builds.
+
+Both reported examples fill one viewport dimension at 2048×1152 without cropping;
+zoom reset and mobile resize checks pass in all three editions. Manual checks,
+all edition builds, and the viewer browser suite pass.

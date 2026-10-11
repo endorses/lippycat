@@ -14,6 +14,8 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
 
 **[Read the Manual](https://🫦🐱.ws)** | **Status:** v0.13.0 - Early development. Expect breaking changes.
 
+![Live packet capture in lippycat with colored protocol rows and packet details](docs/demos/packet-stream.gif)
+
 ## Table of Contents
 
 - [Features](#features)
@@ -239,8 +241,8 @@ See `example-config.yaml` for configuration options.
 
 ```yaml
 voip:
-  tcp_performance_mode: "balanced"  # balanced, throughput, latency, memory
-  gpu_backend: "auto"               # auto, cuda, opencl, cpu-simd, disabled
+  tcp_performance_mode: "balanced" # balanced, throughput, latency, memory
+  gpu_backend: "auto" # auto, cuda, opencl, cpu-simd, disabled
   max_tcp_buffers: 10000
   enable_backpressure: true
 ```

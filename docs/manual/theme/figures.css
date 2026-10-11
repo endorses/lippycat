@@ -20,6 +20,12 @@ figure[data-figure-number] img {
   height: auto;
 }
 
+/* Keep the tall TUI screenshot compact in the chapter preview. */
+#fig-live-packet-details img {
+  max-height: min(60vh, 32rem);
+  width: auto;
+}
+
 figure[data-figure-number] figcaption {
   margin-top: 0.8rem;
   color: var(--fg);

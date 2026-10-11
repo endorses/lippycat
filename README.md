@@ -271,6 +271,11 @@ Standard builds use CPU SIMD. Use `make build-cuda` for GPU acceleration.
 Deploy hunters across network segments and aggregate to central processors. **TLS is enabled by default** for all gRPC connections—processors require certificates, hunters require CA verification.
 
 ```mermaid
+---
+config:
+  layout: dagre
+  look: classic
+---
 flowchart TB
     subgraph Edge["Distributed Hunters"]
         direction LR

@@ -24,6 +24,11 @@ A single capture point only sees traffic on its own network segment. In real-wor
 <!-- i18n:skip -->
 
 ```mermaid
+---
+config:
+  layout: dagre
+  look: classic
+---
 flowchart TB
     subgraph Edge["Distributed Hunters"]
         direction LR

@@ -212,7 +212,21 @@
   }
 
   function enhance(source) {
-    if (enhanced.has(source)) return;
+    if (enhanced.has(source) || !source.isConnected) return;
+    // mdBook 0.5.4 wraps images in a second, checkbox-based viewer. Keep
+    // the original image so a click opens only this accessible dialog.
+    const nativeWrapper = source.closest("label.checkbox-label");
+    if (nativeWrapper) {
+      const original = nativeWrapper.querySelector(":scope > img");
+      const checkbox = nativeWrapper.querySelector(
+        ":scope > input.checkbox-img",
+      );
+      const enlarged = nativeWrapper.querySelector(":scope > span.img-wrapper");
+      if (original && checkbox && enlarged) {
+        if (source !== original) return;
+        nativeWrapper.replaceWith(original);
+      }
+    }
     enhanced.add(source);
     descriptions.set(source, description(source));
     source.dataset.imageViewer = "true";
@@ -229,7 +243,10 @@
     source.setAttribute("tabindex", "0");
     source.setAttribute("aria-haspopup", "dialog");
     source.setAttribute("aria-label", label);
-    source.addEventListener("click", () => open(source, source));
+    source.addEventListener("click", (event) => {
+      event.preventDefault();
+      open(source, source);
+    });
     source.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();

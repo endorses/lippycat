@@ -30,6 +30,7 @@ const server = http.createServer((request, response) => {
       ".css": "text/css",
       ".json": "application/json",
       ".gif": "image/gif",
+      ".png": "image/png",
     }[path.extname(file)] || "application/octet-stream",
   );
   response.end(fs.readFileSync(file));
@@ -55,6 +56,18 @@ async function assertFitted(page) {
     }),
     "Fit to screen must fill the available width or height without cropping",
   );
+}
+
+async function assertDismissed(page, opener) {
+  await page.locator(`${dialog}[open]`).waitFor({ state: "hidden" });
+  assert.equal(await page.locator("input.checkbox-img:checked").count(), 0);
+  assert.equal(
+    await page.locator("main label.checkbox-label, main .img-wrapper").count(),
+    0,
+    "mdBook's native viewer must not remain beneath the manual viewer",
+  );
+  await page.waitForFunction(() => document.body.style.overflow === "");
+  assert.ok(await opener.evaluate((node) => node === document.activeElement));
 }
 
 async function main() {
@@ -245,6 +258,11 @@ async function main() {
         'main img[src$="packet-stream.gif"][data-image-viewer]',
       );
       await gif.waitFor();
+      assert.equal(await gif.count(), 1);
+      await gif.click();
+      await page.locator(`${dialog}[open]`).waitFor();
+      await page.locator(action("close")).click();
+      await assertDismissed(page, gif);
       await gif.focus();
       await page.keyboard.press("Space");
       await page.locator(`${dialog}[open]`).waitFor();
@@ -253,7 +271,42 @@ async function main() {
         /packet-stream\.gif$/,
       );
       await page.locator(action("close")).click();
-      assert.ok(await gif.evaluate((node) => node === document.activeElement));
+      await assertDismissed(page, gif);
+
+      // Native wrappers added after startup must also lose their second viewer.
+      await page.evaluate(() => {
+        const fixture = document.createElement("p");
+        fixture.id = "dynamic-native-image";
+        const label = document.createElement("label");
+        label.className = "checkbox-label";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "checkbox-img";
+        const image = document.createElement("img");
+        image.src = document.querySelector(
+          'main img[src$="packet-stream.gif"]',
+        ).src;
+        image.alt = "Dynamically added image";
+        const enlarged = document.createElement("span");
+        enlarged.className = "img-wrapper";
+        enlarged.append(image.cloneNode());
+        label.append(checkbox, image, enlarged);
+        fixture.append(label);
+        document.querySelector("main").append(fixture);
+      });
+      const dynamic = page.locator(
+        "#dynamic-native-image > img[data-image-viewer]",
+      );
+      await dynamic.waitFor();
+      assert.equal(await page.locator("#dynamic-native-image img").count(), 1);
+      await dynamic.click();
+      await page.locator(`${dialog}[open]`).waitFor();
+      await page.keyboard.press("Escape");
+      await assertDismissed(page, dynamic);
+      await page
+        .locator("#dynamic-native-image")
+        .evaluate((node) => node.remove());
+
       await page.setViewportSize({ width: 390, height: 844 });
       await gif.tap();
       await page.locator(`${dialog}[open]`).waitFor();
@@ -271,7 +324,35 @@ async function main() {
       assert.equal(await page.locator(dialog).isVisible(), false);
       assert.equal(await gif.isVisible(), true);
       await page.emulateMedia({ media: "screen" });
+      await page.locator(`${dialog} .manual-image-viewer-viewport`).focus();
       await page.keyboard.press("Escape");
+
+      await assertDismissed(page, gif);
+      await page.goto(
+        `${base}${language.path}part2-local-capture/watch-local.html`,
+      );
+      const screenshot = page.locator(
+        "#fig-live-packet-details img[data-image-viewer]",
+      );
+      await screenshot.waitFor();
+      assert.equal(await screenshot.count(), 1);
+      await screenshot.tap();
+      await page.locator(`${dialog}[open]`).waitFor();
+      await assertFitted(page);
+      await page.locator(`${dialog} .manual-image-viewer-viewport`).click({
+        position: { x: 2, y: 2 },
+      });
+      await assertDismissed(page, screenshot);
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await screenshot.click();
+      await page.locator(`${dialog}[open]`).waitFor();
+      await page.keyboard.press("Escape");
+      await assertDismissed(page, screenshot);
+      await screenshot.focus();
+      await page.keyboard.press("Enter");
+      await page.locator(`${dialog}[open]`).waitFor();
+      await page.locator(action("close")).click();
+      await assertDismissed(page, screenshot);
       await page.close();
       console.log(
         `${language.code}: keyboard, zoom, focus, GIF, mobile, print, and nonbreaking references passed`,

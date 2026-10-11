@@ -1,0 +1,135 @@
+.manual-image-viewer-trigger {
+  cursor: zoom-in;
+}
+
+.manual-image-viewer-trigger:focus-visible,
+.manual-image-viewer button:focus-visible,
+.manual-image-viewer-open:focus-visible,
+.manual-image-viewer-viewport:focus-visible {
+  outline: 2px solid var(--links);
+  outline-offset: 3px;
+}
+
+.manual-image-viewer {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.manual-image-viewer[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.manual-image-viewer::backdrop {
+  background: rgb(0 0 0 / 75%);
+}
+
+.manual-image-viewer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem max(1rem, env(safe-area-inset-right)) 0.75rem
+    max(1rem, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--table-border-color);
+}
+
+.manual-image-viewer-toolbar h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 1em;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-image-viewer-controls {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+
+.manual-image-viewer button,
+.manual-image-viewer-open {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--table-border-color);
+  border-radius: 4px;
+  background: var(--theme-popup-bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 1.5em;
+  cursor: pointer;
+}
+
+.manual-image-viewer button:hover,
+.manual-image-viewer-open:hover {
+  background: var(--theme-hover);
+}
+
+.manual-image-viewer button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.manual-image-viewer-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.manual-image-viewer-canvas {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.manual-image-viewer-canvas img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  max-height: none;
+  transform: translate(-50%, -50%);
+}
+
+@media (max-width: 480px) {
+  .manual-image-viewer-toolbar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .manual-image-viewer-toolbar h2 {
+    flex-basis: 100%;
+  }
+
+  .manual-image-viewer-controls {
+    margin-left: auto;
+  }
+}
+
+@media print {
+  .manual-image-viewer,
+  .manual-image-viewer-open {
+    display: none !important;
+  }
+
+  .manual-image-viewer-trigger {
+    cursor: auto;
+    outline: none;
+  }
+}

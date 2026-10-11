@@ -24,6 +24,7 @@ figure[data-figure-number] figcaption {
 
 figure[data-figure-number] .figure-label {
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .figure-list ul {

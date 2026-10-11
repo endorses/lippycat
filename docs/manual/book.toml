@@ -19,6 +19,7 @@ additional-js = [
     "theme/language-selector.js",
     "theme/term-hints.js",
     "theme/external-links.js",
+    "theme/image-viewer.js",
 ]
 additional-css = [
     "theme/language-selector.css",
@@ -26,6 +27,7 @@ additional-css = [
     "theme/figures.css",
     "theme/comparison.css",
     "theme/external-links.css",
+    "theme/image-viewer.css",
 ]
 
 [preprocessor.mermaid]

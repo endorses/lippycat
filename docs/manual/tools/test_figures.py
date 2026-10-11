@@ -56,7 +56,7 @@ class FigureTests(unittest.TestCase):
         ]
         for number, content in enumerate(contents, 1):
             self.assertIn(f' data-figure-number="{number}"', content)
-            self.assertIn(f"Figure {number}:</span>", content)
+            self.assertIn(f"Figure\u00a0{number}:</span>", content)
         self.assertIn('aria-labelledby="fig-overview-caption"', contents[0])
         self.assertIn('<figcaption id="fig-overview-caption">', contents[0])
         self.assertEqual(original["sections"][1]["Chapter"]["content"], figure())
@@ -69,14 +69,16 @@ class FigureTests(unittest.TestCase):
                     {"sections": [chapter(figure(caption="Überblick <em>àgil</em>."))]},
                     language,
                 )["sections"][0]["Chapter"]["content"]
-                self.assertIn(f"{label} 1:</span> Überblick <em>àgil</em>.", content)
+                self.assertIn(
+                    f"{label}\u00a01:</span> Überblick <em>àgil</em>.", content
+                )
         with self.assertRaisesRegex(ValueError, "unsupported figure language"):
             figures.preprocess({"sections": []}, "xx")
 
     def test_current_mdbook_items_protocol(self):
         output = figures.preprocess({"items": [chapter(figure())]}, "en")
         self.assertNotIn("sections", output)
-        self.assertIn("Figure 1:", output["items"][0]["Chapter"]["content"])
+        self.assertIn("Figure\u00a01:", output["items"][0]["Chapter"]["content"])
 
     def test_forward_nested_and_same_chapter_references(self):
         detail = chapter(
@@ -92,10 +94,10 @@ class FigureTests(unittest.TestCase):
         later["Chapter"]["source_path"] = "advanced/later.md"
         output = figures.preprocess({"items": [overview, later]}, "de")
         content = output["items"][0]["Chapter"]["content"]
-        self.assertIn("[Abbildung 3](../advanced/later.md#fig-later)", content)
-        self.assertIn("[Abbildung 1](#fig-overview)", content)
+        self.assertIn("[Abbildung\u00a03](../advanced/later.md#fig-later)", content)
+        self.assertIn("[Abbildung\u00a01](#fig-overview)", content)
         self.assertIn(
-            "[Abbildung 1](../overview.md#fig-overview)",
+            "[Abbildung\u00a01](../overview.md#fig-overview)",
             output["items"][0]["Chapter"]["sub_items"][0]["Chapter"]["content"],
         )
 
@@ -110,11 +112,13 @@ class FigureTests(unittest.TestCase):
         content = output["sections"][1]["Chapter"]["content"]
         self.assertIn('<div class="figure-list">\n\n', content)
         self.assertIn(
-            "- [Figura 1: Els nodes \\[A\\] & B\\.](../overview.md#fig-overview)",
+            "- [Figura\u00a01: Els nodes \\[A\\] & B\\.](../overview.md#fig-overview)",
             content,
         )
-        self.assertIn("- [Figura 2: Un detall\\.](../detail.md#fig-detail)", content)
-        self.assertLess(content.index("Figura 1"), content.index("Figura 2"))
+        self.assertIn(
+            "- [Figura\u00a02: Un detall\\.](../detail.md#fig-detail)", content
+        )
+        self.assertLess(content.index("Figura\u00a01"), content.index("Figura\u00a02"))
         self.assertNotIn("<em>", content)
         self.assertNotIn("{{#figure", content)
 
@@ -136,7 +140,7 @@ class FigureTests(unittest.TestCase):
             0
         ]["Chapter"]["content"]
         self.assertTrue(output.startswith(examples))
-        self.assertIn("See [Figure 1](#fig-overview).", output)
+        self.assertIn("See [Figure\u00a01](#fig-overview).", output)
 
     def test_unknown_and_malformed_references_report_chapter_context(self):
         for content, message in [
@@ -190,7 +194,7 @@ class FigureTests(unittest.TestCase):
             0
         ]["Chapter"]["content"]
         self.assertTrue(output.startswith(example))
-        self.assertIn("Figure 1:", output)
+        self.assertIn("Figure\u00a01:", output)
 
     def test_reject_invalid_author_markup_with_chapter_context(self):
         examples = {
@@ -268,7 +272,7 @@ class FigureTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         output = json.loads(result.stdout)
-        self.assertIn("Figura 1:", output["sections"][0]["Chapter"]["content"])
+        self.assertIn("Figura\u00a01:", output["sections"][0]["Chapter"]["content"])
         book["sections"][0]["Chapter"]["content"] = "```mermaid\nx\n```"
         result = subprocess.run(
             [sys.executable, str(SCRIPT)],
@@ -305,7 +309,7 @@ class FigureTests(unittest.TestCase):
             for name in ("overview.html", "print.html"):
                 output = (root / "book" / name).read_text()
                 self.assertIn('<figure id="fig-overview" aria-labelledby=', output)
-                self.assertIn('class="figure-label">Abbildung 1:</span>', output)
+                self.assertIn('class="figure-label">Abbildung\u00a01:</span>', output)
                 self.assertIn('class="language-mermaid"', output)
                 self.assertNotIn("```mermaid", output)
 
@@ -343,15 +347,15 @@ class FigureTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             overview = (root / "book" / "overview.html").read_text()
-            self.assertIn('href="detail.html#fig-detail">Figure 2</a>', overview)
-            self.assertIn('href="#fig-overview">Figure 1</a>', overview)
+            self.assertIn('href="detail.html#fig-detail">Figure\u00a02</a>', overview)
+            self.assertIn('href="#fig-overview">Figure\u00a01</a>', overview)
             index = (root / "book" / "appendices" / "list.html").read_text()
-            self.assertIn('href="../overview.html#fig-overview">Figure 1:', index)
-            self.assertIn('href="../detail.html#fig-detail">Figure 2:', index)
+            self.assertIn('href="../overview.html#fig-overview">Figure\u00a01:', index)
+            self.assertIn('href="../detail.html#fig-detail">Figure\u00a02:', index)
             printed = (root / "book" / "print.html").read_text()
-            self.assertIn('href="#fig-detail">Figure 2</a>', printed)
-            self.assertIn('href="#fig-overview">Figure 1:', printed)
-            self.assertIn('href="#fig-detail">Figure 2:', printed)
+            self.assertIn('href="#fig-detail">Figure\u00a02</a>', printed)
+            self.assertIn('href="#fig-overview">Figure\u00a01:', printed)
+            self.assertIn('href="#fig-detail">Figure\u00a02:', printed)
             self.assertNotIn("{{#figure", printed)
 
 

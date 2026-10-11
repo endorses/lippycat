@@ -22,7 +22,15 @@
       "Copied!": "Copiat!"
     },
     "selectorLabel": "Selecciona la llengua",
-    "externalLinkLabel": "s’obre en una pestanya nova"
+    "externalLinkLabel": "s’obre en una pestanya nova",
+    "imageViewer": {
+      "open": "Obre la imatge a pantalla completa",
+      "title": "Visor d’imatges",
+      "close": "Tanca el visor d’imatges",
+      "zoomIn": "Apropa",
+      "zoomOut": "Allunya",
+      "reset": "Ajusta a la pantalla"
+    }
   },
   {
     "code": "en",
@@ -31,7 +39,15 @@
     "title": "lippycat 🫦🐱 Manual",
     "description": "Comprehensive guide to network traffic capture and analysis with lippycat",
     "selectorLabel": "Select language",
-    "externalLinkLabel": "opens in a new tab"
+    "externalLinkLabel": "opens in a new tab",
+    "imageViewer": {
+      "open": "Open image fullscreen",
+      "title": "Image viewer",
+      "close": "Close image viewer",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "reset": "Fit to screen"
+    }
   },
   {
     "code": "de",
@@ -56,6 +72,14 @@
       "Copied!": "Kopiert!"
     },
     "selectorLabel": "Sprache auswählen",
-    "externalLinkLabel": "öffnet in einem neuen Tab"
+    "externalLinkLabel": "öffnet in einem neuen Tab",
+    "imageViewer": {
+      "open": "Bild im Vollbild öffnen",
+      "title": "Bildansicht",
+      "close": "Bildansicht schließen",
+      "zoomIn": "Vergrößern",
+      "zoomOut": "Verkleinern",
+      "reset": "An Bildschirm anpassen"
+    }
   }
 ]

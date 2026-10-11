@@ -118,6 +118,21 @@ Missing wrappers, malformed markup, and duplicate anchors fail the build with
 chapter context. When adding a language, add its figure label in `tools/figures.py`.
 Caption text is searchable, and caption styling follows the current theme and
 keeps figures together for printing when page space permits.
+Figure labels and numbers use a nonbreaking space in references, captions, and
+the appendix, including print output.
+
+## Image viewer
+
+Click or tap a chapter image or Mermaid diagram to open it in a fullscreen
+viewer. Keyboard users can focus the image and press Enter or Space. Use the
+zoom controls to enlarge details and scroll the image; Fit to screen restores
+the initial view. Close the viewer with its close button or Escape. Focus
+returns to the original image.
+
+The viewer preserves animated GIFs and uses each edition's `imageViewer` labels
+in `languages.json`. Diagrams are rendered independently inside the viewer so
+their SVG identifiers do not collide with the chapter. Print output retains the
+ordinary chapter images and captions.
 
 ## External links
 
@@ -194,19 +209,24 @@ Use `make manual-serve` to preview hints; a bare `mdbook build` does not run thi
 post-build step. JavaScript-disabled readers still have the complete glossary.
 
 `make manual-check` runs Python regression checks, including dictionary validation.
-After building all editions, run the separate browser suite with an installed
+After building all editions, run the separate browser suites with an installed
 Playwright module and Chromium:
 
 ```bash
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
   CHROMIUM_EXECUTABLE=/usr/bin/chromium \
   node docs/manual/tools/test_term_hints_browser.cjs
+PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
+  CHROMIUM_EXECUTABLE=/usr/bin/chromium \
+  node docs/manual/tools/test_image_viewer_browser.cjs
 ```
 
-The browser suite serves local fixtures and the generated manual, checks mouse,
-keyboard, touch, translations, exclusions, themes, and failure behavior, and closes
-its server and browser when finished. Follow its output for screenshot artifacts
-and remove temporary QA files after review.
+The browser suites serve local fixtures and the generated manual, check mouse,
+keyboard, touch, translations, exclusions, themes, and failure behavior, and close
+their servers and browsers when finished. The image viewer suite also verifies
+zoom, focus restoration, print behavior, and nonbreaking figure references.
+Follow their output for screenshot artifacts and remove temporary QA files after
+review.
 
 ## Updating translations
 

@@ -232,7 +232,7 @@ def preprocess(book, language):
                     )
                     escaped = re.sub(r"([\\`*_{}\[\]()#+.!<>|])", r"\\\1", visible)
                     links.append(
-                        f"- [{LABELS[language]} {number}: {escaped}]({href(path, target, identifier)})"
+                        f"- [{LABELS[language]}\u00a0{number}: {escaped}]({href(path, target, identifier)})"
                     )
                 replacement = (
                     '<div class="figure-list">\n\n' + "\n".join(links) + "\n\n</div>"
@@ -243,7 +243,7 @@ def preprocess(book, language):
                         f"{context}:{reference.line + 1}: unknown figure {reference.identifier}"
                     )
                 number, target, _caption = catalog[reference.identifier]
-                replacement = f"[{LABELS[language]} {number}]({href(path, target, reference.identifier)})"
+                replacement = f"[{LABELS[language]}\u00a0{number}]({href(path, target, reference.identifier)})"
             line = lines[reference.line]
             lines[reference.line] = (
                 line[: reference.start] + replacement + line[reference.end :]
@@ -262,7 +262,7 @@ def preprocess(book, language):
             )
             lines[figure.caption] = (
                 f'<figcaption id="{caption_id}"><span class="figure-label">'
-                f"{LABELS[language]} {number}:</span> {figure.text}</figcaption>{caption_ending}"
+                f"{LABELS[language]}\u00a0{number}:</span> {figure.text}</figcaption>{caption_ending}"
             )
         chapter["content"] = "".join(lines)
     return result

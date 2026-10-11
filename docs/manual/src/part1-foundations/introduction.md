@@ -106,7 +106,7 @@ graph LR
     end
 ```
 
-<figcaption>Local and distributed capture commands.</figcaption>
+<figcaption>Learning path through the manual, from local capture to distributed capture and remote monitoring.</figcaption>
 
 <!-- i18n:skip -->
 

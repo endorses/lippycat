@@ -34993,9 +34993,13 @@ msgstr ""
 "política d'inventari](#inventory-evidence-policy) i [Privadesa i "
 "compatibilitat](#network-privacy-compatibility)."
 
-#: src/part1-foundations/introduction.md:104
-msgid "<figcaption>Local and distributed capture commands.</figcaption>\n"
-msgstr "<figcaption>Ordres de captura local i distribuïda.</figcaption>\n"
+#: src/part1-foundations/introduction.md:109
+msgid ""
+"<figcaption>Learning path through the manual, from local capture to "
+"distributed capture and remote monitoring.</figcaption>\n"
+msgstr ""
+"<figcaption>Itinerari d’aprenentatge del manual: de la captura local a la "
+"captura distribuïda i el monitoratge remot.</figcaption>\n"
 
 #: src/part1-foundations/core-concepts.md:158
 msgid ""

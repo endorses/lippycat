@@ -35320,10 +35320,13 @@ msgstr ""
 "[Inventarnachweise und Richtlinie](#inventory-evidence-policy) und "
 "[Datenschutz und Kompatibilität](#network-privacy-compatibility)."
 
-#: src/part1-foundations/introduction.md:104
-msgid "<figcaption>Local and distributed capture commands.</figcaption>\n"
+#: src/part1-foundations/introduction.md:109
+msgid ""
+"<figcaption>Learning path through the manual, from local capture to "
+"distributed capture and remote monitoring.</figcaption>\n"
 msgstr ""
-"<figcaption>Befehle für lokale und verteilte Paketerfassung.</figcaption>\n"
+"<figcaption>Lernpfad durch das Handbuch: von lokaler Paketerfassung über "
+"verteilte Erfassung bis zur Fernüberwachung.</figcaption>\n"
 
 #: src/part1-foundations/core-concepts.md:158
 msgid ""

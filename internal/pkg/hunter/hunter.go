@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -20,6 +21,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	"github.com/endorses/lippycat/internal/pkg/failover"
+	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
 	"github.com/endorses/lippycat/internal/pkg/gpuaccel"
 	huntercapture "github.com/endorses/lippycat/internal/pkg/hunter/capture"
 	"github.com/endorses/lippycat/internal/pkg/hunter/connection"
@@ -27,8 +30,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/endorses/lippycat/internal/pkg/hunter/filtering"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
+	"github.com/endorses/lippycat/internal/pkg/hunter/packetforwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/packetreceipt"
+	"github.com/endorses/lippycat/internal/pkg/packetspool"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/radius"
@@ -58,6 +64,8 @@ func stableFilterIDUnion(direct, inherited []string) []string {
 
 // Config contains hunter configuration
 type Config struct {
+	Packets           packetforwarding.Config
+	FilterPolicy      filterpolicy.Config
 	EventAnalysis     *eventconfig.Config
 	MediaAdmission    *admissionintegration.Session
 	RADIUSPorts       []uint16
@@ -66,6 +74,8 @@ type Config struct {
 	RADIUSCorrelation radius.CorrelatorConfig
 	RADIUSMatcher     radius.ObservationMatcher
 	ProcessorAddr     string
+	Processors        []failover.Endpoint
+	Failover          failover.Config
 	HunterID          string
 	Interfaces        []string
 	BPFFilter         string
@@ -109,7 +119,11 @@ type Config struct {
 
 // Hunter represents a hunter node
 type Hunter struct {
-	config Config
+	packetReplay          atomic.Uint64
+	packetSpool           *packetspool.Spool
+	packetReceiptVerifier *packetreceipt.Verifier
+	packetProducer        *forwarding.Manager
+	config                Config
 
 	// Managers
 	captureManager    *huntercapture.Manager
@@ -161,8 +175,22 @@ func New(config Config) (*Hunter, error) {
 			return nil, fmt.Errorf("RADIUS service port must be nonzero")
 		}
 	}
-	if config.ProcessorAddr == "" {
+	legacyProcessor := config.ProcessorAddr
+	if len(config.Processors) > 0 {
+		legacyProcessor = ""
+	}
+	endpoints, err := failover.NormalizeEndpoints(legacyProcessor, config.Processors)
+	if err != nil {
+		return nil, fmt.Errorf("processor endpoints: %w", err)
+	}
+	if len(endpoints) == 0 {
 		return nil, fmt.Errorf("processor address is required")
+	}
+	config.Processors = endpoints
+	config.ProcessorAddr = endpoints[0].Address
+	config.Failover, err = failover.NormalizeConfig(config.Failover)
+	if err != nil {
+		return nil, fmt.Errorf("processor failover: %w", err)
 	}
 
 	if config.HunterID == "" {
@@ -212,6 +240,7 @@ func New(config Config) (*Hunter, error) {
 		BufferSize:            config.BufferSize,
 		SIPBufferSize:         config.SIPBufferSize,
 		ProcessorAddr:         config.ProcessorAddr,
+		Processors:            append([]failover.Endpoint(nil), config.Processors...),
 	}, ctx)
 
 	// Determine batch queue size (default or configured)
@@ -235,7 +264,14 @@ func New(config Config) (*Hunter, error) {
 
 	// Create filter manager with capture restarter interface
 	h.filterManager = filtering.New(config.HunterID, captureManager, h)
-	if config.ForwardMode == "events" {
+	if err := h.filterManager.InitializeSharedPolicy(config.FilterPolicy, config.SupportedFilterTypes); err != nil {
+		return nil, fmt.Errorf("initialize hunter shared policy: %w", err)
+	}
+	if err := h.configureReliablePackets(); err != nil {
+		return nil, errors.Join(err, h.filterManager.CloseSharedPolicy())
+	}
+	h.statsCollector.SetRawPacketProvider(h.rawPacketStatus)
+	if config.ForwardMode == "events" || h.packetSpool != nil {
 		h.filterManager.SetPolicyChangeCoordinator(h)
 	}
 
@@ -255,6 +291,12 @@ func (h *Hunter) SetPacketProcessor(processor forwarding.PacketProcessor) {
 func (h *Hunter) Start(ctx context.Context) error {
 	h.ctx, h.cancel = context.WithCancel(ctx)
 	defer h.cancel()
+	defer h.closeReliablePackets()
+	defer func() {
+		if err := h.filterManager.CloseSharedPolicy(); err != nil {
+			logger.Error("Failed to close hunter shared policy", "error", err)
+		}
+	}()
 
 	logger.Info("Hunter starting", "hunter_id", h.config.HunterID)
 	if h.config.ForwardMode == "events" {
@@ -330,7 +372,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 
 	appFilter, err := NewApplicationFilter(gpuConfig)
 	if err != nil {
-		if h.config.MediaAdmission != nil {
+		if h.config.MediaAdmission != nil || h.config.FilterPolicy.Owner == "li" {
 			return fmt.Errorf("initialize required admission selection filter: %w", err)
 		}
 		logger.Warn("Failed to initialize application filter, continuing without it", "error", err)
@@ -390,18 +432,32 @@ func (h *Hunter) Start(ctx context.Context) error {
 	// It was created with a background context, but that's fine - it will create
 	// its own child context in Start() anyway. No need to recreate the manager here.
 
-	// Start packet capture first (works independently of processor connection)
-	filters := h.filterManager.GetFilters()
-	if err := h.captureManager.Start(filters); err != nil {
-		return fmt.Errorf("failed to start capture: %w", err)
+	// A waiting shared-policy hunter establishes authenticated policy before
+	// opening capture. Its stable queue can already serve transport readiness.
+	if err := h.captureManager.PrepareBuffer(); err != nil {
+		return err
 	}
 	defer h.captureManager.Stop()
+	defer func() { h.cancel(); h.wg.Wait() }()
+	captureStarted := h.filterManager.SharedStartupReady()
+	h.startReliablePacketProducer()
+	if captureStarted {
+		if err := h.captureManager.Start(h.filterManager.GetFilters()); err != nil {
+			return fmt.Errorf("failed to start capture: %w", err)
+		}
+	}
 
 	// Create and start connection manager (handles initial connect and reconnections)
 	h.connectionManager = connection.New(
 		connection.Config{
-			InventoryEnabled:      h.config.EventAnalysis.Inventory.Enabled,
-			ProcessorAddr:         h.config.ProcessorAddr,
+			OpenPacketStream: h.reliablePacketStreamFactory(),
+			InventoryEnabled: h.config.EventAnalysis.Inventory.Enabled,
+			ProcessorAddr:    "", // Processors is the normalized source of truth.
+			Processors:       append([]failover.Endpoint(nil), h.config.Processors...),
+			Failover:         h.config.Failover,
+			OnEndpoint: func(ctx context.Context, endpoint failover.Endpoint) error {
+				return h.captureManager.PrepareProcessor(ctx, endpoint, h.filterManager.GetFilters())
+			},
 			HunterID:              h.config.HunterID,
 			Interfaces:            h.config.Interfaces,
 			BufferSize:            h.config.BufferSize,
@@ -427,7 +483,32 @@ func (h *Hunter) Start(ctx context.Context) error {
 		h.handleFlowControl,
 	)
 	h.connectionManager.SetEventForwarder(h.eventForwarder)
+	h.statsCollector.SetProcessorSelectionProvider(func() *management.ProcessorSelectionStatus {
+		status := h.connectionManager.Status()
+		addresses := make([]string, len(status.Candidates))
+		for i, endpoint := range status.Candidates {
+			addresses[i] = endpoint.Address
+		}
+		var lastConnected int64
+		if !status.LastConnected.IsZero() {
+			lastConnected = status.LastConnected.UnixNano()
+		}
+		return &management.ProcessorSelectionStatus{Candidates: addresses, ActiveEndpoint: status.ActiveEndpoint, AttemptEndpoint: status.AttemptEndpoint, State: status.State, Reason: status.Reason, LastConnectedNs: lastConnected, FailoverCount: status.Failovers}
+	})
 	h.connectionManager.Start(h.ctx, &h.wg)
+	if !captureStarted {
+		select {
+		case <-h.ctx.Done():
+			h.wg.Wait()
+			return h.ctx.Err()
+		case <-h.filterManager.SharedReady():
+		}
+		if err := h.captureManager.Start(h.filterManager.GetFilters()); err != nil {
+			h.cancel()
+			h.wg.Wait()
+			return fmt.Errorf("start capture after shared policy: %w", err)
+		}
+	}
 	if h.eventRuntime != nil {
 		h.wg.Add(1)
 		go func() {
@@ -772,6 +853,9 @@ func (h *Hunter) ApplyPolicyChange(apply func() error) error {
 		return nil
 	}
 	if h.config.ForwardMode != "events" {
+		if h.packetProducer != nil {
+			return h.packetProducer.ApplyCapturePolicy(h.filterManager.EffectiveCapturePolicy(), apply)
+		}
 		return apply()
 	}
 	h.eventMu.RLock()
@@ -877,42 +961,26 @@ func (h *Hunter) CreateForwardingManager(connCtx context.Context, stream data.Da
 			"queue_capacity", h.batchQueueSize)
 	}
 
+	config := h.packetForwardingConfig()
+	if h.packetSpool != nil {
+		var err error
+		config, err = h.reliableSenderConfig(stream)
+		if err != nil {
+			logger.Error("Cannot construct reliable raw sender", "error", err)
+			h.cancel()
+			config.ExternalProducer = true
+		}
+	}
 	fwdMgr := forwarding.New(
-		forwarding.Config{
-			RADIUSPorts:        h.config.RADIUSPorts,
-			RADIUSScope:        h.config.RADIUSScope,
-			RADIUSOnly:         h.config.RADIUSOnly,
-			RADIUSCorrelation:  h.config.RADIUSCorrelation,
-			RADIUSMatcher:      h.config.RADIUSMatcher,
-			HunterID:           h.config.HunterID,
-			BatchSize:          h.config.BatchSize,
-			BatchTimeout:       h.config.BatchTimeout,
-			BufferSize:         h.config.BufferSize,
-			DiskBufferEnabled:  h.config.DiskBufferEnabled,
-			DiskBufferDir:      h.config.DiskBufferDir,
-			DiskBufferMaxSize:  h.config.DiskBufferMaxSize,
-			IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers"),
-			// BatchQueueSize omitted - we pass the queue directly
-		},
+		config,
 		h.statsCollector,
 		h.captureManager,
 		connCtx,
 		h.batchQueue, // Pass persistent queue (survives reconnections)
 	)
 	fwdMgr.SetStream(stream)
-	if h.packetProcessor != nil {
-		fwdMgr.SetPacketProcessor(h.packetProcessor)
-	}
-	if h.applicationFilter != nil {
-		fwdMgr.SetApplicationFilter(h.applicationFilter)
-	}
-	if h.dnsProcessor != nil {
-		fwdMgr.SetDNSMetadataProvider(h.dnsProcessor)
-	}
-	// Set disconnect callback to trigger reconnection on send failures
-	fwdMgr.SetDisconnectCallback(func() {
-		h.MarkDisconnected()
-	})
+	h.configurePacketProcessor(fwdMgr)
+	// The connection owner installs its generation-specific disconnect callback.
 	return fwdMgr
 }
 
@@ -985,11 +1053,14 @@ func (h *Hunter) ForwardPacketWithFilterProvenance(packet gopacket.Packet, metad
 		return fmt.Errorf("cannot forward nil packet")
 	}
 
-	if h.connectionManager == nil {
+	if h.connectionManager == nil && h.packetProducer == nil {
 		return fmt.Errorf("connection manager not initialized")
 	}
 
-	forwardingManager := h.connectionManager.GetForwardingManager()
+	forwardingManager := h.packetProducer
+	if forwardingManager == nil {
+		forwardingManager = h.connectionManager.GetForwardingManager()
+	}
 	if forwardingManager == nil {
 		return fmt.Errorf("forwarding manager not initialized")
 	}

@@ -629,3 +629,7 @@ processor:
 ```
 
 For production deployment procedures (systemd services, monitoring, health checks), see [Chapter 12: Operations Runbook](../part4-administration/operations.md).
+
+### Upstream Failover {#upstream-failover}
+
+Use `--processors upstream-a:55555,upstream-b:55555` for ordered external alternatives with one sticky active connection. See [Failover and Reliable Delivery](processor-failover.md#failover-and-reliable-delivery) for shared selection settings, authenticated raw relay admission, signed policy, central receipts and operational limits. Tap local outputs continue during upstream outages; independent receivers keep separate analysis state.

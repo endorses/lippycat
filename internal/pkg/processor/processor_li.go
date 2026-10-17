@@ -1089,7 +1089,7 @@ func (p *Processor) processLIPacketWithProvenance(pkt *types.PacketDisplay, dire
 	p.processLIPacketWithAdmission(pkt, directFilterIDs, inheritedFilterIDs, nil)
 }
 
-func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string, admission *CallAdmission) {
+func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string, admission *CallAdmission, capturePolicy ...[]byte) {
 	if p.filterProcessingBlocked() {
 		return
 	}
@@ -1125,6 +1125,16 @@ func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, direc
 	provenance := li.PacketFilterProvenance{
 		DirectFilterIDs:    directFilterIDs,
 		InheritedFilterIDs: inheritedFilterIDs,
+	}
+	if len(capturePolicy) > 0 && len(capturePolicy[0]) > 0 {
+		authority, err := p.liPacketCaptureAuthority(pkt, directFilterIDs, inheritedFilterIDs, capturePolicy[0])
+		if err != nil {
+			return
+		}
+		provenance.CaptureAuthority = authority
+	} else if p.config.LIHandover.Enabled {
+		// An explicitly enabled LI owner never falls back to unsigned old IDs.
+		return
 	}
 	if pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP && len(inheritedFilterIDs) > 0 {
 		// The capture pipeline stamps Call-ID only after authoritative endpoint

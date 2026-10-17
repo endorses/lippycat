@@ -27,6 +27,57 @@ lc hunt --processor processor:55555 --id edge-01
 lc hunt voip --processor processor:55555
 ```
 
+## Processor Failover
+
+Supply `--processors relay-a:55555,relay-b:55555` instead of `--processor`
+to configure ordered alternatives. This works with every hunter protocol and
+with packet or event forwarding; LI and a common central processor are optional.
+The hunter uses one active processor, tries candidates in order at startup, and
+tries another when setup or reconnection fails. A working backup stays active
+when an earlier candidate recovers; there is no automatic failback.
+
+Each setup attempt is bounded by `--processor-attempt-timeout` (default `10s`).
+`--processor-reconnect-attempts` defaults to `1`; `0` skips the extra attempt on
+the disconnected destination. Unavailable candidates have separate exponential
+backoff with jitter. YAML `hunter.failover.retry_initial` and `retry_max` default
+to `1s` and `60s`. Durations must be positive, the initial delay must not exceed
+the maximum, and the reconnect count must be nonnegative.
+
+```yaml
+hunter:
+  processors:
+    - address: 192.0.2.10:55555
+      tls_server_name: relay-a.example.com
+    - relay-b.example.com:55555
+  failover:
+    attempt_timeout: 10s
+    reconnect_attempts: 1
+    retry_initial: 1s
+    retry_max: 60s
+  tls:
+    ca_file: /etc/lippycat/ca.crt
+```
+
+An explicit CLI selector replaces configured selectors, including the other
+selector's YAML form. Using both `--processor` and `--processors`, or both
+`hunter.processor_addr` and `hunter.processors` without a CLI override, is an
+error. Lists must be nonempty and contain valid, unique `host:port` addresses.
+Endpoint objects accept only `address` and optional `tls_server_name`; all
+credentials and verification settings are inherited from the existing hunter
+TLS configuration. A server-name override requires TLS.
+
+Raw packets default to best effort. Optional reliable raw delivery retains immutable
+batches until the configured receiver or common central destination signs durable
+acceptance; it requires verified mutual TLS and explicitly initialized stores.
+`--packet-delivery-profile reliable` selects that profile. Normalized events retain
+their existing spool/receipt contract. Independent processors keep separate analysis,
+output and deduplication state. Optional signed shared policy reconciles filters
+across cold backup processors.
+
+See [processor failover and reliable packets](../../docs/PROCESSOR_FAILOVER.md) for
+relay origin delegation, source/receiver YAML, receipt scopes, offline provisioning,
+shared policy, encryption, operational limits and optional LI authority.
+
 ## Forwarding Modes
 
 `--forward-mode packets` is the compatibility default. It sends selected raw
@@ -147,9 +198,14 @@ credential-adjacent data.
 
 Captures all packets (or BPF-filtered packets) and forwards to processor.
 
-**Required Flags:**
+**Processor Selection:**
 
-- `-P, --processor` - Processor address (host:port) **[REQUIRED]**
+Configure either a scalar processor or an ordered candidate list.
+
+- `-P, --processor` - Single processor address (host:port)
+- `--processors` - Ordered processor addresses (comma-separated)
+- `--processor-attempt-timeout` - Connection setup deadline (default: `10s`)
+- `--processor-reconnect-attempts` - Current processor retry count (default: `1`; `0` advances immediately)
 
 **Hunter Configuration:**
 

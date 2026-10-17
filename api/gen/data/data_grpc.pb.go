@@ -213,3 +213,207 @@ var DataService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "data.proto",
 }
+
+const (
+	RelayDataService_StreamRelayPackets_FullMethodName = "/lippycat.data.RelayDataService/StreamRelayPackets"
+)
+
+// RelayDataServiceClient is the client API for RelayDataService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// RelayDataService keeps authenticated processor delegation separate from direct
+// hunter registration. The first message opens the stream without a packet batch.
+type RelayDataServiceClient interface {
+	StreamRelayPackets(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RelayPacketMessage, StreamControl], error)
+}
+
+type relayDataServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewRelayDataServiceClient(cc grpc.ClientConnInterface) RelayDataServiceClient {
+	return &relayDataServiceClient{cc}
+}
+
+func (c *relayDataServiceClient) StreamRelayPackets(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RelayPacketMessage, StreamControl], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &RelayDataService_ServiceDesc.Streams[0], RelayDataService_StreamRelayPackets_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[RelayPacketMessage, StreamControl]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type RelayDataService_StreamRelayPacketsClient = grpc.BidiStreamingClient[RelayPacketMessage, StreamControl]
+
+// RelayDataServiceServer is the server API for RelayDataService service.
+// All implementations must embed UnimplementedRelayDataServiceServer
+// for forward compatibility.
+//
+// RelayDataService keeps authenticated processor delegation separate from direct
+// hunter registration. The first message opens the stream without a packet batch.
+type RelayDataServiceServer interface {
+	StreamRelayPackets(grpc.BidiStreamingServer[RelayPacketMessage, StreamControl]) error
+	mustEmbedUnimplementedRelayDataServiceServer()
+}
+
+// UnimplementedRelayDataServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedRelayDataServiceServer struct{}
+
+func (UnimplementedRelayDataServiceServer) StreamRelayPackets(grpc.BidiStreamingServer[RelayPacketMessage, StreamControl]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamRelayPackets not implemented")
+}
+func (UnimplementedRelayDataServiceServer) mustEmbedUnimplementedRelayDataServiceServer() {}
+func (UnimplementedRelayDataServiceServer) testEmbeddedByValue()                          {}
+
+// UnsafeRelayDataServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to RelayDataServiceServer will
+// result in compilation errors.
+type UnsafeRelayDataServiceServer interface {
+	mustEmbedUnimplementedRelayDataServiceServer()
+}
+
+func RegisterRelayDataServiceServer(s grpc.ServiceRegistrar, srv RelayDataServiceServer) {
+	// If the following call pancis, it indicates UnimplementedRelayDataServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&RelayDataService_ServiceDesc, srv)
+}
+
+func _RelayDataService_StreamRelayPackets_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(RelayDataServiceServer).StreamRelayPackets(&grpc.GenericServerStream[RelayPacketMessage, StreamControl]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type RelayDataService_StreamRelayPacketsServer = grpc.BidiStreamingServer[RelayPacketMessage, StreamControl]
+
+// RelayDataService_ServiceDesc is the grpc.ServiceDesc for RelayDataService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var RelayDataService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "lippycat.data.RelayDataService",
+	HandlerType: (*RelayDataServiceServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StreamRelayPackets",
+			Handler:       _RelayDataService_StreamRelayPackets_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "data.proto",
+}
+
+const (
+	ReliablePacketService_StreamReliablePackets_FullMethodName = "/lippycat.data.ReliablePacketService/StreamReliablePackets"
+)
+
+// ReliablePacketServiceClient is the client API for ReliablePacketService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Reliable raw transport has an explicit custody boundary. Ordinary packet ACKs
+// never imply support for this service or permit deleting durable origin data.
+type ReliablePacketServiceClient interface {
+	StreamReliablePackets(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ReliablePacketMessage, ReliablePacketControl], error)
+}
+
+type reliablePacketServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewReliablePacketServiceClient(cc grpc.ClientConnInterface) ReliablePacketServiceClient {
+	return &reliablePacketServiceClient{cc}
+}
+
+func (c *reliablePacketServiceClient) StreamReliablePackets(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ReliablePacketMessage, ReliablePacketControl], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ReliablePacketService_ServiceDesc.Streams[0], ReliablePacketService_StreamReliablePackets_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ReliablePacketMessage, ReliablePacketControl]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ReliablePacketService_StreamReliablePacketsClient = grpc.BidiStreamingClient[ReliablePacketMessage, ReliablePacketControl]
+
+// ReliablePacketServiceServer is the server API for ReliablePacketService service.
+// All implementations must embed UnimplementedReliablePacketServiceServer
+// for forward compatibility.
+//
+// Reliable raw transport has an explicit custody boundary. Ordinary packet ACKs
+// never imply support for this service or permit deleting durable origin data.
+type ReliablePacketServiceServer interface {
+	StreamReliablePackets(grpc.BidiStreamingServer[ReliablePacketMessage, ReliablePacketControl]) error
+	mustEmbedUnimplementedReliablePacketServiceServer()
+}
+
+// UnimplementedReliablePacketServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedReliablePacketServiceServer struct{}
+
+func (UnimplementedReliablePacketServiceServer) StreamReliablePackets(grpc.BidiStreamingServer[ReliablePacketMessage, ReliablePacketControl]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamReliablePackets not implemented")
+}
+func (UnimplementedReliablePacketServiceServer) mustEmbedUnimplementedReliablePacketServiceServer() {}
+func (UnimplementedReliablePacketServiceServer) testEmbeddedByValue()                               {}
+
+// UnsafeReliablePacketServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ReliablePacketServiceServer will
+// result in compilation errors.
+type UnsafeReliablePacketServiceServer interface {
+	mustEmbedUnimplementedReliablePacketServiceServer()
+}
+
+func RegisterReliablePacketServiceServer(s grpc.ServiceRegistrar, srv ReliablePacketServiceServer) {
+	// If the following call pancis, it indicates UnimplementedReliablePacketServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&ReliablePacketService_ServiceDesc, srv)
+}
+
+func _ReliablePacketService_StreamReliablePackets_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ReliablePacketServiceServer).StreamReliablePackets(&grpc.GenericServerStream[ReliablePacketMessage, ReliablePacketControl]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ReliablePacketService_StreamReliablePacketsServer = grpc.BidiStreamingServer[ReliablePacketMessage, ReliablePacketControl]
+
+// ReliablePacketService_ServiceDesc is the grpc.ServiceDesc for ReliablePacketService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ReliablePacketService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "lippycat.data.ReliablePacketService",
+	HandlerType: (*ReliablePacketServiceServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StreamReliablePackets",
+			Handler:       _ReliablePacketService_StreamReliablePackets_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "data.proto",
+}

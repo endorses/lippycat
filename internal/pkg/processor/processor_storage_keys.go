@@ -17,17 +17,37 @@ import (
 // Owners authenticate their snapshots/ledgers at startup. storageKeyValidator
 // repeats independence with their actual loaded rings before recovery effects.
 func validateIndependentStorageKeys(config Config, persistence filtering.PersistenceHandler) error {
+	var transportRings []*securestore.Keyring
+	for _, store := range []struct {
+		enabled bool
+		keys    securestore.KeyConfig
+	}{
+		{config.FilterPolicy.Mode == "shared" && config.FilterPolicy.StorageProtection == "encrypted", config.FilterPolicy.StorageKeys},
+		{config.PacketCustody.Enabled && config.PacketCustody.Store.Protection == "encrypted", config.PacketCustody.Store.Keys},
+	} {
+		if !store.enabled {
+			continue
+		}
+		ring, err := securestore.LoadKeyring(store.keys)
+		if err != nil {
+			return fmt.Errorf("validate capture transport storage keys: %w", err)
+		}
+		transportRings = append(transportRings, ring)
+	}
 	if !config.LIEnabled {
 		if config.LIDeliveryX3SpoolDir != "" || config.LIDeliveryX3SpoolReplayPolicy != "" && config.LIDeliveryX3SpoolReplayPolicy != "hold" {
 			return errors.New("persistent X3 requires LI to be enabled")
 		}
-		return nil
+		if provider, ok := persistence.(interface{ Keyring() *securestore.Keyring }); ok && provider.Keyring() != nil {
+			transportRings = append(transportRings, provider.Keyring())
+		}
+		return securestore.CheckIndependent(transportRings...)
 	}
 	provider, ok := persistence.(interface{ Keyring() *securestore.Keyring })
 	if !ok || provider.Keyring() == nil {
 		return errors.New("LI requires encrypted managed filter storage")
 	}
-	rings := []*securestore.Keyring{provider.Keyring()}
+	rings := append([]*securestore.Keyring{provider.Keyring()}, transportRings...)
 	if config.LIStateFile != "" {
 		ring, err := securestore.LoadKeyring(config.LIStateKeys)
 		if err != nil {
@@ -75,6 +95,12 @@ func (p *Processor) storageKeyValidator(state *securestore.Keyring) (func(*secur
 		return nil, errors.New("LI administrative storage ownership is incomplete")
 	}
 	rings := []*securestore.Keyring{p.filterManager.Keyring()}
+	if p.sharedPolicy != nil && p.sharedPolicy.state.Keyring() != nil {
+		rings = append(rings, p.sharedPolicy.state.Keyring())
+	}
+	if p.packetCustody != nil && p.packetCustody.store.Keyring() != nil {
+		rings = append(rings, p.packetCustody.store.Keyring())
+	}
 	if state != nil {
 		rings = append(rings, state)
 	}

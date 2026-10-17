@@ -20,6 +20,73 @@ service DataService {
     rpc SubscribeCorrelatedCalls(SubscribeRequest) returns (stream CorrelatedCallUpdate);
 }
 
+// RelayDataService keeps authenticated processor delegation separate from direct
+// hunter registration. The first message opens the stream without a packet batch.
+service RelayDataService {
+    rpc StreamRelayPackets(stream RelayPacketMessage) returns (stream StreamControl);
+}
+
+// Reliable raw transport has an explicit custody boundary. Ordinary packet ACKs
+// never imply support for this service or permit deleting durable origin data.
+service ReliablePacketService {
+    rpc StreamReliablePackets(stream ReliablePacketMessage) returns (stream ReliablePacketControl);
+}
+
+message RawPacketIdentity {
+    string source_id = 1;
+    string producer_session_id = 2;
+    string capture_epoch = 3;
+    string destination_id = 4;
+    string ack_scope = 5;
+}
+
+message RawPacketLossRange {
+    uint64 first = 1;
+    uint64 last = 2;
+}
+
+message ReliablePacketMessage {
+    uint32 protocol_version = 1;
+    RawPacketIdentity identity = 2;
+    // Empty on direct hunter streams; otherwise verified origin delegation is
+    // required for this immediate relay, independently of the receipt signer.
+    string relay_id = 3;
+    // The first message opens the session without payload or loss coverage.
+    PacketBatch batch = 4;
+    repeated RawPacketLossRange losses = 5;
+    uint64 loss_generation = 6;
+    // Explicit retirement leaves a durable tombstone; it cannot reopen a session.
+    bool retire_session = 7;
+}
+
+message RawPacketReceipt {
+    uint32 protocol_version = 1;
+    RawPacketIdentity identity = 2;
+    uint64 sequence = 3;
+    // Hash of deterministic protobuf packet bytes; prevents identity reuse.
+    bytes content_sha256 = 4;
+    uint64 loss_generation = 5;
+    repeated RawPacketLossRange losses = 6;
+    bool retired = 7;
+    string authority_id = 8;
+    // Signature over the deterministic encoding with this field cleared.
+    bytes signature = 9;
+}
+
+message ReliablePacketControl {
+    StreamControl control = 1;
+    // Open replies identify the actual destination/scope and protocol version.
+    uint32 protocol_version = 2;
+    RawPacketIdentity identity = 3;
+    RawPacketReceipt receipt = 4;
+}
+
+message RelayPacketMessage {
+    string relay_id = 1;
+    uint32 protocol_version = 2;
+    PacketBatch batch = 3;
+}
+
 // PacketBatch contains multiple packets captured by a hunter
 message PacketBatch {
     // Unique hunter identifier
@@ -41,6 +108,14 @@ message PacketBatch {
     // Each serving node sets its own value; ingress never trusts a sender's
     // claim about the current node's analysis policy.
     MonitorEventAnalysis monitor_event_analysis = 6;
+
+    // Capture lifetime identity; independent of the selected transport route.
+    string producer_session_id = 7;
+    string capture_epoch = 8;
+
+    // Deterministic SignedPolicySnapshot for the effective capture policy.
+    // Its original authority signature and IDs survive every relay and replay.
+    bytes signed_capture_policy = 9;
 }
 
 // CapturedPacket represents a single captured network packet

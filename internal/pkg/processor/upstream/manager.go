@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	"github.com/endorses/lippycat/internal/pkg/failover"
 	"github.com/endorses/lippycat/internal/pkg/grpcpool"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
@@ -23,7 +24,10 @@ import (
 
 // Config contains upstream connection configuration
 type Config struct {
-	Address       string // Upstream processor address
+	OnEndpoint    func(context.Context, failover.Endpoint) error
+	Address       string // Legacy upstream processor address
+	Endpoints     []failover.Endpoint
+	Failover      failover.Config
 	TLSEnabled    bool   // Enable TLS for upstream connection
 	TLSCAFile     string // CA certificate file
 	TLSCertFile   string // Client certificate file
@@ -66,7 +70,11 @@ type connection struct {
 
 // Manager handles upstream processor connection and forwarding
 type Manager struct {
-	config Config
+	config        Config
+	selector      *failover.Selector
+	activeAddress string
+	activeIndex   int
+	configErr     error
 
 	// gRPC connection
 	conn        *grpc.ClientConn
@@ -111,8 +119,22 @@ func NewManager(config Config, packetsForwarded *atomic.Uint64) *Manager {
 	if config.OutboundQueueSize <= 0 {
 		config.OutboundQueueSize = defaultOutboundQueueSize
 	}
+	endpoints, endpointErr := failover.NormalizeEndpoints(config.Address, config.Endpoints)
+	config.Endpoints = endpoints
+	if !config.TLSEnabled {
+		for _, endpoint := range endpoints {
+			if endpoint.TLSServerName != "" {
+				endpointErr = errors.Join(endpointErr, errors.New("tls_server_name requires TLS"))
+			}
+		}
+	}
+	normalized, configErr := failover.NormalizeConfig(config.Failover)
+	config.Failover = normalized
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
+		selector:         failover.NewSelector(endpoints, normalized),
+		activeIndex:      -1,
+		configErr:        errors.Join(endpointErr, configErr),
 		config:           config,
 		connPool:         grpcpool.NewConnectionPool(grpcpool.DefaultPoolConfig()),
 		packetsForwarded: packetsForwarded,
@@ -124,7 +146,10 @@ func NewManager(config Config, packetsForwarded *atomic.Uint64) *Manager {
 // Start begins the upstream connection manager (runs in background)
 // It handles initial connection and automatic reconnection on failure.
 func (m *Manager) Start() error {
-	if m.config.Address == "" {
+	if m.configErr != nil {
+		return m.configErr
+	}
+	if len(m.config.Endpoints) == 0 {
 		return fmt.Errorf("upstream address not configured")
 	}
 
@@ -134,10 +159,21 @@ func (m *Manager) Start() error {
 	// been committed to the event pipeline. Resolve that explicit boundary
 	// synchronously before Processor.Start launches local capture.
 	if m.config.ForwardMode == "events" && m.config.EventFallbackToPackets {
-		if err := m.connectAndRegister(); err != nil {
-			return fmt.Errorf("negotiate initial upstream forwarding mode: %w", err)
+		var attemptErrors []error
+		for index, endpoint := range m.config.Endpoints {
+			if err := m.connectEndpoint(endpoint); err != nil {
+				attemptErrors = append(attemptErrors, err)
+				m.selector.Failed(index, time.Now())
+				continue
+			}
+			m.activeIndex = index
+			m.selector.Connected(index)
+			initialConnected = true
+			break
 		}
-		initialConnected = true
+		if !initialConnected {
+			return fmt.Errorf("negotiate initial upstream forwarding mode: %w", errors.Join(attemptErrors...))
+		}
 	}
 
 	m.wg.Add(1)
@@ -165,78 +201,72 @@ func (m *Manager) canFallbackToPackets() bool {
 // connectionManager manages upstream connection lifecycle with automatic reconnection
 func (m *Manager) connectionManager(initialConnected bool) {
 	defer m.wg.Done()
-
-	logger.Info("Upstream connection manager started", "addr", m.config.Address)
-
-	for {
-		select {
-		case <-m.ctx.Done():
-			logger.Info("Upstream connection manager stopping")
-			return
-		default:
-		}
-
-		// Attempt to connect unless Start already established the initial
-		// generation to resolve an explicit fallback before capture begins.
-		var err error
+	for m.ctx.Err() == nil {
 		if !initialConnected {
-			err = m.connectAndRegister()
+			if err := m.connectNext(); err != nil {
+				if m.ctx.Err() == nil && !errors.Is(err, errCandidatesCoolingDown) {
+					logger.Warn("Upstream candidate failed", "error", err)
+				}
+				continue
+			}
 		}
 		initialConnected = false
-		if err == nil {
-			// Successfully connected
-			logger.Info("Connected to upstream processor", "addr", m.config.Address)
-
-			// Reset reconnection state
-			m.reconnectMu.Lock()
-			m.reconnecting = false
-			m.reconnectAttempts = 0
-			m.reconnectMu.Unlock()
-			// Monitor for disconnection
-			m.monitorConnection()
-
-			// If we get here, connection was lost - clean up before reconnecting
-			logger.Warn("Upstream connection lost, cleaning up before retry")
-			m.cleanup()
-			continue
-		}
-
-		// Connection failed
-		logger.Error("Failed to connect to upstream processor", "error", err)
-
-		// Exponential backoff
-		m.reconnectMu.Lock()
-		m.reconnectAttempts++
-		attempts := m.reconnectAttempts
-		m.reconnectMu.Unlock()
-
-		if m.maxReconnectAttempts > 0 && attempts >= m.maxReconnectAttempts {
-			logger.Error("Max upstream reconnection attempts reached, giving up",
-				"attempts", attempts,
-				"max", m.maxReconnectAttempts)
-			return
-		}
-
-		backoff := min(time.Duration(1<<uint(min(attempts-1, 6)))*time.Second, 60*time.Second) // #nosec G115
-
-		logger.Info("Retrying upstream connection",
-			"attempt", attempts,
-			"backoff", backoff)
-
-		select {
-		case <-time.After(backoff):
-		case <-m.ctx.Done():
-			return
+		m.monitorConnection()
+		index := m.activeIndex
+		m.cleanup()
+		if index >= 0 {
+			m.selector.Disconnected(index)
 		}
 	}
 }
 
+func (m *Manager) connectNext() error {
+	endpoint, index, wait := m.selector.Next(time.Now())
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return errCandidatesCoolingDown
+		case <-m.ctx.Done():
+			return m.ctx.Err()
+		}
+	}
+	if err := m.connectEndpoint(endpoint); err != nil {
+		m.selector.Failed(index, time.Now())
+		return err
+	}
+	m.activeIndex = index
+	m.selector.Connected(index)
+	return nil
+}
+
+var errCandidatesCoolingDown = errors.New("upstream candidates cooling down")
+
 // connectAndRegister establishes connection to upstream processor and registers
 func (m *Manager) connectAndRegister() error {
-	logger.Info("Connecting to upstream processor", "addr", m.config.Address)
+	if m.configErr != nil {
+		return m.configErr
+	}
+	if len(m.config.Endpoints) == 0 {
+		return errors.New("upstream address not configured")
+	}
+	return m.connectEndpoint(m.config.Endpoints[0])
+}
+
+func (m *Manager) connectEndpoint(endpoint failover.Endpoint) error {
+	attemptCtx, cancelAttempt := context.WithTimeout(m.ctx, m.config.Failover.AttemptTimeout)
+	defer cancelAttempt()
+	if m.config.OnEndpoint != nil {
+		if err := m.config.OnEndpoint(attemptCtx, endpoint); err != nil {
+			return err
+		}
+	}
+	logger.Info("Connecting to upstream processor", "addr", endpoint.Address)
 
 	// Create gRPC connection with TLS if enabled
 	opts := []grpc.DialOption{
+		grpc.WithBlock(),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(constants.MaxGRPCMessageSize)),
 		// Configure keepalive to detect broken connections quickly
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -248,9 +278,10 @@ func (m *Manager) connectAndRegister() error {
 
 	if m.config.TLSEnabled {
 		tlsCreds, err := tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
-			CAFile:   m.config.TLSCAFile,
-			CertFile: m.config.TLSCertFile,
-			KeyFile:  m.config.TLSKeyFile,
+			CAFile:             m.config.TLSCAFile,
+			ServerNameOverride: endpoint.TLSServerName,
+			CertFile:           m.config.TLSCertFile,
+			KeyFile:            m.config.TLSKeyFile,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to build TLS credentials for upstream: %w", err)
@@ -263,15 +294,23 @@ func (m *Manager) connectAndRegister() error {
 			"security_risk", "packet data transmitted in cleartext")
 	}
 
-	conn, err := grpcpool.Get(m.connPool, m.ctx, m.config.Address, opts...)
+	conn, err := grpcpool.Get(m.connPool, attemptCtx, endpoint.Address, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to dial upstream: %w", err)
 	}
 
-	m.conn = conn
-	m.dataClient = data.NewDataServiceClient(conn)
-	m.mgmtClient = management.NewManagementServiceClient(conn)
-	m.eventClient = eventsv1.NewEventServiceClient(conn)
+	committed := false
+	defer func() {
+		if !committed {
+			grpcpool.Release(m.connPool, endpoint.Address)
+		}
+	}()
+	dataClient := data.NewDataServiceClient(conn)
+	mgmtClient := management.NewManagementServiceClient(conn)
+	effectiveMode := m.config.ForwardMode
+	var acceptedKinds []eventsv1.EventKind
+	var upstreamID string
+	var rawRelayVersion uint32
 
 	// Register this processor with upstream
 	if m.config.ProcessorID != "" && m.config.ListenAddress != "" {
@@ -284,95 +323,112 @@ func (m *Manager) connectAndRegister() error {
 			requestedMode = management.ForwardingMode_FORWARDING_MODE_EVENTS
 		}
 		allowFallback := m.config.EventFallbackToPackets && !m.modeNegotiated.Load()
-		regResp, err := m.mgmtClient.RegisterProcessor(m.ctx, &management.ProcessorRegistration{
+		regResp, err := mgmtClient.RegisterProcessor(attemptCtx, &management.ProcessorRegistration{
 			ProcessorId:     m.config.ProcessorID,
 			ListenAddress:   m.config.ListenAddress,
 			Version:         "dev", // TODO: Use actual version
 			EventForwarding: &management.EventForwardingCapabilities{RequestedMode: requestedMode, EventApiMajors: []uint32{1}, EventKinds: protoadapter.SupportedKindIDs(true), SemanticProfileRevision: 1, StatefulAnalysisFeatures: m.eventAnalysisFeatures(), AllowPacketFallback: allowFallback},
 		})
 		if err != nil {
-			grpcpool.Release(m.connPool, m.config.Address)
 			return fmt.Errorf("failed to register with upstream processor: %w", err)
 		}
 		if !regResp.Accepted {
-			grpcpool.Release(m.connPool, m.config.Address)
 			return fmt.Errorf("upstream processor rejected registration: %s", regResp.Error)
 		}
 		acceptedMode := regResp.GetAcceptedForwardingMode()
 		if acceptedMode == management.ForwardingMode_FORWARDING_MODE_UNSPECIFIED {
 			acceptedMode = management.ForwardingMode_FORWARDING_MODE_PACKETS
 		}
+		if acceptedMode != management.ForwardingMode_FORWARDING_MODE_EVENTS && acceptedMode != management.ForwardingMode_FORWARDING_MODE_PACKETS {
+			return fmt.Errorf("upstream selected unsupported forwarding mode %s", acceptedMode)
+		}
+		if requestedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS && acceptedMode != requestedMode {
+			return fmt.Errorf("upstream changed requested packet forwarding mode to %s", acceptedMode)
+		}
 		if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && acceptedMode != requestedMode && !allowFallback {
-			grpcpool.Release(m.connPool, m.config.Address)
 			return fmt.Errorf("upstream rejected requested event forwarding profile: selected %s", acceptedMode)
 		}
 		if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && acceptedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
 			if !m.canFallbackToPackets() {
-				grpcpool.Release(m.connPool, m.config.Address)
 				return errors.New("upstream selected packet fallback while recovered event batches remain unacknowledged")
 			}
-			m.mu.Lock()
-			m.config.ForwardMode = "packets"
-			m.mu.Unlock()
+			effectiveMode = "packets"
 			logger.Warn("Upstream explicitly selected packet fallback", "notice", regResp.GetForwardingNotice())
 		}
 		if acceptedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
 			if err := validateAcceptedEventProfile(regResp, m.config.RequiredEventKinds...); err != nil {
-				grpcpool.Release(m.connPool, m.config.Address)
 				return fmt.Errorf("upstream accepted an insufficient event forwarding profile: %w", err)
 			}
 		}
 		if acceptedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
-			m.mu.Lock()
-			m.acceptedEventKinds = nil
 			for _, kind := range regResp.GetAcceptedEventKinds() {
-				m.acceptedEventKinds = append(m.acceptedEventKinds, eventsv1.EventKind(kind))
+				acceptedKinds = append(acceptedKinds, eventsv1.EventKind(kind))
 			}
-			m.mu.Unlock()
 		}
-		m.modeNegotiated.Store(true)
 
 		// Store the upstream processor ID for topology reporting
-		m.mu.Lock()
-		m.upstreamProcessorID = regResp.UpstreamProcessorId
-		m.mu.Unlock()
+		upstreamID = regResp.UpstreamProcessorId
+		rawRelayVersion = regResp.GetRawRelayVersion()
 		logger.Info("Successfully registered with upstream processor",
 			"upstream_processor_id", regResp.UpstreamProcessorId)
 	} else {
 		logger.Warn("ProcessorID or ListenAddress not configured, skipping processor registration")
 	}
 
-	// Event mode uses EventService exclusively and never opens StreamPackets.
+	// Stream lifetime belongs to the generation, while setup is bounded by the
+	// attempt deadline. Stop its cancellation hook before committing the generation.
 	generationCtx, generationCancel := context.WithCancel(m.ctx)
-	if m.config.ForwardMode == "events" {
-		generation := &connection{queue: make(chan *data.PacketBatch, m.config.OutboundQueueSize), ctx: generationCtx, cancel: generationCancel}
-		m.mu.Lock()
-		m.generation = generation
-		m.mu.Unlock()
-		return nil
-	}
-	stream, err := m.dataClient.StreamPackets(generationCtx)
-	if err != nil {
-		generationCancel()
-		grpcpool.Release(m.connPool, m.config.Address)
-		return fmt.Errorf("failed to create upstream stream: %w", err)
+	stopAttempt := context.AfterFunc(attemptCtx, generationCancel)
+	generation := &connection{queue: make(chan *data.PacketBatch, m.config.OutboundQueueSize), ctx: generationCtx, cancel: generationCancel}
+	if effectiveMode != "events" {
+		var stream upstreamStream
+		var err error
+		switch rawRelayVersion {
+		case 0:
+			logger.Warn("Upstream does not advertise authenticated raw relay ingress; using legacy packet forwarding", "address", endpoint.Address, "notice", "legacy admission may reject relayed hunter origins")
+			stream, err = dataClient.StreamPackets(generationCtx)
+		case 1:
+			stream, err = openRelayStream(generationCtx, conn, m.config.ProcessorID)
+		default:
+			err = fmt.Errorf("unsupported upstream raw relay version %d", rawRelayVersion)
+		}
+		if err != nil {
+			stopAttempt()
+			generationCancel()
+			return fmt.Errorf("create upstream stream: %w", err)
+		}
+		generation.stream = stream
 	}
 
-	generation := &connection{
-		stream: stream,
-		queue:  make(chan *data.PacketBatch, m.config.OutboundQueueSize),
-		ctx:    generationCtx,
-		cancel: generationCancel,
+	if !stopAttempt() || attemptCtx.Err() != nil || generationCtx.Err() != nil {
+		generationCancel()
+		return fmt.Errorf("upstream attempt ended before commit: %w", attemptCtx.Err())
 	}
 	generation.accepting.Store(true)
+	// Publish only fully initialized state. Failed candidates never change mode,
+	// accepted kinds or topology, nor expose an event client to a route sender.
+	m.reconnectMu.Lock()
+	m.reconnecting = false
+	m.reconnectAttempts = 0
+	m.reconnectMu.Unlock()
 	m.mu.Lock()
+	m.conn = conn
+	m.dataClient = dataClient
+	m.mgmtClient = mgmtClient
+	m.eventClient = eventsv1.NewEventServiceClient(conn)
+	m.config.ForwardMode = effectiveMode
+	m.acceptedEventKinds = acceptedKinds
+	m.upstreamProcessorID = upstreamID
+	m.activeAddress = endpoint.Address
 	m.generation = generation
+	m.modeNegotiated.Store(true)
 	m.mu.Unlock()
-
-	generation.wg.Add(2)
-	go m.sendBatches(generation)
-	go m.receiveAcks(generation)
-
+	committed = true
+	if generation.stream != nil {
+		generation.wg.Add(2)
+		go m.sendBatches(generation)
+		go m.receiveAcks(generation)
+	}
 	return nil
 }
 
@@ -522,6 +578,11 @@ func (m *Manager) cleanup() {
 	generation := m.generation
 	m.generation = nil
 	m.eventClient = nil
+	address := m.activeAddress
+	m.activeAddress = ""
+	m.upstreamProcessorID = ""
+	conn := m.conn
+	m.conn = nil
 	m.mu.Unlock()
 	if generation != nil {
 		generation.enqueueMu.Lock()
@@ -531,10 +592,8 @@ func (m *Manager) cleanup() {
 		generation.wg.Wait()
 	}
 
-	if m.conn != nil {
-		// Release connection back to pool
-		grpcpool.Release(m.connPool, m.config.Address)
-		m.conn = nil
+	if conn != nil {
+		grpcpool.Release(m.connPool, address)
 	}
 }
 
@@ -684,7 +743,12 @@ func (m *Manager) disconnectGeneration(generation *connection) {
 		generation.accepting.Store(false)
 		generation.enqueueMu.Unlock()
 		generation.cancel()
-		m.MarkDisconnected()
+		m.mu.Lock()
+		current := m.generation == generation
+		if current {
+			m.MarkDisconnected()
+		}
+		m.mu.Unlock()
 	})
 }
 
@@ -744,4 +808,16 @@ func (m *Manager) GetUpstreamProcessorID() string {
 // GetPoolStats returns statistics about the connection pool
 func (m *Manager) GetPoolStats() grpcpool.Stats {
 	return grpcpool.GetStats(m.connPool)
+}
+
+// ActiveAddress reports the committed connection, or empty while disconnected.
+func (m *Manager) ActiveAddress() string { m.mu.Lock(); defer m.mu.Unlock(); return m.activeAddress }
+
+// Configured is independent of current upstream availability.
+func (m *Manager) Configured() bool { return len(m.config.Endpoints) > 0 }
+
+func (m *Manager) eventGeneration() (eventsv1.EventServiceClient, *connection) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.eventClient, m.generation
 }

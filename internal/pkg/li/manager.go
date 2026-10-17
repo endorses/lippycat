@@ -278,6 +278,9 @@ type ManagerStats struct {
 // trust boundary. AuthoritativeCallID must be populated only by the exact-media
 // endpoint resolver; an RTP packet's display Call-ID is not proof by itself.
 type PacketFilterProvenance struct {
+	// CaptureAuthority has already been authenticated by the signed-policy
+	// ingress. It binds reused filter IDs to their captured activation generation.
+	CaptureAuthority *HandoverAuthority
 	// RADIUS is a byte-validated capture observation. RADIUSTrusted is set only
 	// by an ingress that establishes the capture source, never from wire fields.
 	RADIUS              *radius.Observation
@@ -1195,7 +1198,7 @@ func (m *Manager) ProcessPacketWithProvenance(pkt *types.PacketDisplay, provenan
 			continue
 		}
 
-		if !task.IsActive() || IsRADIUSTask(task) {
+		if !task.IsActive() || IsRADIUSTask(task) || !m.handoverMatchCurrent(provenance.CaptureAuthority, match, task) {
 			continue
 		}
 

@@ -702,3 +702,231 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "management.proto",
 }
+
+const (
+	FilterPolicyService_GetSnapshot_FullMethodName        = "/lippycat.management.FilterPolicyService/GetSnapshot"
+	FilterPolicyService_SubscribeSnapshots_FullMethodName = "/lippycat.management.FilterPolicyService/SubscribeSnapshots"
+	FilterPolicyService_ApplySnapshot_FullMethodName      = "/lippycat.management.FilterPolicyService/ApplySnapshot"
+	FilterPolicyService_PublishSnapshot_FullMethodName    = "/lippycat.management.FilterPolicyService/PublishSnapshot"
+)
+
+// FilterPolicyServiceClient is the client API for FilterPolicyService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Signer identity is configured separately from the upstream relationship.
+// Publish requires a verified publisher certificate pinned to the signing key;
+// forwarding an already signed snapshot never grants publication authority.
+type FilterPolicyServiceClient interface {
+	GetSnapshot(ctx context.Context, in *PolicySnapshotRequest, opts ...grpc.CallOption) (*SignedPolicySnapshot, error)
+	SubscribeSnapshots(ctx context.Context, in *PolicySnapshotRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SignedPolicySnapshot], error)
+	ApplySnapshot(ctx context.Context, in *SignedPolicySnapshot, opts ...grpc.CallOption) (*PolicyReceipt, error)
+	PublishSnapshot(ctx context.Context, in *PolicyPublication, opts ...grpc.CallOption) (*SignedPolicySnapshot, error)
+}
+
+type filterPolicyServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewFilterPolicyServiceClient(cc grpc.ClientConnInterface) FilterPolicyServiceClient {
+	return &filterPolicyServiceClient{cc}
+}
+
+func (c *filterPolicyServiceClient) GetSnapshot(ctx context.Context, in *PolicySnapshotRequest, opts ...grpc.CallOption) (*SignedPolicySnapshot, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SignedPolicySnapshot)
+	err := c.cc.Invoke(ctx, FilterPolicyService_GetSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *filterPolicyServiceClient) SubscribeSnapshots(ctx context.Context, in *PolicySnapshotRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SignedPolicySnapshot], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &FilterPolicyService_ServiceDesc.Streams[0], FilterPolicyService_SubscribeSnapshots_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PolicySnapshotRequest, SignedPolicySnapshot]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type FilterPolicyService_SubscribeSnapshotsClient = grpc.ServerStreamingClient[SignedPolicySnapshot]
+
+func (c *filterPolicyServiceClient) ApplySnapshot(ctx context.Context, in *SignedPolicySnapshot, opts ...grpc.CallOption) (*PolicyReceipt, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PolicyReceipt)
+	err := c.cc.Invoke(ctx, FilterPolicyService_ApplySnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *filterPolicyServiceClient) PublishSnapshot(ctx context.Context, in *PolicyPublication, opts ...grpc.CallOption) (*SignedPolicySnapshot, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SignedPolicySnapshot)
+	err := c.cc.Invoke(ctx, FilterPolicyService_PublishSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// FilterPolicyServiceServer is the server API for FilterPolicyService service.
+// All implementations must embed UnimplementedFilterPolicyServiceServer
+// for forward compatibility.
+//
+// Signer identity is configured separately from the upstream relationship.
+// Publish requires a verified publisher certificate pinned to the signing key;
+// forwarding an already signed snapshot never grants publication authority.
+type FilterPolicyServiceServer interface {
+	GetSnapshot(context.Context, *PolicySnapshotRequest) (*SignedPolicySnapshot, error)
+	SubscribeSnapshots(*PolicySnapshotRequest, grpc.ServerStreamingServer[SignedPolicySnapshot]) error
+	ApplySnapshot(context.Context, *SignedPolicySnapshot) (*PolicyReceipt, error)
+	PublishSnapshot(context.Context, *PolicyPublication) (*SignedPolicySnapshot, error)
+	mustEmbedUnimplementedFilterPolicyServiceServer()
+}
+
+// UnimplementedFilterPolicyServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedFilterPolicyServiceServer struct{}
+
+func (UnimplementedFilterPolicyServiceServer) GetSnapshot(context.Context, *PolicySnapshotRequest) (*SignedPolicySnapshot, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSnapshot not implemented")
+}
+func (UnimplementedFilterPolicyServiceServer) SubscribeSnapshots(*PolicySnapshotRequest, grpc.ServerStreamingServer[SignedPolicySnapshot]) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeSnapshots not implemented")
+}
+func (UnimplementedFilterPolicyServiceServer) ApplySnapshot(context.Context, *SignedPolicySnapshot) (*PolicyReceipt, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApplySnapshot not implemented")
+}
+func (UnimplementedFilterPolicyServiceServer) PublishSnapshot(context.Context, *PolicyPublication) (*SignedPolicySnapshot, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PublishSnapshot not implemented")
+}
+func (UnimplementedFilterPolicyServiceServer) mustEmbedUnimplementedFilterPolicyServiceServer() {}
+func (UnimplementedFilterPolicyServiceServer) testEmbeddedByValue()                             {}
+
+// UnsafeFilterPolicyServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to FilterPolicyServiceServer will
+// result in compilation errors.
+type UnsafeFilterPolicyServiceServer interface {
+	mustEmbedUnimplementedFilterPolicyServiceServer()
+}
+
+func RegisterFilterPolicyServiceServer(s grpc.ServiceRegistrar, srv FilterPolicyServiceServer) {
+	// If the following call pancis, it indicates UnimplementedFilterPolicyServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&FilterPolicyService_ServiceDesc, srv)
+}
+
+func _FilterPolicyService_GetSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PolicySnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FilterPolicyServiceServer).GetSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FilterPolicyService_GetSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FilterPolicyServiceServer).GetSnapshot(ctx, req.(*PolicySnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FilterPolicyService_SubscribeSnapshots_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(PolicySnapshotRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(FilterPolicyServiceServer).SubscribeSnapshots(m, &grpc.GenericServerStream[PolicySnapshotRequest, SignedPolicySnapshot]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type FilterPolicyService_SubscribeSnapshotsServer = grpc.ServerStreamingServer[SignedPolicySnapshot]
+
+func _FilterPolicyService_ApplySnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SignedPolicySnapshot)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FilterPolicyServiceServer).ApplySnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FilterPolicyService_ApplySnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FilterPolicyServiceServer).ApplySnapshot(ctx, req.(*SignedPolicySnapshot))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FilterPolicyService_PublishSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PolicyPublication)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FilterPolicyServiceServer).PublishSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FilterPolicyService_PublishSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FilterPolicyServiceServer).PublishSnapshot(ctx, req.(*PolicyPublication))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// FilterPolicyService_ServiceDesc is the grpc.ServiceDesc for FilterPolicyService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var FilterPolicyService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "lippycat.management.FilterPolicyService",
+	HandlerType: (*FilterPolicyServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetSnapshot",
+			Handler:    _FilterPolicyService_GetSnapshot_Handler,
+		},
+		{
+			MethodName: "ApplySnapshot",
+			Handler:    _FilterPolicyService_ApplySnapshot_Handler,
+		},
+		{
+			MethodName: "PublishSnapshot",
+			Handler:    _FilterPolicyService_PublishSnapshot_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "SubscribeSnapshots",
+			Handler:       _FilterPolicyService_SubscribeSnapshots_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "management.proto",
+}

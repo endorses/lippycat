@@ -6,7 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/bpfutil"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/failover"
 	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/radius"
@@ -22,16 +26,21 @@ import (
 
 // Manager handles packet capture lifecycle
 type Manager struct {
+	lifecycleMu       sync.Mutex
 	captureOptions    capture.CaptureOptions
 	captureInterfaces func() []pcaptypes.PcapInterface
 	radiusPorts       []uint16
 	radiusBoundary    atomic.Int64
 	// Configuration
-	interfaces    []string
-	baseFilter    string
-	bufferSize    int
-	sipBufferSize int
-	processorAddr string // Processor address (for automatic port exclusion)
+	interfaces       []string
+	baseFilter       string
+	bufferSize       int
+	sipBufferSize    int
+	processorAddr    string // Legacy processor address (for automatic port exclusion)
+	processors       []failover.Endpoint
+	processorPeersMu sync.RWMutex
+	processorPeers   map[string][]netip.Addr
+	resolveProcessor func(context.Context, string) ([]netip.Addr, error)
 
 	// Packet buffer (shared with forwarding)
 	packetBuffer *capture.PacketBuffer
@@ -55,11 +64,13 @@ type Config struct {
 	BufferSize        int      // Packet buffer size
 	SIPBufferSize     int      // SIP priority buffer size (0 = match BufferSize)
 	ProcessorAddr     string   // Processor address (for automatic port exclusion)
+	Processors        []failover.Endpoint
+	ResolveProcessor  func(context.Context, string) ([]netip.Addr, error)
 }
 
 // New creates a new capture manager
 func New(config Config, mainCtx context.Context) *Manager {
-	return &Manager{
+	m := &Manager{
 		captureOptions:    capture.CaptureOptions{ReassembleIPFragments: config.ReassembleIPFragments, FilterInstaller: config.FilterInstaller},
 		captureInterfaces: config.CaptureInterfaces,
 		radiusPorts:       append([]uint16(nil), config.RADIUSPorts...),
@@ -68,8 +79,26 @@ func New(config Config, mainCtx context.Context) *Manager {
 		bufferSize:        config.BufferSize,
 		sipBufferSize:     config.SIPBufferSize,
 		processorAddr:     config.ProcessorAddr,
+		processors:        append([]failover.Endpoint(nil), config.Processors...),
 		mainCtx:           mainCtx,
+		processorPeers:    make(map[string][]netip.Addr),
+		resolveProcessor:  config.ResolveProcessor,
 	}
+	if m.resolveProcessor == nil {
+		m.resolveProcessor = func(ctx context.Context, host string) ([]netip.Addr, error) {
+			return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		}
+	}
+	for _, endpoint := range m.processors {
+		host, _, err := net.SplitHostPort(endpoint.Address)
+		if err != nil {
+			continue
+		}
+		if address, err := netip.ParseAddr(host); err == nil {
+			m.processorPeers[endpoint.Address] = []netip.Addr{address.Unmap().WithZone("")}
+		}
+	}
+	return m
 }
 
 // GetPacketBuffer returns the packet buffer channel for reading packets
@@ -77,8 +106,48 @@ func (m *Manager) GetPacketBuffer() *capture.PacketBuffer {
 	return m.packetBuffer
 }
 
+func (m *Manager) CaptureActive() bool {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.captureDone == nil {
+		return false
+	}
+	select {
+	case <-m.captureDone:
+		return false
+	default:
+		return true
+	}
+}
+
 // Start begins packet capture with the given BPF filter
 func (m *Manager) Start(dynamicFilters []*management.Filter) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.start(dynamicFilters)
+}
+
+// PrepareBuffer lets transport/policy setup precede capture without exposing a
+// nil packet queue or opening an interface under an unverified shared policy.
+func (m *Manager) PrepareBuffer() error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.prepareBuffer()
+}
+
+func (m *Manager) prepareBuffer() error {
+	if m.packetBuffer != nil {
+		return nil
+	}
+	buffer, err := capture.NewPacketBufferWithConfig(m.mainCtx, capture.PacketBufferConfig{RegularCapacity: m.bufferSize, SIPCapacity: m.sipBufferSize})
+	if err != nil {
+		return fmt.Errorf("create packet buffer: %w", err)
+	}
+	m.packetBuffer = buffer
+	return nil
+}
+
+func (m *Manager) start(dynamicFilters []*management.Filter) error {
 	// Build combined BPF filter
 	bpfFilter := m.buildCombinedBPFFilter(dynamicFilters)
 
@@ -92,18 +161,11 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 	// Create packet buffer ONLY on first start
 	// Don't recreate on restart - forwardPackets() is already reading from it
 	// IMPORTANT: Use mainCtx (not captureCtx) so buffer survives capture restarts
-	if m.packetBuffer == nil {
-		packetBuffer, err := capture.NewPacketBufferWithConfig(m.mainCtx, capture.PacketBufferConfig{
-			RegularCapacity: m.bufferSize,
-			SIPCapacity:     m.sipBufferSize,
-		})
-		if err != nil {
-			m.captureCancel()
-			m.captureCtx = nil
-			m.captureCancel = nil
-			return fmt.Errorf("create packet buffer: %w", err)
-		}
-		m.packetBuffer = packetBuffer
+	if err := m.prepareBuffer(); err != nil {
+		m.captureCancel()
+		m.captureCtx = nil
+		m.captureCancel = nil
+		return err
 	}
 
 	// Create PCAP interfaces
@@ -157,6 +219,15 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 
 // Restart stops and restarts packet capture with updated filters
 func (m *Manager) Restart(dynamicFilters []*management.Filter) error {
+	return m.restart(dynamicFilters, true)
+}
+
+func (m *Manager) restart(dynamicFilters []*management.Filter, policyBoundary bool) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.captureDone == nil {
+		return nil
+	}
 	logger.Info("Restarting packet capture to apply filter changes")
 
 	// Save references to old capture state BEFORE Start() overwrites them
@@ -187,9 +258,11 @@ func (m *Manager) Restart(dynamicFilters []*management.Filter) error {
 
 	// Publish the boundary only after old readers have stopped. Queued packets
 	// from their drain cannot seed or inherit association in the new epoch.
-	m.radiusBoundary.Store(time.Now().UnixNano())
+	if policyBoundary {
+		m.radiusBoundary.Store(time.Now().UnixNano())
+	}
 	logger.Debug("Starting new capture with updated filters")
-	return m.Start(dynamicFilters)
+	return m.start(dynamicFilters)
 }
 
 // ApplyInitialFilters installs the processor's first BPF policy after capture
@@ -197,9 +270,14 @@ func (m *Manager) Restart(dynamicFilters []*management.Filter) error {
 // discarded so they cannot enter either forwarding mode under the wrong
 // capture scope.
 func (m *Manager) ApplyInitialFilters(dynamicFilters []*management.Filter) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.captureDone == nil {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(m.mainCtx, 5*time.Second)
 	defer cancel()
-	if err := m.Quiesce(ctx); err != nil {
+	if err := m.quiesce(ctx); err != nil {
 		return fmt.Errorf("quiesce capture for initial filters: %w", err)
 	}
 	if m.packetBuffer != nil {
@@ -221,7 +299,7 @@ func (m *Manager) ApplyInitialFilters(dynamicFilters []*management.Filter) error
 			}
 		}
 	}
-	if err := m.Start(dynamicFilters); err != nil {
+	if err := m.start(dynamicFilters); err != nil {
 		return fmt.Errorf("start capture with initial filters: %w", err)
 	}
 	return nil
@@ -229,6 +307,8 @@ func (m *Manager) ApplyInitialFilters(dynamicFilters []*management.Filter) error
 
 // Stop stops packet capture
 func (m *Manager) Stop() {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	if m.captureCancel != nil {
 		m.captureCancel()
 	}
@@ -249,6 +329,12 @@ func (m *Manager) Stop() {
 // enqueue another packet. The shared PacketBuffer remains open for draining
 // across an analysis-policy boundary.
 func (m *Manager) Quiesce(ctx context.Context) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.quiesce(ctx)
+}
+
+func (m *Manager) quiesce(ctx context.Context) error {
 	if m.captureCancel != nil {
 		m.captureCancel()
 	}
@@ -267,6 +353,29 @@ func (m *Manager) Quiesce(ctx context.Context) error {
 // This prevents the hunter from capturing its own gRPC traffic to the processor.
 // Returns empty string if no processor address is configured.
 func (m *Manager) buildProcessorPortExclusionFilter() string {
+	if len(m.processors) > 0 {
+		m.processorPeersMu.RLock()
+		defer m.processorPeersMu.RUnlock()
+		var exclusions []string
+		seen := make(map[string]bool)
+		for _, endpoint := range m.processors {
+			_, port, err := net.SplitHostPort(endpoint.Address)
+			if err != nil {
+				continue
+			}
+			for _, host := range m.processorPeers[endpoint.Address] {
+				clause := fmt.Sprintf("(tcp and host %s and port %s)", host.String(), port)
+				if !seen[clause] {
+					exclusions = append(exclusions, clause)
+					seen[clause] = true
+				}
+			}
+		}
+		if len(exclusions) == 0 {
+			return ""
+		}
+		return "not (" + strings.Join(exclusions, " or ") + ")"
+	}
 	if m.processorAddr == "" {
 		return ""
 	}
@@ -279,6 +388,59 @@ func (m *Manager) buildProcessorPortExclusionFilter() string {
 	// Build exclusion filter for the processor port
 	// Both data and management gRPC connections use the same port
 	return fmt.Sprintf("not port %s", port)
+}
+
+// PrepareProcessor refreshes scoped communication exclusions before an endpoint
+// is contacted. Unreachable DNS candidates cannot leave an unexcluded active
+// sender; their setup fails and selection advances to another endpoint.
+func (m *Manager) PrepareProcessor(ctx context.Context, endpoint failover.Endpoint, filters []*management.Filter) error {
+	if len(m.processors) == 0 {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(endpoint.Address)
+	if err != nil {
+		return fmt.Errorf("processor exclusion address: %w", err)
+	}
+	var addresses []netip.Addr
+	if address, parseErr := netip.ParseAddr(host); parseErr == nil {
+		addresses = []netip.Addr{address}
+	} else {
+		addresses, err = m.resolveProcessor(ctx, host)
+		if err != nil {
+			return fmt.Errorf("resolve processor exclusion for %s: %w", host, err)
+		}
+	}
+	var normalized []netip.Addr
+	for _, address := range addresses {
+		if address.IsValid() {
+			normalized = append(normalized, address.Unmap().WithZone(""))
+		}
+	}
+	if len(normalized) == 0 {
+		return fmt.Errorf("processor exclusion for %s resolved no addresses", host)
+	}
+	m.processorPeersMu.Lock()
+	previous := m.processorPeers[endpoint.Address]
+	changed := len(previous) != len(normalized)
+	if !changed {
+		for i := range previous {
+			if previous[i] != normalized[i] {
+				changed = true
+				break
+			}
+		}
+	}
+	m.processorPeers[endpoint.Address] = normalized
+	m.processorPeersMu.Unlock()
+	if changed {
+		if err := m.restart(filters, false); err != nil {
+			m.processorPeersMu.Lock()
+			m.processorPeers[endpoint.Address] = previous
+			m.processorPeersMu.Unlock()
+			return fmt.Errorf("refresh processor capture exclusions: %w", err)
+		}
+	}
+	return nil
 }
 
 // buildCombinedBPFFilter builds a combined BPF filter from config and dynamic filters

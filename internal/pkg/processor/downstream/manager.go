@@ -25,6 +25,7 @@ type ProcessorInfo struct {
 	// mu protects all fields below from concurrent access
 	mu sync.Mutex
 
+	PacketGeneration        uint64
 	ForwardingMode          management.ForwardingMode
 	EventAPIMajor           uint32
 	EventKinds              []int32
@@ -48,6 +49,7 @@ type ProcessorInfo struct {
 // ForwardingContract records the event profile accepted for a downstream
 // processor registration. Event ingress must remain within this contract.
 type ForwardingContract struct {
+	PacketGeneration        uint64
 	Mode                    management.ForwardingMode
 	EventAPIMajor           uint32
 	EventKinds              []int32
@@ -67,6 +69,7 @@ func (p *ProcessorInfo) GetForwardingContract() ForwardingContract {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return ForwardingContract{
+		PacketGeneration:        p.PacketGeneration,
 		Mode:                    p.ForwardingMode,
 		EventAPIMajor:           p.EventAPIMajor,
 		EventKinds:              append([]int32(nil), p.EventKinds...),
@@ -177,6 +180,7 @@ func (m *Manager) Register(processorID, listenAddress, version string, contracts
 		existing.ListenAddress = listenAddress // Update in case it changed
 		existing.Version = version
 		existing.mu.Lock()
+		existing.PacketGeneration++
 		existing.ForwardingMode = contract.Mode
 		existing.EventAPIMajor = contract.EventAPIMajor
 		existing.EventKinds = append(existing.EventKinds[:0], contract.EventKinds...)
@@ -284,6 +288,7 @@ func (m *Manager) Register(processorID, listenAddress, version string, contracts
 	client := management.NewManagementServiceClient(conn)
 
 	proc := &ProcessorInfo{
+		PacketGeneration:        1,
 		ProcessorID:             processorID,
 		ListenAddress:           listenAddress,
 		Version:                 version,

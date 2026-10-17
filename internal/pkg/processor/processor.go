@@ -44,6 +44,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	"github.com/endorses/lippycat/internal/pkg/failover"
+	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -69,11 +71,17 @@ import (
 
 // Config contains processor configuration
 type Config struct {
+	PrepareUpstream                    func(context.Context, failover.Endpoint) error
+	PacketCustody                      PacketCustodyConfig
+	FilterPolicy                       filterpolicy.Config
 	LICallCorrelation                  li.CallCorrelationConfig
 	EventAnalysis                      *eventconfig.Config
 	ListenAddr                         string
 	ProcessorID                        string
 	UpstreamAddr                       string
+	RelayOrigins                       map[string][]string // Explicit verified relay identity to authorized origin IDs.
+	UpstreamProcessors                 []failover.Endpoint
+	UpstreamFailover                   failover.Config
 	UpstreamForwardMode                string
 	UpstreamEventFallbackToPackets     bool
 	UpstreamEventDeliveryProfile       string
@@ -107,6 +115,7 @@ type Config struct {
 	AuthConfig *auth.Config // API key authentication configuration (alternative to mTLS)
 	// LI (Lawful Interception) settings - only functional with -tags li build
 	LIEnabled                    bool // Enable LI processing
+	LIHandover                   li.HandoverConfig
 	LIRADIUSScope                radius.ScopeBinding
 	LIRADIUSMACProfile           string
 	LIRADIUSCorrelationLifetime  time.Duration
@@ -209,10 +218,14 @@ type StructuredLogConfig struct {
 
 // Processor represents a processor node
 type Processor struct {
-	sdpDiagnostics *processorSDPDiagnostics
-	radiusMu       sync.Mutex
-	radiusCapture  *radius.CaptureProcessor
-	config         Config
+	liHandoverCancel context.CancelFunc
+	liHandoverWG     sync.WaitGroup
+	packetCustody    *packetCustody
+	sharedPolicy     *processorPolicy
+	sdpDiagnostics   *processorSDPDiagnostics
+	radiusMu         sync.Mutex
+	radiusCapture    *radius.CaptureProcessor
+	config           Config
 
 	// Protocol detector (for centralized detection)
 	detector *detector.Detector
@@ -311,12 +324,35 @@ type Processor struct {
 	shutdownErr  error
 
 	// Embed gRPC service implementations
+	data.UnimplementedRelayDataServiceServer
+	data.UnimplementedReliablePacketServiceServer
 	data.UnimplementedDataServiceServer
 	management.UnimplementedManagementServiceServer
 }
 
 // New creates a new processor instance
 func New(config Config) (_ *Processor, constructorErr error) {
+	var relayErr error
+	config.RelayOrigins, relayErr = normalizeRelayOrigins(config.RelayOrigins)
+	if relayErr != nil {
+		return nil, fmt.Errorf("relay delegation: %w", relayErr)
+	}
+	if len(config.UpstreamProcessors) > 0 || config.UpstreamAddr != "" {
+		legacy := config.UpstreamAddr
+		if len(config.UpstreamProcessors) > 0 {
+			legacy = ""
+		}
+		endpoints, err := failover.NormalizeEndpoints(legacy, config.UpstreamProcessors)
+		if err != nil {
+			return nil, fmt.Errorf("upstream endpoints: %w", err)
+		}
+		config.UpstreamProcessors = endpoints
+		config.UpstreamAddr = endpoints[0].Address
+		config.UpstreamFailover, err = failover.NormalizeConfig(config.UpstreamFailover)
+		if err != nil {
+			return nil, fmt.Errorf("upstream failover: %w", err)
+		}
+	}
 	policy, policyErr := eventconfig.Resolve(config.EventAnalysis)
 	if policyErr != nil {
 		return nil, fmt.Errorf("event analysis configuration: %w", policyErr)
@@ -379,6 +415,12 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	}()
 	if err := p.filterManager.Initialize(); err != nil {
 		return nil, fmt.Errorf("initialize managed filter storage: %w", err)
+	}
+	if err := p.initSharedPolicy(); err != nil {
+		return nil, fmt.Errorf("initialize shared filter policy: %w", err)
+	}
+	if err := p.initPacketCustody(); err != nil {
+		return nil, fmt.Errorf("initialize raw packet custody: %w", err)
 	}
 	p.initLIManager()
 	if err := p.prepareLIStorage(); err != nil {
@@ -727,9 +769,12 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	if config.UpstreamAddr != "" {
 		p.upstreamManager = upstream.NewManager(
 			upstream.Config{
+				OnEndpoint:             config.PrepareUpstream,
 				InventoryEnabled:       config.EventAnalysis.Inventory.Enabled,
 				RequiredEventKinds:     requiredEventKinds,
-				Address:                config.UpstreamAddr,
+				Address:                "", // Endpoints is the normalized source of truth.
+				Endpoints:              append([]failover.Endpoint(nil), config.UpstreamProcessors...),
+				Failover:               config.UpstreamFailover,
 				TLSEnabled:             config.TLSEnabled,
 				TLSCAFile:              config.TLSCAFile,
 				TLSCertFile:            config.TLSCertFile,
@@ -814,6 +859,20 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	p.callCorrelator = NewCallCorrelator()
 	p.initLIRuntime()
 	p.sdpDiagnostics = newProcessorSDPDiagnostics()
+	p.statsCollector.SetRouteProvider(func() *management.RouteStatus {
+		route := &management.RouteStatus{PolicyReady: !p.filterProcessingBlocked()}
+		if manager := p.upstreamManager; manager != nil {
+			route.Configured = manager.Configured()
+			route.Connected = manager.IsConnected()
+			route.Endpoint = manager.ActiveAddress()
+			route.UpstreamProcessorId = manager.GetUpstreamProcessorID()
+			route.QueuedBatches = uint64(manager.QueueDepth())
+			route.DroppedBatches = manager.DroppedBatches()
+			route.DroppedPackets = manager.DroppedPackets()
+		}
+		return route
+	})
+	p.statsCollector.SetRawPacketProvider(p.rawPacketStatus)
 	return p, nil
 }
 

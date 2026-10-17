@@ -1432,6 +1432,16 @@ func (s *LocalSource) GetProtocolMode() string {
 // SetBPFFilter updates the BPF filter. This requires restarting capture.
 // Returns nil on success, or an error if the filter update fails.
 func (s *LocalSource) SetBPFFilter(filter string) error {
+	return s.setBPFFilter(filter, true)
+}
+
+// SetTransportBPFFilter refreshes only self-traffic exclusions. A relay processor
+// DNS change does not create a new capture-policy authorization epoch.
+func (s *LocalSource) SetTransportBPFFilter(filter string) error {
+	return s.setBPFFilter(filter, false)
+}
+
+func (s *LocalSource) setBPFFilter(filter string, policyBoundary bool) error {
 	s.boundaryMu.Lock()
 	defer s.boundaryMu.Unlock()
 	s.mu.Lock()
@@ -1480,8 +1490,10 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 	// Old handles can still enqueue packets while cancellation drains. Only
 	// establish the new epoch after every old handle has stopped, so those
 	// queued packets cannot seed association across the capture gap.
-	if err := s.radiusProcessor.AdvanceBoundary(time.Now()); err != nil {
-		return err
+	if policyBoundary {
+		if err := s.radiusProcessor.AdvanceBoundary(time.Now()); err != nil {
+			return err
+		}
 	}
 
 	// Shutdown may have started while the previous capture generation drained.

@@ -21,6 +21,7 @@ type Manager struct {
 	// Serialize mutations through distribution and persistence so hunters cannot
 	// receive an older revision (or deletion) after a newer committed update.
 	// Keep mu separate: distribution callbacks may read the current filters.
+	sharedNamespace string
 	mutationMu      sync.Mutex
 	mu              sync.RWMutex
 	filters         map[string]*management.Filter
@@ -335,6 +336,9 @@ func (m *Manager) UpdateValidated(input *management.Filter, validate func(*manag
 	if filter.Id == "" {
 		filter.Id = fmt.Sprintf("filter-%d", time.Now().UnixNano())
 	}
+	if m.sharedNamespace != "" && strings.HasPrefix(filter.Id, m.sharedNamespace) {
+		return nil, 0, fmt.Errorf("%w: shared policy namespace requires signed replacement", ErrFilterInvalid)
+	}
 	if filter.Type == management.FilterType_FILTER_PHONE_NUMBER {
 		filter.Pattern = filtering.NormalizePhonePattern(filter.Pattern)
 	}
@@ -430,6 +434,9 @@ func (m *Manager) UpdateValidated(input *management.Filter, validate func(*manag
 func (m *Manager) Delete(filterID string) (uint32, error) {
 	m.mutationMu.Lock()
 	defer m.mutationMu.Unlock()
+	if m.sharedNamespace != "" && strings.HasPrefix(filterID, m.sharedNamespace) {
+		return 0, fmt.Errorf("%w: shared policy namespace requires signed replacement", ErrFilterInvalid)
+	}
 	if err := m.ensureInitialized(); err != nil {
 		return 0, err
 	}

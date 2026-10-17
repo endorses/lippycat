@@ -26,8 +26,10 @@ type cachedStats struct {
 
 // Collector collects and caches processor statistics
 type Collector struct {
-	cache   atomic.Value  // stores *cachedStats
-	updates atomic.Uint64 // incremented on every stats change
+	rawProvider   atomic.Value  // func() *management.RawPacketStatus
+	routeProvider atomic.Value  // func() *management.RouteStatus
+	cache         atomic.Value  // stores *cachedStats
+	updates       atomic.Uint64 // incremented on every stats change
 
 	packetsReceived  *atomic.Uint64
 	packetsForwarded *atomic.Uint64
@@ -100,8 +102,18 @@ func (c *Collector) SetUpstreamProcessor(upstreamAddr string) {
 // GetProto returns statistics as protobuf message
 func (c *Collector) GetProto() *management.ProcessorStats {
 	stats := c.Get()
+	var route *management.RouteStatus
+	if provider := c.routeProvider.Load(); provider != nil {
+		route = provider.(func() *management.RouteStatus)()
+	}
+	var raw *management.RawPacketStatus
+	if provider := c.rawProvider.Load(); provider != nil {
+		raw = provider.(func() *management.RawPacketStatus)()
+	}
 
 	return &management.ProcessorStats{
+		RawPackets:            raw,
+		UpstreamRoute:         route,
 		TotalHunters:          stats.TotalHunters,
 		HealthyHunters:        stats.HealthyHunters,
 		WarningHunters:        stats.WarningHunters,
@@ -112,4 +124,12 @@ func (c *Collector) GetProto() *management.ProcessorStats {
 		ProcessorId:           c.processorID,
 		UpstreamProcessor:     c.upstreamProcessor,
 	}
+}
+
+func (c *Collector) SetRawPacketProvider(provider func() *management.RawPacketStatus) {
+	c.rawProvider.Store(provider)
+}
+
+func (c *Collector) SetRouteProvider(provider func() *management.RouteStatus) {
+	c.routeProvider.Store(provider)
 }

@@ -7,15 +7,14 @@ package tap
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
-	"github.com/endorses/lippycat/internal/pkg/bpfutil"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
+	"github.com/endorses/lippycat/internal/pkg/failover"
 	"github.com/endorses/lippycat/internal/pkg/gpuaccel"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logflags"
@@ -86,8 +85,8 @@ Examples:
 		}
 		// Handle deprecated --upstream flag migration to --processor
 		if cmd.Flags().Changed("upstream") {
-			if cmd.Flags().Changed("processor") {
-				return fmt.Errorf("cannot use both --upstream (deprecated) and --processor; use --processor only")
+			if cmd.Flags().Changed("processor") || cmd.Flags().Changed("processors") {
+				return fmt.Errorf("cannot combine --upstream with --processor or --processors")
 			}
 			processorAddr = upstreamAddrDeprecated
 			logger.Warn("--upstream is deprecated, use --processor instead")
@@ -228,6 +227,7 @@ func init() {
 
 	// Upstream forwarding (--processor is the new name, --upstream is deprecated)
 	TapCmd.PersistentFlags().StringVarP(&processorAddr, "processor", "P", "", "Upstream processor address for hierarchical mode (host:port)")
+	failover.Register(TapCmd.PersistentFlags(), viper.GetViper(), "tap")
 	TapCmd.PersistentFlags().StringVar(&upstreamAddrDeprecated, "upstream", "", "")
 	TapCmd.PersistentFlags().Lookup("upstream").Deprecated = "use --processor instead"
 	TapCmd.PersistentFlags().Lookup("upstream").Hidden = true
@@ -549,6 +549,7 @@ func runTapProtocol(cmd *cobra.Command, args []string, protocol protocolcatalog.
 		LogConfig:                 structuredLogs,
 		ListenAddr:                cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:               effectiveTapID,
+		RelayOrigins:              viper.GetStringMapStringSlice("tap.relay_origins"),
 		UpstreamAddr:              cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
 		MaxHunters:                cmdutil.GetIntConfig("tap.max_hunters", maxHunters),
 		MaxSubscribers:            cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
@@ -577,6 +578,10 @@ func runTapProtocol(cmd *cobra.Command, args []string, protocol protocolcatalog.
 		VifDropPrivilegesUser: cmdutil.GetStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
 		// TLS keylog configuration (for decryption support)
 		TLSKeylogConfig: tlsKeylogConfig,
+	}
+
+	if err := applyTapUpstreamConfig(cmd, &config); err != nil {
+		return err
 	}
 
 	// Apply LI configuration (only available in -tags li builds)
@@ -648,7 +653,7 @@ func runTapProtocol(cmd *cobra.Command, args []string, protocol protocolcatalog.
 		"interfaces", runtime.sourceConfig.Interfaces,
 		"bpf_filter", runtime.sourceConfig.BPFFilter,
 		"listen", config.ListenAddr,
-		"upstream", config.UpstreamAddr,
+		"upstream_candidates", config.UpstreamProcessors,
 		"enable_detection", config.EnableDetection)
 
 	return runtime.run("Tap node", config)
@@ -680,39 +685,4 @@ func createApplicationFilter(gpuConfig GPUConfig) (*hunter.ApplicationFilter, er
 	}
 
 	return appFilter, nil
-}
-
-// buildOwnTrafficExclusionFilter builds a BPF exclusion filter to prevent tap from
-// capturing its own gRPC traffic (management interface and upstream forwarding).
-// Returns an empty string if no exclusions are needed.
-func buildOwnTrafficExclusionFilter(effectiveListenAddr, effectiveProcessorAddr string) string {
-	var exclusions []string
-
-	// Exclude management interface port (TUI serving)
-	if port := bpfutil.ExtractPortFromAddr(effectiveListenAddr); port != "" {
-		exclusions = append(exclusions, fmt.Sprintf("not port %s", port))
-	}
-
-	// Exclude upstream processor port
-	if port := bpfutil.ExtractPortFromAddr(effectiveProcessorAddr); port != "" {
-		exclusions = append(exclusions, fmt.Sprintf("not port %s", port))
-	}
-
-	if len(exclusions) == 0 {
-		return ""
-	}
-
-	return strings.Join(exclusions, " and ")
-}
-
-// combineFiltersWithExclusion combines a base BPF filter with own-traffic exclusion.
-// Returns the combined filter, handling empty cases appropriately.
-func combineFiltersWithExclusion(baseBPF, exclusionBPF string) string {
-	if exclusionBPF == "" {
-		return baseBPF
-	}
-	if baseBPF == "" {
-		return exclusionBPF
-	}
-	return fmt.Sprintf("(%s) and (%s)", baseBPF, exclusionBPF)
 }

@@ -43,11 +43,21 @@ const (
 	JournalBatchIndex
 	// CallCorrelationState authenticates the dedicated LI call-leg decision store.
 	CallCorrelationState
+	// PacketSpoolBatch is raw captured product, never control-reserve eligible.
+	PacketSpoolBatch
+	// PacketSpoolState authenticates bounded custody and retention metadata.
+	PacketSpoolState
+	// PacketCustodyState contains receiver-side captured product as well as
+	// duplicate metadata, so it never uses the control encryption allowance.
+	PacketCustodyState
+	// CapturePolicyState binds signed delegated selectors and authority leases
+	// independently of ordinary local filter snapshots.
+	CapturePolicyState
 )
 
-func (p Purpose) valid() bool { return p >= FilterSnapshot && p <= CallCorrelationState }
+func (p Purpose) valid() bool { return p >= FilterSnapshot && p <= CapturePolicyState }
 func (p Purpose) control() bool {
-	return p.valid() && p != X2Product && p != X3Product
+	return p.valid() && p != X2Product && p != X3Product && p != PacketSpoolBatch && p != PacketCustodyState
 }
 
 // Binding is authenticated inside the ciphertext. Store comes from the locked,

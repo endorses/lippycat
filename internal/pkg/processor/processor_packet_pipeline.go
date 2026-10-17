@@ -193,7 +193,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	p.normalizeRADIUS(sourceID, packets)
 
 	// Normalize protocol metadata after enrichment and before forwarding/broadcasting.
-	p.emitProtocolEvents(sourceID, packets)
+	p.emitProtocolEventsWithScope(sourceID, batch.CaptureEpoch, packets)
 	if !packetOutput {
 		// Event forwarding and structured logs consume the analysis above. With
 		// no packet output, avoid packet-only aggregation and serialization.
@@ -346,7 +346,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			if pkt.Radius != nil {
 				p.processLIRADIUSPacket(&display, pkt, batch)
 			} else {
-				p.processLIPacketWithAdmission(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index])
+				p.processLIPacketWithCapturePolicy(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index], batch.SignedCapturePolicy)
 			}
 			if p.afterLIPacket != nil {
 				p.afterLIPacket()

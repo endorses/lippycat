@@ -14,6 +14,8 @@ import (
 
 // Collector tracks hunter statistics with lock-free atomic operations
 type Collector struct {
+	rawProvider                                atomic.Value // func() *management.RawPacketStatus
+	selectionProvider                          atomic.Value // func() *management.ProcessorSelectionStatus
 	admissionProvider                          atomic.Value // stores func() *management.MediaAdmissionStatus
 	packetsCaptured, packetsMatched            atomic.Uint64
 	packetsForwarded, packetsDropped           atomic.Uint64
@@ -130,7 +132,17 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 	if provider := c.admissionProvider.Load(); provider != nil {
 		admission = provider.(func() *management.MediaAdmissionStatus)()
 	}
+	var selection *management.ProcessorSelectionStatus
+	if provider := c.selectionProvider.Load(); provider != nil {
+		selection = provider.(func() *management.ProcessorSelectionStatus)()
+	}
+	var raw *management.RawPacketStatus
+	if provider := c.rawProvider.Load(); provider != nil {
+		raw = provider.(func() *management.RawPacketStatus)()
+	}
 	return &management.HunterStats{
+		RawPackets:                    raw,
+		ProcessorSelection:            selection,
 		RtpEbpf:                       admission,
 		PacketsCaptured:               c.packetsCaptured.Load(),
 		PacketsMatched:                c.packetsMatched.Load(),
@@ -171,6 +183,14 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 			SipIpPairCapEvictions:       detectorStats.SIPIPPairCapEvictions,
 		},
 	}
+}
+
+func (c *Collector) SetRawPacketProvider(provider func() *management.RawPacketStatus) {
+	c.rawProvider.Store(provider)
+}
+
+func (c *Collector) SetProcessorSelectionProvider(provider func() *management.ProcessorSelectionStatus) {
+	c.selectionProvider.Store(provider)
 }
 
 // SetMediaAdmissionProvider installs a snapshot callback before hunter startup.

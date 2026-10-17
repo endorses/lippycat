@@ -55,8 +55,8 @@ func FromPacketBatch(b *data.PacketBatch) (*pipeline.PacketBatch, error) {
 	if b == nil {
 		return nil, fmt.Errorf("convert packet batch: nil batch")
 	}
-	source := pipeline.SourceProvenance{Kind: pipeline.SourceGRPC, NodeID: b.HunterId, BatchSequence: b.Sequence, BatchTimestamp: time.Unix(0, b.TimestampNs)}
-	out := &pipeline.PacketBatch{Source: source, Sequence: b.Sequence, CreatedAt: source.BatchTimestamp, Packets: make([]*pipeline.PacketEnvelope, 0, len(b.Packets))}
+	source := pipeline.SourceProvenance{Kind: pipeline.SourceGRPC, NodeID: b.HunterId, ProducerSessionID: b.ProducerSessionId, CaptureEpoch: b.CaptureEpoch, BatchSequence: b.Sequence, BatchTimestamp: time.Unix(0, b.TimestampNs)}
+	out := &pipeline.PacketBatch{Source: source, Sequence: b.Sequence, CreatedAt: source.BatchTimestamp, Packets: make([]*pipeline.PacketEnvelope, 0, len(b.Packets)), SignedCapturePolicy: append([]byte(nil), b.SignedCapturePolicy...)}
 	if b.Stats != nil {
 		out.HasStats = true
 		out.Stats = pipeline.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage, CaptureBufferRegularDrops: b.Stats.CaptureBufferRegularDrops, CaptureBufferSIPDrops: b.Stats.CaptureBufferSipDrops, CaptureBufferSIPDemotions: b.Stats.CaptureBufferSipDemotions, BatchChannelDrops: b.Stats.BatchChannelDrops, CaptureBufferRegularLen: b.Stats.CaptureBufferRegularLen, CaptureBufferRegularCapacity: b.Stats.CaptureBufferRegularCapacity, CaptureBufferSIPLen: b.Stats.CaptureBufferSipLen, CaptureBufferSIPCapacity: b.Stats.CaptureBufferSipCapacity, CaptureBufferOutputLen: b.Stats.CaptureBufferOutputLen, CaptureBufferOutputCapacity: b.Stats.CaptureBufferOutputCapacity}
@@ -82,7 +82,7 @@ func ToPacketBatch(b *pipeline.PacketBatch) (*data.PacketBatch, error) {
 	if b == nil {
 		return nil, fmt.Errorf("convert packet batch: nil batch")
 	}
-	out := &data.PacketBatch{HunterId: b.Source.NodeID, Sequence: b.Sequence, TimestampNs: unixNano(b.CreatedAt), Packets: make([]*data.CapturedPacket, 0, len(b.Packets))}
+	out := &data.PacketBatch{HunterId: b.Source.NodeID, ProducerSessionId: b.Source.ProducerSessionID, CaptureEpoch: b.Source.CaptureEpoch, Sequence: b.Sequence, TimestampNs: unixNano(b.CreatedAt), Packets: make([]*data.CapturedPacket, 0, len(b.Packets)), SignedCapturePolicy: append([]byte(nil), b.SignedCapturePolicy...)}
 	if b.HasStats {
 		out.Stats = &data.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage, CaptureBufferRegularDrops: b.Stats.CaptureBufferRegularDrops, CaptureBufferSipDrops: b.Stats.CaptureBufferSIPDrops, CaptureBufferSipDemotions: b.Stats.CaptureBufferSIPDemotions, BatchChannelDrops: b.Stats.BatchChannelDrops, CaptureBufferRegularLen: b.Stats.CaptureBufferRegularLen, CaptureBufferRegularCapacity: b.Stats.CaptureBufferRegularCapacity, CaptureBufferSipLen: b.Stats.CaptureBufferSIPLen, CaptureBufferSipCapacity: b.Stats.CaptureBufferSIPCapacity, CaptureBufferOutputLen: b.Stats.CaptureBufferOutputLen, CaptureBufferOutputCapacity: b.Stats.CaptureBufferOutputCapacity}
 	}

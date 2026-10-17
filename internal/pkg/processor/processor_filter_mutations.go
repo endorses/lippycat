@@ -32,7 +32,7 @@ func (p *Processor) filterMutationReady() error {
 }
 
 func (p *Processor) filterProcessingBlocked() bool {
-	return p.filterPolicyBlocked.Load() || (p.filterManager != nil && p.filterManager.Fault() != nil)
+	return p.filterPolicyBlocked.Load() || !p.sharedPolicyAdmissionReady() || (p.filterManager != nil && p.filterManager.Fault() != nil)
 }
 
 func (p *Processor) blockFilterProcessing() {

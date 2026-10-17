@@ -9,6 +9,8 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/eventconfig"
+	"github.com/endorses/lippycat/internal/pkg/failover"
+	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/pflag"
@@ -100,6 +102,36 @@ func buildHunterConfigChecked(spec hunterConfigSpec) (hunter.Config, error) {
 		return hunter.Config{}, err
 	}
 	config.SIPBufferSize = sipCapacity
+	endpoints, selection, err := failover.Resolve(viper.GetViper(), eventPolicyFlags, "hunter", "hunter.processor_addr", "processor")
+	if err != nil {
+		return hunter.Config{}, err
+	}
+	config.FilterPolicy, err = filterpolicy.FromViper(viper.GetViper(), "hunter")
+	if err != nil {
+		return hunter.Config{}, err
+	}
+	if err := viper.UnmarshalKey("hunter.packets", &config.Packets); err != nil {
+		return hunter.Config{}, fmt.Errorf("decode hunter packet delivery: %w", err)
+	}
+	config.Packets.DeliveryProfile = viper.GetString("hunter.packets.delivery_profile")
+	config.Packets.AckScope = viper.GetString("hunter.packets.ack_scope")
+	config.Packets, err = config.Packets.Normalize()
+	if err != nil {
+		return hunter.Config{}, err
+	}
+	config.Processors = endpoints
+	config.Failover = selection
+	config.ProcessorAddr = ""
+	if len(endpoints) > 0 {
+		config.ProcessorAddr = endpoints[0].Address
+	}
+	if !config.TLSEnabled {
+		for _, endpoint := range endpoints {
+			if endpoint.TLSServerName != "" {
+				return hunter.Config{}, fmt.Errorf("processor TLS server name requires TLS (cannot use with --insecure)")
+			}
+		}
+	}
 	return config, nil
 }
 

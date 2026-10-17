@@ -19,7 +19,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
-	"github.com/endorses/lippycat/internal/pkg/hunter/circuitbreaker"
+	"github.com/endorses/lippycat/internal/pkg/failover"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventforwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -34,13 +34,17 @@ import (
 
 // Config contains connection manager configuration
 type Config struct {
-	ProcessorAddr string
-	HunterID      string
-	Interfaces    []string
-	BufferSize    int
-	BatchSize     int
-	BatchTimeout  time.Duration
-	VoIPMode      bool // Determines filter capabilities advertised to processor (legacy)
+	ProcessorAddr    string
+	Processors       []failover.Endpoint
+	Failover         failover.Config
+	OnEndpoint       func(context.Context, failover.Endpoint) error
+	OpenPacketStream func(lifetimeCtx, setupCtx context.Context, conn grpc.ClientConnInterface) (data.DataService_StreamPacketsClient, error)
+	HunterID         string
+	Interfaces       []string
+	BufferSize       int
+	BatchSize        int
+	BatchTimeout     time.Duration
+	VoIPMode         bool // Determines filter capabilities advertised to processor (legacy)
 	// Filter capabilities advertised to processor
 	InventoryEnabled     bool
 	RADIUSIngress        bool     // Observation-aware capture and provenance transport are installed.
@@ -93,6 +97,9 @@ type ForwardingManagerFactory interface {
 type Manager struct {
 	config Config
 
+	// Public client/sender snapshots are protected across generation replacement.
+	clientsMu sync.RWMutex
+
 	// gRPC connections
 	dataConn       *grpc.ClientConn
 	managementConn *grpc.ClientConn
@@ -115,12 +122,22 @@ type Manager struct {
 	eventForwarderMu   sync.RWMutex
 	acceptedMode       management.ForwardingMode
 	modeReady          chan management.ForwardingMode
+	startupError       chan error
+
+	statusMu     sync.RWMutex
+	status       Status
+	endpoint     failover.Endpoint
+	setupCtx     context.Context
+	registration *management.RegistrationResponse
+	firstControl *data.StreamControl
+
+	candidateKinds   []eventsv1.EventKind
+	eventSetupCommit func() error
 
 	// Reconnection
 	reconnectAttempts int
 	reconnecting      bool
 	reconnectMu       sync.Mutex
-	circuitBreaker    *circuitbreaker.CircuitBreaker
 
 	// Control
 	ctx        context.Context
@@ -159,13 +176,6 @@ func New(
 	forwardingFactory ForwardingManagerFactory,
 	flowControlHandler func(*data.StreamControl),
 ) *Manager {
-	// Create circuit breaker for connection management
-	cb := circuitbreaker.New(circuitbreaker.Config{
-		Name:             "processor-connection",
-		MaxFailures:      5,                // Open after 5 consecutive failures
-		ResetTimeout:     30 * time.Second, // Try again after 30s
-		HalfOpenMaxCalls: 3,                // Allow 3 test calls in half-open
-	})
 
 	return &Manager{
 		config:             config,
@@ -176,8 +186,8 @@ func New(
 		flowControlHandler: flowControlHandler,
 		reconnectAttempts:  0,
 		reconnecting:       false,
-		circuitBreaker:     cb,
 		modeReady:          make(chan management.ForwardingMode, 1),
+		startupError:       make(chan error, 1),
 	}
 }
 
@@ -185,6 +195,8 @@ func (m *Manager) WaitAcceptedMode(ctx context.Context) (management.ForwardingMo
 	select {
 	case mode := <-m.modeReady:
 		return mode, nil
+	case err := <-m.startupError:
+		return 0, err
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
@@ -206,11 +218,15 @@ func (m *Manager) Stop() {
 
 // GetMgmtClient returns the management client
 func (m *Manager) GetMgmtClient() management.ManagementServiceClient {
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
 	return m.mgmtClient
 }
 
 // GetDataClient returns the data client
 func (m *Manager) GetDataClient() data.DataServiceClient {
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
 	return m.dataClient
 }
 
@@ -223,6 +239,8 @@ func (m *Manager) GetStream() data.DataService_StreamPacketsClient {
 
 // GetForwardingManager returns the current forwarding manager (nil if not connected)
 func (m *Manager) GetForwardingManager() *forwarding.Manager {
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
 	return m.forwardingManager
 }
 
@@ -255,145 +273,227 @@ func (m *Manager) markGenerationDisconnected(generation uint64) {
 	}
 }
 
-// connectionManager manages processor connection lifecycle
+// Status is a race-safe snapshot of endpoint selection, independent of legacy
+// scalar configuration. Candidate addresses are copied on every read.
+type Status struct {
+	Candidates      []failover.Endpoint
+	ActiveEndpoint  string
+	AttemptEndpoint string
+	State           string
+	Reason          string
+	LastConnected   time.Time
+	Failovers       uint64
+}
+
+func (m *Manager) Status() Status {
+	m.statusMu.RLock()
+	defer m.statusMu.RUnlock()
+	snapshot := m.status
+	snapshot.Candidates = append([]failover.Endpoint(nil), snapshot.Candidates...)
+	return snapshot
+}
+
+// connectionManager is the sole owner of transport generations and selection.
 func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 	defer wg.Done()
-
-	logger.Info("Connection manager started")
-
-	// Attempt initial connection with retries
-	for {
-		select {
-		case <-m.ctx.Done():
+	defer m.cleanup()
+	endpoints, err := failover.NormalizeEndpoints(m.config.ProcessorAddr, m.config.Processors)
+	if err != nil {
+		m.failStartup(err)
+		return
+	}
+	cfg, err := failover.NormalizeConfig(m.config.Failover)
+	if err != nil {
+		m.failStartup(err)
+		return
+	}
+	if len(endpoints) == 0 {
+		m.failStartup(errors.New("at least one processor is required"))
+		return
+	}
+	if m.config.TLSEnabled {
+		if _, err := m.buildTLSCredentials(); err != nil {
+			m.failStartup(fmt.Errorf("processor TLS configuration: %w", err))
 			return
-		default:
 		}
-
-		m.connCtx, m.connCancel = context.WithCancel(m.ctx)
-		generation := m.generation.Add(1)
-
-		// Use circuit breaker for connection attempts
-		err := m.circuitBreaker.Call(func() error {
-			return m.connectAndRegister()
-		})
-
-		if err == nil {
-			// Successfully connected
-			logger.Info("Connected to processor")
-
-			// Reset reconnection state
-			m.reconnectMu.Lock()
-			m.reconnecting = false
-			m.reconnectAttempts = 0
-			m.reconnectMu.Unlock()
-
-			// Start the negotiated transport only. A producer session never emits
-			// both packets and normalized events.
-			if m.acceptedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
-				forwarder := m.getEventForwarder()
-				m.connWg.Add(1)
-				go func() {
-					defer m.connWg.Done()
-					attemptCtx, cancelAttempt := context.WithCancel(m.connCtx)
-					stream, streamErr := m.eventClient.StreamEvents(attemptCtx)
-					if streamErr == nil {
-						streamErr = forwarder.Serve(attemptCtx, stream, cancelAttempt)
-					} else {
-						cancelAttempt()
-					}
-					if streamErr != nil && m.connCtx.Err() == nil {
-						logger.Error("Event stream failed", "error", streamErr)
-						m.markGenerationDisconnected(generation)
-					}
-				}()
-			} else {
-				m.forwardingManager = m.forwardingFactory.CreateForwardingManager(m.connCtx, m.stream)
-				m.forwardingManager.SetDisconnectCallback(func() { m.markGenerationDisconnected(generation) })
-				m.connWg.Add(2)
-				go m.forwardingManager.ForwardPackets(&m.connWg)
-				go m.handleStreamControl()
+	}
+	m.statusMu.Lock()
+	m.status.Candidates = append([]failover.Endpoint(nil), endpoints...)
+	m.statusMu.Unlock()
+	selector := failover.NewSelector(endpoints, cfg)
+	var previous string
+	for m.ctx.Err() == nil {
+		endpoint, index, wait := selector.Next(time.Now())
+		if wait > 0 {
+			m.setSelection("waiting", "", "all processors cooling down")
+			timer := time.NewTimer(wait)
+			select {
+			case <-m.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
 			}
-			m.filterManager.ApplyPendingInitial()
-
-			// Start common connection-dependent goroutines.
-			m.connWg.Add(2)
-			go m.subscribeToFilters()
-			go m.sendHeartbeats()
-
-			// Monitor for disconnection
-			m.monitorConnection()
-
-			// If we get here, connection was lost - clean up before reconnecting
-			logger.Warn("Connection to processor lost, cleaning up goroutines before retry")
+			continue
+		}
+		m.endpoint = endpoint
+		m.setSelection("connecting", endpoint.Address, "attempting processor")
+		m.reconnectMu.Lock()
+		m.connCtx, m.connCancel = context.WithCancel(m.ctx)
+		m.reconnecting = false
+		generation := m.generation.Add(1)
+		m.reconnectMu.Unlock()
+		attemptCtx, cancelAttempt := context.WithTimeout(m.connCtx, cfg.AttemptTimeout)
+		m.setupCtx = attemptCtx
+		var err error
+		if m.config.OnEndpoint != nil {
+			err = m.config.OnEndpoint(attemptCtx, endpoint)
+		}
+		if err == nil {
+			err = m.connectAndRegister()
+		}
+		cancelAttempt()
+		m.setupCtx = nil
+		if err != nil {
 			m.cleanup()
+			selector.Failed(index, time.Now())
+			m.setSelection("retrying", endpoint.Address, err.Error())
+			logger.Warn("Processor connection attempt failed", "processor", endpoint.Address, "error", err)
+			m.reconnectAttempts++
+			if m.config.MaxReconnectAttempts > 0 && m.reconnectAttempts >= m.config.MaxReconnectAttempts {
+				m.cancel()
+				return
+			}
 			continue
 		}
 
-		// Connection failed or circuit breaker open
-		m.connCancel()
-		logger.Error("Failed to connect to processor", "error", err)
-
-		// Exponential backoff
+		// A new route must not inherit peer-owned PAUSE state.
+		if m.flowControlHandler != nil {
+			m.flowControlHandler(&data.StreamControl{FlowControl: data.FlowControl_FLOW_CONTINUE})
+		}
+		if m.acceptedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
+			forwarder := m.forwardingFactory.CreateForwardingManager(m.connCtx, m.stream)
+			forwarder.SetDisconnectCallback(func() { m.markGenerationDisconnected(generation) })
+			m.clientsMu.Lock()
+			m.forwardingManager = forwarder
+			m.clientsMu.Unlock()
+			if m.firstControl != nil && m.flowControlHandler != nil {
+				m.flowControlHandler(m.firstControl)
+			}
+			m.firstControl = nil
+			m.connWg.Add(2)
+			go forwarder.ForwardPackets(&m.connWg)
+			go m.handleStreamControl()
+		}
+		if policy, ok := m.filterManager.(interface{ ApplyPendingInitialE() error }); ok {
+			if err := policy.ApplyPendingInitialE(); err != nil {
+				logger.Error("Failed to apply processor policy", "processor", endpoint.Address, "error", err)
+				m.setSelection("retrying", endpoint.Address, err.Error())
+				m.cleanup()
+				selector.Failed(index, time.Now())
+				continue
+			}
+		} else {
+			m.filterManager.ApplyPendingInitial()
+		}
+		// Successful policy rotation may deliberately replace the producer and
+		// cancel this generation. Reconnect that route without publishing it ready.
+		if m.connCtx.Err() != nil {
+			m.cleanup()
+			selector.Connected(index)
+			selector.Disconnected(index)
+			continue
+		}
+		selector.Connected(index)
+		m.reconnectAttempts = 0
 		m.reconnectMu.Lock()
-		m.reconnectAttempts++
-		attempts := m.reconnectAttempts
+		m.reconnecting = false
 		m.reconnectMu.Unlock()
-
-		if m.config.MaxReconnectAttempts > 0 && attempts >= m.config.MaxReconnectAttempts {
-			logger.Error("Max reconnection attempts reached, giving up",
-				"attempts", attempts,
-				"max", m.config.MaxReconnectAttempts)
-			m.cancel()
-			return
+		m.statusMu.Lock()
+		if previous != "" && previous != endpoint.Address {
+			m.status.Failovers++
 		}
+		previous = endpoint.Address
+		m.status.ActiveEndpoint = endpoint.Address
+		m.status.State = "connected"
+		m.status.Reason = "registration and ingress ready"
+		m.status.LastConnected = time.Now()
+		m.statusMu.Unlock()
 
-		backoff := time.Duration(1<<uint(min(attempts-1, 6))) * time.Second // #nosec G115 - safe: exponential backoff, max 6
-		if backoff > 60*time.Second {
-			backoff = 60 * time.Second
-		}
+		m.publishAcceptedMode()
+		m.connWg.Add(2)
+		go m.subscribeToFilters()
+		go m.sendHeartbeats()
+		m.monitorConnection()
+		m.cleanup()
+		m.statusMu.Lock()
+		m.status.ActiveEndpoint = ""
+		m.statusMu.Unlock()
+		selector.Disconnected(index)
+	}
+	m.setSelection("stopped", "", "connection manager stopped")
+}
 
-		logger.Info("Retrying connection",
-			"attempt", attempts,
-			"backoff", backoff)
-
-		select {
-		case <-time.After(backoff):
-		case <-m.ctx.Done():
-			return
-		}
+func (m *Manager) failStartup(err error) {
+	m.setSelection("invalid", "", err.Error())
+	logger.Error("Processor connection configuration failed", "error", err)
+	select {
+	case m.startupError <- err:
+	default:
 	}
 }
 
-// connectAndRegister connects to processor and registers
+func (m *Manager) setSelection(state, endpoint, reason string) {
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
+	m.status.State, m.status.AttemptEndpoint, m.status.Reason = state, endpoint, reason
+}
+
+func (m *Manager) publishAcceptedMode() {
+	if m.acceptedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
+		m.config.ForwardMode = "packets"
+	}
+	select {
+	case m.modeReady <- m.acceptedMode:
+	default:
+	}
+}
+
+// connectAndRegister bounds setup independently from its long-lived streams.
 func (m *Manager) connectAndRegister() error {
-	// Connect to processor
 	if err := m.connectToProcessor(); err != nil {
-		return fmt.Errorf("failed to connect to processor: %w", err)
+		return fmt.Errorf("connect processor: %w", err)
 	}
-
-	// Register with processor
 	if err := m.register(); err != nil {
-		return fmt.Errorf("failed to register with processor: %w", err)
+		return err
 	}
-
 	if m.acceptedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
 		if err := m.startStreaming(); err != nil {
-			return fmt.Errorf("failed to start streaming: %w", err)
+			return err
+		}
+	} else {
+		if err := m.startEventStreaming(); err != nil {
+			return err
 		}
 	}
-
-	// Reset reconnect attempts on successful connection
-	m.reconnectMu.Lock()
-	m.reconnectAttempts = 0
-	m.reconnecting = false
-	m.reconnectMu.Unlock()
-
+	if policy, ok := m.filterManager.(interface {
+		InitializePolicy(context.Context, grpc.ClientConnInterface) error
+	}); ok {
+		if err := policy.InitializePolicy(m.registrationContext(), m.managementConn); err != nil {
+			return fmt.Errorf("initialize processor policy: %w", err)
+		}
+	}
+	if err := m.filterManager.SetInitialFilters(m.registration.GetFilters()); err != nil {
+		return fmt.Errorf("apply initial processor filters: %w", err)
+	}
+	if m.eventSetupCommit != nil {
+		return m.eventSetupCommit()
+	}
 	return nil
 }
 
 // connectToProcessor establishes gRPC connections
 func (m *Manager) connectToProcessor() error {
-	logger.Info("Connecting to processor", "addr", m.config.ProcessorAddr)
+	logger.Info("Connecting to processor", "addr", m.endpointAddress())
 
 	// Create custom dialer with TCP keepalive
 	// This provides defense-in-depth with gRPC keepalive
@@ -458,16 +558,18 @@ func (m *Manager) connectToProcessor() error {
 	}
 
 	// Connect data channel
-	dataConn, err := grpc.NewClient(m.config.ProcessorAddr, opts...)
+	dataConn, err := grpc.NewClient(m.endpointAddress(), opts...)
 	if err != nil {
 		return fmt.Errorf("failed to dial processor data: %w", err)
 	}
 	m.dataConn = dataConn
+	m.clientsMu.Lock()
 	m.dataClient = data.NewDataServiceClient(dataConn)
 	m.eventClient = eventsv1.NewEventServiceClient(dataConn)
+	m.clientsMu.Unlock()
 
 	// Connect management channel (same address for now, different service)
-	mgmtConn, err := grpc.NewClient(m.config.ProcessorAddr, opts...)
+	mgmtConn, err := grpc.NewClient(m.endpointAddress(), opts...)
 	if err != nil {
 		if closeErr := dataConn.Close(); closeErr != nil {
 			logger.Error("Failed to close data connection during error cleanup", "error", closeErr, "processor", m.config.ProcessorAddr)
@@ -475,9 +577,11 @@ func (m *Manager) connectToProcessor() error {
 		return fmt.Errorf("failed to dial processor management: %w", err)
 	}
 	m.managementConn = mgmtConn
+	m.clientsMu.Lock()
 	m.mgmtClient = management.NewManagementServiceClient(mgmtConn)
+	m.clientsMu.Unlock()
 
-	logger.Info("Connected to processor", "addr", m.config.ProcessorAddr, "tls", m.config.TLSEnabled,
+	logger.Info("Connected to processor", "addr", m.endpointAddress(), "tls", m.config.TLSEnabled,
 		"tcp_keepalive", "enabled")
 	return nil
 }
@@ -489,8 +593,27 @@ func (m *Manager) buildTLSCredentials() (credentials.TransportCredentials, error
 		CertFile:           m.config.TLSCertFile,
 		KeyFile:            m.config.TLSKeyFile,
 		SkipVerify:         m.config.TLSSkipVerify,
-		ServerNameOverride: m.config.TLSServerNameOverride,
+		ServerNameOverride: m.endpointServerName(),
 	})
+}
+
+func (m *Manager) endpointAddress() string {
+	if m.endpoint.Address != "" {
+		return m.endpoint.Address
+	}
+	return m.config.ProcessorAddr
+}
+func (m *Manager) endpointServerName() string {
+	if m.endpoint.TLSServerName != "" {
+		return m.endpoint.TLSServerName
+	}
+	return m.config.TLSServerNameOverride
+}
+func (m *Manager) registrationContext() context.Context {
+	if m.setupCtx != nil {
+		return m.setupCtx
+	}
+	return m.ctx
 }
 
 // register registers hunter with processor
@@ -503,7 +626,7 @@ func (m *Manager) register() error {
 
 	if hostname == "" {
 		// Fallback to connection-based detection
-		hostname = getConnectionLocalIP(m.managementConn)
+		hostname = getConnectionLocalIPContext(m.registrationContext(), m.managementConn)
 		logger.Info("Using connection local IP", "ip", hostname)
 	}
 
@@ -561,7 +684,7 @@ func (m *Manager) register() error {
 		},
 	}
 
-	resp, err := m.mgmtClient.RegisterHunter(m.ctx, req)
+	resp, err := m.mgmtClient.RegisterHunter(m.registrationContext(), req)
 	if err != nil {
 		return fmt.Errorf("registration failed: %w", err)
 	}
@@ -580,9 +703,6 @@ func (m *Manager) register() error {
 		if forwarder := m.getEventForwarder(); forwarder != nil && forwarder.HasPending() {
 			return errors.New("registration selected packet fallback while recovered event batches remain unacknowledged")
 		}
-		// Explicit fallback fixes packet mode for this producer lifetime. A later
-		// reconnect must not silently switch the same capture session to events.
-		m.config.ForwardMode = "packets"
 	}
 	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS {
 		if err := validateAcceptedEventProfile(resp, m.config.RequiredEventKinds...); err != nil {
@@ -597,8 +717,13 @@ func (m *Manager) register() error {
 		for _, kind := range resp.GetAcceptedEventKinds() {
 			kinds = append(kinds, eventsv1.EventKind(kind))
 		}
-		if err := m.getEventForwarder().SetAcceptedKinds(kinds); err != nil {
-			return fmt.Errorf("apply accepted event kinds: %w", err)
+		m.candidateKinds = kinds
+		if m.setupCtx == nil {
+			if err := m.getEventForwarder().SetAcceptedKinds(kinds); err != nil {
+				return fmt.Errorf("apply accepted event kinds: %w", err)
+			}
+		} else if err := m.getEventForwarder().ValidateAcceptedKinds(kinds); err != nil {
+			return fmt.Errorf("validate accepted event kinds: %w", err)
 		}
 	}
 	m.acceptedMode = accepted
@@ -607,13 +732,14 @@ func (m *Manager) register() error {
 		"assigned_id", resp.AssignedId,
 		"initial_filters", len(resp.Filters), "forwarding_mode", accepted, "forwarding_notice", resp.GetForwardingNotice())
 
-	// Store initial filters in filter manager
-	if err := m.filterManager.SetInitialFilters(resp.Filters); err != nil {
-		return fmt.Errorf("apply initial processor filters: %w", err)
-	}
-	select {
-	case m.modeReady <- accepted:
-	default:
+	m.registration = resp
+	// Direct register calls in compatibility tests have no setup transaction.
+	// Production publishes only after bounded ingress readiness and policy setup.
+	if m.setupCtx == nil {
+		if err := m.filterManager.SetInitialFilters(resp.Filters); err != nil {
+			return fmt.Errorf("apply initial processor filters: %w", err)
+		}
+		m.publishAcceptedMode()
 	}
 
 	return nil
@@ -643,30 +769,119 @@ func validateAcceptedEventProfile(resp *management.RegistrationResponse, extraRe
 	return nil
 }
 
-// startStreaming establishes the bidirectional packet stream
-func (m *Manager) startStreaming() error {
-	logger.Info("Starting packet stream to processor")
-
-	stream, err := m.dataClient.StreamPackets(m.connCtx)
-	if err != nil {
-		return fmt.Errorf("failed to create stream: %w", err)
+// boundedSetup runs an operation on the generation's stream context, while
+// cancelling the entire generation if its separate setup budget expires.
+func (m *Manager) boundedSetup(operation func() error) error {
+	if m.setupCtx == nil {
+		return operation()
 	}
+	done := make(chan error, 1)
+	m.connWg.Add(1)
+	go func() { defer m.connWg.Done(); done <- operation() }()
+	select {
+	case err := <-done:
+		return err
+	case <-m.setupCtx.Done():
+		m.connCancel()
+		return m.setupCtx.Err()
+	}
+}
 
-	m.streamMu.Lock()
-	m.stream = stream
-	m.streamMu.Unlock()
+// startStreaming verifies admission with a zero-packet, sequence-zero control
+// probe. This sends no captured traffic and never enters forwarding statistics.
+// Legacy packet peers ACK ordinary empty batches, so no new RPC is required.
+func (m *Manager) startStreaming() error {
+	return m.boundedSetup(func() error {
+		var stream data.DataService_StreamPacketsClient
+		var err error
+		if m.config.OpenPacketStream != nil {
+			stream, err = m.config.OpenPacketStream(m.connCtx, m.registrationContext(), m.dataConn)
+		} else {
+			stream, err = m.dataClient.StreamPackets(m.connCtx)
+		}
+		if err != nil {
+			return fmt.Errorf("create packet stream: %w", err)
+		}
+		m.streamMu.Lock()
+		m.stream = stream
+		m.streamMu.Unlock()
+		if err := stream.Send(&data.PacketBatch{HunterId: m.config.HunterID, TimestampNs: time.Now().UnixNano()}); err != nil {
+			return fmt.Errorf("probe packet ingress: %w", err)
+		}
+		control, err := stream.Recv()
+		if err != nil {
+			return fmt.Errorf("packet ingress readiness: %w", err)
+		}
+		m.firstControl = control
+		return nil
+	})
+}
 
-	// NOTE: Do NOT start receiveStreamControl here - handleStreamControl is started
-	// in connectionManager() and will handle receiving flow control messages.
-	// Having two goroutines calling stream.Recv() causes race conditions and deadlocks.
-
-	logger.Info("Packet stream established with flow control")
-	return nil
+func (m *Manager) startEventStreaming() error {
+	ctx, cancel := context.WithCancel(m.connCtx)
+	stream, err := m.eventClient.StreamEvents(ctx)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("create event stream: %w", err)
+	}
+	ready := make(chan struct{})
+	proceed := make(chan struct{})
+	committed := make(chan error, 1)
+	exited := make(chan error, 1)
+	forwarder := m.getEventForwarder()
+	kinds := append([]eventsv1.EventKind(nil), m.candidateKinds...)
+	connectionCtx := m.connCtx
+	generation := m.generation.Load()
+	m.connWg.Add(1)
+	go func() {
+		defer m.connWg.Done()
+		err := forwarder.ServeNegotiated(ctx, stream, cancel, kinds, func() error {
+			close(ready)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-proceed:
+			}
+			err := forwarder.SetAcceptedKinds(kinds)
+			committed <- err
+			return err
+		})
+		exited <- err
+		if connectionCtx.Err() == nil {
+			m.markGenerationDisconnected(generation)
+		}
+	}()
+	select {
+	case <-ready:
+		m.eventSetupCommit = func() error {
+			close(proceed)
+			select {
+			case err := <-committed:
+				return err
+			case err := <-exited:
+				return err
+			case <-m.registrationContext().Done():
+				return m.registrationContext().Err()
+			}
+		}
+		return nil
+	case err := <-exited:
+		cancel()
+		if err == nil {
+			return errors.New("event stream ended during setup")
+		}
+		return err
+	case <-m.registrationContext().Done():
+		cancel()
+		return m.registrationContext().Err()
+	}
 }
 
 // handleStreamControl receives flow control messages from processor
 func (m *Manager) handleStreamControl() {
 	defer m.connWg.Done()
+	ctx := m.connCtx
+	generation := m.generation.Load()
 	logger.Debug("handleStreamControl goroutine starting")
 	defer logger.Debug("handleStreamControl goroutine exiting")
 	defer func() {
@@ -690,7 +905,7 @@ func (m *Manager) handleStreamControl() {
 		case <-m.ctx.Done():
 			logger.Debug("handleStreamControl: context cancelled, exiting")
 			return
-		case <-m.connCtx.Done():
+		case <-ctx.Done():
 			logger.Debug("handleStreamControl: connection context cancelled, exiting")
 			return
 		default:
@@ -699,18 +914,18 @@ func (m *Manager) handleStreamControl() {
 		ctrl, err := stream.Recv()
 		if err == io.EOF {
 			logger.Info("Stream closed by processor")
-			m.MarkDisconnected()
+			m.markGenerationDisconnected(generation)
 			return
 		}
 		if err != nil {
 			// Check if we're shutting down
-			if m.ctx.Err() != nil || m.connCtx.Err() != nil {
+			if m.ctx.Err() != nil || ctx.Err() != nil {
 				// Context canceled, normal shutdown
 				logger.Debug("handleStreamControl: error during shutdown, exiting gracefully", "error", err)
 				return
 			}
 			logger.Error("Stream control error", "error", err)
-			m.MarkDisconnected()
+			m.markGenerationDisconnected(generation)
 			return
 		}
 
@@ -730,20 +945,23 @@ func (m *Manager) subscribeToFilters() {
 	defer m.connWg.Done()
 	logger.Debug("subscribeToFilters goroutine starting")
 	defer logger.Debug("subscribeToFilters goroutine exiting")
-	m.filterManager.Subscribe(m.ctx, m.connCtx, m.mgmtClient)
+	m.filterManager.Subscribe(m.connCtx, m.connCtx, m.mgmtClient)
 }
 
 // sendHeartbeats sends periodic heartbeat to processor
 func (m *Manager) sendHeartbeats() {
 	defer m.connWg.Done()
+	ctx := m.connCtx
+	generation := m.generation.Load()
 	logger.Debug("sendHeartbeats goroutine starting")
 	defer logger.Debug("sendHeartbeats goroutine exiting")
 
 	logger.Info("Starting heartbeat stream to processor")
 
-	stream, err := m.mgmtClient.Heartbeat(m.ctx)
+	stream, err := m.mgmtClient.Heartbeat(ctx)
 	if err != nil {
 		logger.Error("Failed to create heartbeat stream", "error", err)
+		m.markGenerationDisconnected(generation)
 		return
 	}
 
@@ -767,7 +985,7 @@ func (m *Manager) sendHeartbeats() {
 			select {
 			case <-m.ctx.Done():
 				return
-			case <-m.connCtx.Done():
+			case <-ctx.Done():
 				return
 			default:
 			}
@@ -775,7 +993,7 @@ func (m *Manager) sendHeartbeats() {
 			resp, err := stream.Recv()
 			if err != nil {
 				// Only send error if not shutting down
-				if m.ctx.Err() == nil && m.connCtx.Err() == nil {
+				if m.ctx.Err() == nil && ctx.Err() == nil {
 					respErrCh <- err
 				}
 				return
@@ -784,7 +1002,7 @@ func (m *Manager) sendHeartbeats() {
 			case respCh <- resp:
 			case <-m.ctx.Done():
 				return
-			case <-m.connCtx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -792,7 +1010,7 @@ func (m *Manager) sendHeartbeats() {
 
 	for {
 		select {
-		case <-m.connCtx.Done():
+		case <-ctx.Done():
 			logger.Info("Heartbeat stream closed")
 			return
 
@@ -801,7 +1019,7 @@ func (m *Manager) sendHeartbeats() {
 				return
 			}
 			logger.Error("Heartbeat stream error", "error", err)
-			m.MarkDisconnected()
+			m.markGenerationDisconnected(generation)
 			return
 
 		case <-ticker.C:
@@ -849,7 +1067,7 @@ func (m *Manager) sendHeartbeats() {
 					return
 				}
 				logger.Error("Failed to send heartbeat", "error", err)
-				m.MarkDisconnected()
+				m.markGenerationDisconnected(generation)
 				return
 			}
 
@@ -908,6 +1126,8 @@ func (m *Manager) monitorConnection() {
 		select {
 		case <-m.ctx.Done():
 			return
+		case <-m.connCtx.Done():
+			return
 
 		case <-ticker.C:
 			// Check if we need to reconnect
@@ -925,25 +1145,20 @@ func (m *Manager) monitorConnection() {
 
 // cleanup closes connections
 func (m *Manager) cleanup() {
+	if policy, ok := m.filterManager.(interface{ PolicyDisconnected() }); ok {
+		policy.PolicyDisconnected()
+	}
 	// Cancel connection-scoped context to signal all goroutines to exit
 	if m.connCancel != nil {
 		m.connCancel()
 	}
 
-	// Wait for all connection-scoped goroutines to finish with timeout
-	logger.Debug("Waiting for connection goroutines to finish...")
-
-	done := make(chan struct{})
-	go func() {
-		m.connWg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		logger.Debug("All connection goroutines finished")
-	case <-time.After(10 * time.Second):
-		logger.Warn("Cleanup timeout - some goroutines may still be running, proceeding anyway")
+	// Closing management transport releases stream receivers, including partial setup.
+	if m.managementConn != nil {
+		if err := m.managementConn.Close(); err != nil {
+			logger.Error("Close management transport", "error", err)
+		}
+		m.managementConn = nil
 	}
 	if m.forwardingManager != nil {
 		grace := m.forwardingExitGrace
@@ -969,21 +1184,28 @@ func (m *Manager) cleanup() {
 		}
 	}
 
+	if m.dataConn != nil {
+		if err := m.dataConn.Close(); err != nil {
+			logger.Error("Close data transport", "error", err)
+		}
+		m.dataConn = nil
+	}
+	// Never let a successor reuse the waitgroup or transport fields while a
+	// predecessor still owns them. Cancellation and transport closure unblock RPCs.
+	m.connWg.Wait()
+	m.clientsMu.Lock()
+	m.forwardingManager = nil
+	m.dataClient = nil
+	m.mgmtClient = nil
+	m.eventClient = nil
+	m.clientsMu.Unlock()
+	m.eventSetupCommit = nil
+	m.candidateKinds = nil
+	m.firstControl = nil
 	m.streamMu.Lock()
 	m.stream = nil
 	m.streamMu.Unlock()
 
-	if m.dataConn != nil {
-		if err := m.dataConn.Close(); err != nil {
-			logger.Error("Failed to close data connection during shutdown", "error", err, "processor", m.config.ProcessorAddr)
-		}
-	}
-
-	if m.managementConn != nil {
-		if err := m.managementConn.Close(); err != nil {
-			logger.Error("Failed to close management connection during shutdown", "error", err, "processor", m.config.ProcessorAddr)
-		}
-	}
 }
 
 func (m *Manager) forceCloseDataTransport() error {
@@ -1000,6 +1222,10 @@ func (m *Manager) forceCloseDataTransport() error {
 
 // getConnectionLocalIP returns the local IP address used for the gRPC connection
 func getConnectionLocalIP(conn *grpc.ClientConn) string {
+	return getConnectionLocalIPContext(context.Background(), conn)
+}
+
+func getConnectionLocalIPContext(ctx context.Context, conn *grpc.ClientConn) string {
 	if conn == nil {
 		logger.Debug("getConnectionLocalIP: conn is nil")
 		return ""
@@ -1020,9 +1246,9 @@ func getConnectionLocalIP(conn *grpc.ClientConn) string {
 	}
 
 	// Check if the target is a loopback address
-	resolvedIPs, err := net.LookupIP(host)
+	resolvedIPs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err == nil && len(resolvedIPs) > 0 {
-		targetIP := resolvedIPs[0]
+		targetIP := resolvedIPs[0].IP
 		logger.Debug("getConnectionLocalIP: resolved target", "host", host, "ip", targetIP.String())
 
 		if targetIP.IsLoopback() {
@@ -1035,7 +1261,7 @@ func getConnectionLocalIP(conn *grpc.ClientConn) string {
 	logger.Debug("getConnectionLocalIP: dialing UDP", "addr", dialAddr)
 
 	// Dial a temporary UDP connection to see which local IP would be used
-	udpConn, err := net.Dial("udp", dialAddr)
+	udpConn, err := (&net.Dialer{}).DialContext(ctx, "udp", dialAddr)
 	if err != nil {
 		logger.Debug("getConnectionLocalIP: failed to dial UDP", "error", err)
 		return ""

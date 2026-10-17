@@ -120,8 +120,8 @@ func runTLSHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate configuration
-	if config.ProcessorAddr == "" {
-		return fmt.Errorf("processor address is required (use --processor flag)")
+	if len(config.Processors) == 0 {
+		return fmt.Errorf("processor address is required (use --processor or --processors)")
 	}
 
 	logger.Info("TLS Hunter configuration",

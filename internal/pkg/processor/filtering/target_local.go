@@ -84,6 +84,7 @@ type LocalTarget struct {
 
 	// Base BPF filter (from command line or config)
 	baseBPF                string
+	transportExclusion     string
 	applicationIPSelectors bool // immutable; opt-in media admission publishes these to maps
 
 	// Dependencies (optional, set via Set* methods)
@@ -512,7 +513,44 @@ func (t *LocalTarget) buildPolicy(baseBPF string, filters map[string]*management
 			break
 		}
 	}
+	t.mu.RLock()
+	exclusion := t.transportExclusion
+	t.mu.RUnlock()
+	if exclusion != "" {
+		if bpfExpr != "" {
+			bpfExpr = "(" + bpfExpr + ") and (" + exclusion + ")"
+		} else {
+			bpfExpr = exclusion
+		}
+	}
 	return LocalFilterPolicy{BaseBPF: baseBPF, BPFExpression: bpfExpr, Filters: all, ApplicationFilters: appFilters}
+}
+
+// SetTransportExclusion changes transport suppression independently of policy
+// ownership and event producer sessions, while preserving all current filters.
+func (t *LocalTarget) SetTransportExclusion(exclusion string) error {
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
+	t.mu.Lock()
+	previous := t.transportExclusion
+	t.transportExclusion = exclusion
+	base, filters, updater := t.baseBPF, cloneFilterMap(t.filters), t.bpfUpdater
+	t.mu.Unlock()
+	policy := t.buildPolicy(base, filters)
+	var err error
+	if transport, ok := updater.(interface{ SetTransportBPFFilter(string) error }); ok {
+		err = transport.SetTransportBPFFilter(policy.BPFExpression)
+	} else if updater != nil {
+		err = updater.SetBPFFilter(policy.BPFExpression)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if err != nil {
+		t.transportExclusion = previous
+		return err
+	}
+	t.lastAppliedBPF, t.hasAppliedBPF = policy.BPFExpression, true
+	return nil
 }
 
 func sortFilters(filters []*management.Filter) {

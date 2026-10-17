@@ -63,6 +63,45 @@ admission and acknowledgement boundary at each hop.
 
 ---
 
+### Processor failover
+
+Hunters accept an ordered list with `--processors relay-a:55555,relay-b:55555`
+or YAML `hunter.processors`. Tap and processor senders use the same flag and
+`tap.processors` / `processor.processors` for their external upstreams. Scalar
+`--processor` configuration remains supported. A CLI selector overrides configured
+selectors; scalar and list selectors at the same priority conflict. This is
+available for ordinary capture without LI or a common central processor.
+
+Only one candidate is active. Startup tries candidates in order, a failed active
+connection gets the configured retry opportunity, and the sender advances through
+the list when attempts fail. A healthy backup stays active; there is no automatic
+failback. Each attempt has a `10s` default deadline, set with
+`--processor-attempt-timeout`. `--processor-reconnect-attempts` defaults to `1`;
+`0` advances immediately after disconnection. Per-endpoint exponential backoff
+uses jitter and configurable YAML `<role>.failover.retry_initial` (`1s`) and
+`retry_max` (`60s`). `<role>` is `hunter`, `tap`, or `processor`.
+
+Lists accept address strings or `{address: ..., tls_server_name: ...}` endpoint
+objects. Server-name overrides require TLS; credentials and verification policy
+are inherited from the role's existing TLS configuration. Other endpoint
+transport overrides are rejected. See [hunter examples](../cmd/hunt/README.md#processor-failover)
+and the [tap](../cmd/tap/README.md#upstream-failover) and
+[processor](../cmd/process/README.md#upstream-failover) upstream examples.
+
+Failover does not make raw packet delivery durable. Finite queues and existing
+overflow buffers can lose data across disconnects; switches can also duplicate
+or reorder traffic. Existing reliable event spools retain their own receipt and
+retention semantics. Independent processors retain separate filters, analysis
+state, files, and deduplication stores. Configure compatible policy where needed.
+
+A hierarchical deployment can route through alternative relay processors to a
+common central processor, but candidate selection alone does not establish
+authenticated
+multiplexed raw relay ingress or central receipts. That relay admission contract
+and real multi-origin handover validation remain separate work. Do not infer
+production raw relay support or end-to-end durability from upstream selection
+tests. Tap's local capture and outputs do not require a local gRPC connection.
+
 ## Architecture
 
 ### Standalone Tap Mode
@@ -391,7 +430,7 @@ lc hunt [flags]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--processor <host:port>` | Processor address (required) | - |
+| `--processor <host:port>` | Single processor address; alternatively use `--processors` | - |
 | `--hunter-id <id>` | Unique hunter identifier | hostname |
 | `--interface <iface>` | Network interface to capture | any |
 | `--filter <bpf>` | BPF filter expression | "" |
@@ -545,51 +584,12 @@ grpcurl -plaintext -d '{
 
 ### Automatic Reconnection
 
-Hunters automatically reconnect when connection is lost.
-
-**Reconnection Strategy:**
-- **Detection:** Immediate on stream error
-- **Backoff:** Exponential (1s, 2s, 4s, 8s, 16s, 32s, 60s max)
-- **Max Attempts:** 10 (configurable)
-- **Total Time:** ~5 minutes before giving up
-
-**Reconnection Flow:**
-1. Detect connection failure
-2. Mark as disconnected
-3. Wait for exponential backoff
-4. Attempt reconnection
-5. On success: restore all services
-6. On failure: retry with longer backoff
-
-**During Reconnection:**
-- Packet capture continues
-- Packets are buffered (up to buffer size)
-- Failed sends are counted as drops
-- After reconnection, forwarding resumes
-
-**Backoff Schedule:**
-
-| Attempt | Backoff | Total Time |
-|---------|---------|------------|
-| 1 | 1s | 1s |
-| 2 | 2s | 3s |
-| 3 | 4s | 7s |
-| 4 | 8s | 15s |
-| 5 | 16s | 31s |
-| 6 | 32s | 63s |
-| 7-10 | 60s | 123s - 303s |
-
-**Logs During Reconnection:**
-```
-ERROR Failed to send heartbeat error=<...>
-WARN Connection lost, will attempt reconnection
-INFO Attempting reconnection attempt=1 max=10 backoff=1s
-ERROR Reconnection failed error=connection refused attempt=1
-INFO Attempting reconnection attempt=2 max=10 backoff=2s
-INFO Reconnection successful attempt=2
-INFO Starting heartbeat stream to processor
-INFO Heartbeat stream established
-```
+Connection errors trigger generation cleanup and bounded reconnect attempts.
+With a candidate list, the sender advances to another endpoint and keeps retrying
+eligible candidates until cancellation. When every candidate is cooling down,
+it waits cancellably for the next retry. A failed destination does not impose a
+global cooldown on a healthy alternative. See [processor failover](#processor-failover)
+for selection options and packet/event retention limits.
 
 ### TUI Monitoring
 
@@ -1402,10 +1402,10 @@ TUI clients can selectively subscribe to specific hunters:
 
 ## Known Limitations
 
-1. **No Packet Buffering During Disconnect**
-   - Packets captured during reconnection are dropped
-   - Mitigation: Increase buffer size
-   - Future: Add disk-backed buffer queue
+1. **Best-effort packet retention**
+   - Queue and overflow limits still apply during connection failures
+   - Packet loss, duplicates, and reordering remain possible across handover
+   - Durable raw receipts and recoverable replay are not part of processor selection
 
 2. **Filters Not Applied to Packets**
    - Filters are distributed and stored but not applied

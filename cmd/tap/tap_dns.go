@@ -234,6 +234,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		LogConfig:                 structuredLogs,
 		ListenAddr:                cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:               effectiveTapID,
+		RelayOrigins:              viper.GetStringMapStringSlice("tap.relay_origins"),
 		UpstreamAddr:              cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
 		MaxHunters:                cmdutil.GetIntConfig("tap.max_hunters", maxHunters),
 		MaxSubscribers:            cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
@@ -258,6 +259,10 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		VifBufferSize:             cmdutil.GetIntConfig("tap.vif_buffer_size", vifBufferSize),
 		VifNetNS:                  cmdutil.GetStringConfig("tap.vif_netns", vifNetNS),
 		VifDropPrivilegesUser:     cmdutil.GetStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
+	}
+
+	if err := applyTapUpstreamConfig(cmd, &config); err != nil {
+		return err
 	}
 
 	// Apply LI configuration (only available in -tags li builds)

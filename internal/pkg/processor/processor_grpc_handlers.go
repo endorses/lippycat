@@ -728,6 +728,7 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 	return &management.ProcessorRegistrationResponse{
 		Accepted:               true,
 		UpstreamProcessorId:    p.config.ProcessorID,
+		RawRelayVersion:        1,
 		AcceptedForwardingMode: mode, AcceptedEventApiMajor: apiMajor, AcceptedEventKinds: kinds, AcceptedSemanticProfileRevision: profileRevision, ForwardingNotice: notice,
 	}, nil
 }
@@ -890,6 +891,11 @@ func (p *Processor) SubscribeTopology(req *management.TopologySubscribeRequest, 
 
 // UpdateFilter adds or modifies a durably committed managed filter.
 func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter) (*management.FilterUpdateResult, error) {
+	if filter != nil {
+		if err := p.rejectLIOwnedFilterMutation(filter.Id); err != nil {
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+		}
+	}
 	count, err := p.updateManagedFilter(filter)
 	if err != nil {
 		return nil, filterMutationStatus(err)
@@ -901,6 +907,9 @@ func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter)
 func (p *Processor) DeleteFilter(ctx context.Context, req *management.FilterDeleteRequest) (*management.FilterUpdateResult, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "filter delete request is required")
+	}
+	if err := p.rejectLIOwnedFilterMutation(req.FilterId); err != nil {
+		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 	count, err := p.deleteManagedFilter(req.FilterId)
 	if err != nil {
@@ -957,6 +966,9 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 	if routingDecision.IsLocal {
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
+		if err := p.rejectLIOwnedFilterMutation(req.Filter.Id); err != nil {
+			return nil, err
+		}
 		huntersUpdated, err := p.updateManagedFilter(req.Filter)
 		if err != nil {
 			resultErr := filterMutationStatus(err)
@@ -1062,6 +1074,9 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
 
+		if err := p.rejectLIOwnedFilterMutation(req.FilterId); err != nil {
+			return nil, err
+		}
 		huntersUpdated, err := p.deleteManagedFilter(req.FilterId)
 		if err != nil {
 			resultErr := filterMutationStatus(err)

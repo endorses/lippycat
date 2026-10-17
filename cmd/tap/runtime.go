@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	"github.com/endorses/lippycat/internal/pkg/failover"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
@@ -66,6 +67,12 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 	if err := applyRADIUSLIConfig(nil, &config); err != nil {
 		return nil, err
 	}
+	if err := viper.UnmarshalKey("tap.packets.receiver", &config.PacketCustody); err != nil {
+		return nil, fmt.Errorf("decode raw packet custody: %w", err)
+	}
+	if err := viper.UnmarshalKey("li.handover", &config.LIHandover); err != nil {
+		return nil, fmt.Errorf("decode LI handover policy: %w", err)
+	}
 	sourceConfig, err := tapSourceConfigChecked(config, effectiveBPF, protocol)
 	if err != nil {
 		return nil, err
@@ -109,21 +116,34 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 			return nil, fmt.Errorf("RADIUS X2 requires a durable correlation state file or LI state file")
 		}
 	}
+	endpoints := config.UpstreamProcessors
+	if len(endpoints) == 0 && config.UpstreamAddr != "" {
+		endpoints = []failover.Endpoint{{Address: config.UpstreamAddr}}
+	}
+	exclusions, err := failover.NewExclusions(config.ListenAddr, endpoints)
+	if err != nil {
+		return nil, fmt.Errorf("configure tap transport exclusions: %w", err)
+	}
+	var localTarget *filtering.LocalTarget
+	config.PrepareUpstream = func(ctx context.Context, endpoint failover.Endpoint) error {
+		return exclusions.Prepare(ctx, endpoint, localTarget.SetTransportExclusion)
+	}
 	p, err := processor.New(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create processor: %w", err)
 	}
 
-	exclusionFilter := buildOwnTrafficExclusionFilter(config.ListenAddr, config.UpstreamAddr)
-	effectiveBPF = combineFiltersWithExclusion(effectiveBPF, exclusionFilter)
-	if exclusionFilter != "" {
+	if exclusions.Filter() != "" {
 		logger.Info("Own-traffic BPF exclusion applied")
 	}
 
 	sourceConfig.BPFFilter = effectiveBPF
 	localSource := source.NewLocalSource(sourceConfig)
-	localTarget := filtering.NewLocalTarget(filtering.LocalTargetConfig{BaseBPF: effectiveBPF, ApplicationIPSelectors: hooks.ApplicationIPSelectors})
+	localTarget = filtering.NewLocalTarget(filtering.LocalTargetConfig{BaseBPF: effectiveBPF, ApplicationIPSelectors: hooks.ApplicationIPSelectors})
 	localTarget.SetBPFUpdater(localSource)
+	if err := localTarget.SetTransportExclusion(exclusions.Filter()); err != nil {
+		return nil, errors.Join(err, p.Shutdown())
+	}
 
 	gpuConfig := GetGPUConfig()
 	if hooks.ConfigureGPU != nil {
@@ -142,7 +162,7 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 	p.SetPacketSource(localSource)
 	p.SetFilterTarget(localTarget)
 	mode := "standalone"
-	if config.UpstreamAddr != "" {
+	if config.UpstreamAddr != "" || len(config.UpstreamProcessors) > 0 {
 		mode = "hierarchical"
 	}
 	return &tapRuntime{

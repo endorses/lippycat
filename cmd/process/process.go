@@ -15,6 +15,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
 	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	"github.com/endorses/lippycat/internal/pkg/failover"
 	"github.com/endorses/lippycat/internal/pkg/logflags"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
@@ -72,8 +73,8 @@ Examples:
 		}
 		// Handle deprecated --upstream flag migration to --processor
 		if cmd.Flags().Changed("upstream") {
-			if cmd.Flags().Changed("processor") {
-				return fmt.Errorf("cannot use both --upstream (deprecated) and --processor; use --processor only")
+			if cmd.Flags().Changed("processor") || cmd.Flags().Changed("processors") {
+				return fmt.Errorf("cannot combine --upstream with --processor or --processors")
 			}
 			processorAddr = upstreamAddrDeprecated
 			logger.Warn("--upstream is deprecated, use --processor instead")
@@ -166,6 +167,7 @@ func init() {
 	ProcessCmd.Flags().Lookup("processor-id").Hidden = true
 	// Upstream forwarding (--processor is the new name, --upstream is deprecated)
 	ProcessCmd.Flags().StringVarP(&processorAddr, "processor", "P", "", "Upstream processor address for hierarchical mode (host:port)")
+	failover.Register(ProcessCmd.Flags(), viper.GetViper(), "processor")
 	ProcessCmd.Flags().StringVar(&upstreamAddrDeprecated, "upstream", "", "")
 	ProcessCmd.Flags().Lookup("upstream").Deprecated = "use --processor instead"
 	ProcessCmd.Flags().Lookup("upstream").Hidden = true
@@ -468,6 +470,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		},
 		ListenAddr:                  cmdutil.GetStringConfig("processor.listen_addr", listenAddr),
 		ProcessorID:                 cmdutil.GetStringConfig("processor.processor_id", processorID),
+		RelayOrigins:                viper.GetStringMapStringSlice("processor.relay_origins"),
 		UpstreamAddr:                cmdutil.GetStringConfig("processor.processor_addr", processorAddr),
 		MaxHunters:                  cmdutil.GetIntConfig("processor.max_hunters", maxHunters),
 		MaxSubscribers:              cmdutil.GetIntConfig("processor.max_subscribers", maxSubscribers),
@@ -503,6 +506,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		VifDropPrivilegesUser: cmdutil.GetStringConfig("processor.vif_drop_privileges", vifDropPrivileges),
 		// TLS keylog configuration (for decryption support)
 		TLSKeylogConfig: tlsKeylogConfig,
+	}
+	if err := applyProcessUpstreamConfig(cmd, &config); err != nil {
+		return err
 	}
 	if err := applyProcessFilterStoreConfig(&config); err != nil {
 		return err
@@ -618,7 +624,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	}
 
 	mode := "standalone"
-	if config.UpstreamAddr != "" {
+	if config.UpstreamAddr != "" || len(config.UpstreamProcessors) > 0 {
 		mode = "hierarchical"
 	}
 
@@ -626,7 +632,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		"processor_id", config.ProcessorID,
 		"mode", mode,
 		"listen", config.ListenAddr,
-		"upstream", config.UpstreamAddr,
+		"upstream_candidates", config.UpstreamProcessors,
 		"max_hunters", config.MaxHunters,
 		"write_file", config.WriteFile,
 		"enable_detection", config.EnableDetection)
@@ -649,6 +655,12 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	}
 	if err := applyRADIUSLIConfig(cmd, &config); err != nil {
 		return err
+	}
+	if err := viper.UnmarshalKey("processor.packets.receiver", &config.PacketCustody); err != nil {
+		return fmt.Errorf("decode raw packet custody: %w", err)
+	}
+	if err := viper.UnmarshalKey("li.handover", &config.LIHandover); err != nil {
+		return fmt.Errorf("decode LI handover policy: %w", err)
 	}
 	p, err := processor.New(config)
 	if err != nil {

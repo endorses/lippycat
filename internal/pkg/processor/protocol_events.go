@@ -73,13 +73,17 @@ func (p *Processor) initializeEventAnalysisLocked() error {
 }
 
 func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.CapturedPacket) {
+	p.emitProtocolEventsWithScope(batchSource, "", packets)
+}
+
+func (p *Processor) emitProtocolEventsWithScope(batchSource, captureEpoch string, packets []*data.CapturedPacket) {
 	p.eventAnalysisMu.RLock()
 	defer p.eventAnalysisMu.RUnlock()
 	if p.eventRuntime == nil || !p.wantsEventAnalysisLocked() {
 		return
 	}
 	producerNodeID, provenance := p.eventSource(batchSource)
-	if err := p.eventRuntime.ObserveCaptured(eventanalysis.Source{NodeID: producerNodeID, CaptureSource: provenance.CaptureSource, ProcessorNodeIDs: provenance.ProcessorNodeIDs}, packets); err != nil {
+	if err := p.eventRuntime.ObserveCaptured(eventanalysis.Source{NodeID: producerNodeID, CaptureSource: provenance.CaptureSource, CaptureEpoch: captureEpoch, ProcessorNodeIDs: provenance.ProcessorNodeIDs}, packets); err != nil {
 		logger.Warn("Failed to analyze normalized protocol events", "source_id", batchSource, "error", err)
 	}
 }

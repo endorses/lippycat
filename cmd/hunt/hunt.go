@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
 	"github.com/endorses/lippycat/internal/pkg/eventconfig"
+	"github.com/endorses/lippycat/internal/pkg/failover"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/spf13/cobra"
@@ -31,6 +32,7 @@ relevant packets upstream.
 
 Example:
   lc hunt --processor processor.example.com:55555
+  lc hunt --processors relay-a:55555,relay-b:55555
   lc hunt --processor 192.168.1.100:55555 --interface eth0
   lc hunt --processor processor:55555 --id edge-01`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -102,9 +104,9 @@ var (
 func init() {
 	eventPolicyFlags = HuntCmd.PersistentFlags()
 	eventconfig.Register(eventPolicyFlags)
-	// Required flags (persistent so subcommands inherit them)
+	// Processor selectors (persistent so subcommands inherit them).
 	HuntCmd.PersistentFlags().StringVarP(&processorAddr, "processor", "P", "", "Processor address (host:port)")
-	_ = HuntCmd.MarkPersistentFlagRequired("processor") // Error only occurs with invalid flag name (hard-coded string)
+	failover.Register(HuntCmd.PersistentFlags(), viper.GetViper(), "hunter")
 
 	// Hunter configuration (persistent for subcommands)
 	// --id is the new flag, --hunter-id is deprecated
@@ -150,6 +152,8 @@ func init() {
 	// Filter policy configuration
 	HuntCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "deny", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
 	HuntCmd.PersistentFlags().StringVar(&forwardMode, "forward-mode", "packets", "Upstream forwarding mode: packets or events")
+	HuntCmd.PersistentFlags().String("packet-delivery-profile", "best-effort", "Raw packet delivery profile: best-effort or reliable")
+	HuntCmd.PersistentFlags().String("packet-ack-scope", "", "Reliable raw receipt scope: receiver (default) or central")
 	HuntCmd.PersistentFlags().BoolVar(&eventFallbackToPackets, "event-fallback-to-packets", false, "Allow an event-mode session to visibly fall back to packet forwarding when negotiation fails")
 	HuntCmd.PersistentFlags().StringVar(&eventDeliveryProfile, "event-delivery-profile", "reliable", "Event delivery profile: reliable or memory-only")
 	HuntCmd.PersistentFlags().StringVar(&eventSpoolDir, "event-spool-dir", "/var/tmp/lippycat-event-spool", "Crash-recoverable event spool directory")
@@ -184,6 +188,8 @@ func init() {
 	_ = viper.BindPFlag("hunter.insecure", HuntCmd.PersistentFlags().Lookup("insecure"))
 	_ = viper.BindPFlag("hunter.no_filter_policy", HuntCmd.PersistentFlags().Lookup("no-filter-policy"))
 	_ = viper.BindPFlag("hunter.forward_mode", HuntCmd.PersistentFlags().Lookup("forward-mode"))
+	_ = viper.BindPFlag("hunter.packets.delivery_profile", HuntCmd.PersistentFlags().Lookup("packet-delivery-profile"))
+	_ = viper.BindPFlag("hunter.packets.ack_scope", HuntCmd.PersistentFlags().Lookup("packet-ack-scope"))
 	_ = viper.BindPFlag("hunter.events.fallback_to_packets", HuntCmd.PersistentFlags().Lookup("event-fallback-to-packets"))
 	_ = viper.BindPFlag("hunter.events.delivery_profile", HuntCmd.PersistentFlags().Lookup("event-delivery-profile"))
 	_ = viper.BindPFlag("hunter.events.spool.dir", HuntCmd.PersistentFlags().Lookup("event-spool-dir"))
@@ -257,8 +263,8 @@ func runHuntProtocol(cmd *cobra.Command, args []string, protocol, effectiveBPF s
 	}
 
 	// Validate configuration
-	if config.ProcessorAddr == "" {
-		return fmt.Errorf("processor address is required (use --processor flag)")
+	if len(config.Processors) == 0 {
+		return fmt.Errorf("processor address is required (use --processor or --processors)")
 	}
 
 	logger.Info("Hunter configuration",

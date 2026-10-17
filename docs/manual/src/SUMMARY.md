@@ -23,6 +23,7 @@
 - [Edge Capture with `lc hunt`](part3-distributed/hunt.md)
 - [Central Aggregation with `lc process`](part3-distributed/process.md)
 - [Standalone Mode with `lc tap`](part3-distributed/tap.md)
+- [Failover and Reliable Delivery](part3-distributed/processor-failover.md)
 
 ---
 

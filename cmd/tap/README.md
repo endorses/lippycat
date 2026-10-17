@@ -245,6 +245,9 @@ sudo lc tap tls -i eth0 \
 ### Upstream Forwarding
 
 - `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
+- `--processors` - Ordered upstream addresses (comma-separated; one active connection)
+- `--processor-attempt-timeout` - Connection setup deadline (default: `10s`)
+- `--processor-reconnect-attempts` - Active upstream retry count (default: `1`; `0` advances immediately)
 - `--forward-mode` - `packets` (default) or normalized `events`, for upstream forwarding and TUI monitoring
 - `--event-fallback-to-packets` - Explicitly permit compatibility fallback to raw packets
 - `--event-delivery-profile` - `reliable` (default) or `memory-only`
@@ -725,6 +728,46 @@ lc tap -i eth0 \
 ```
 
 See [docs/SECURITY.md](../../docs/SECURITY.md) for complete TLS setup.
+
+### Upstream failover
+
+Use `--processors upstream-a:55555,upstream-b:55555` instead of the scalar
+`--processor` to configure ordered alternatives. The first successful connection
+stays active until it fails; recovery of an earlier candidate does not trigger
+failback. Attempt timeout, reconnect count, and endpoint backoff use the same
+[selection settings as hunters](../hunt/README.md#processor-failover).
+
+```yaml
+tap:
+  processors:
+    - address: 192.0.2.20:55555
+      tls_server_name: upstream-a.example.com
+    - upstream-b.example.com:55555
+  failover:
+    attempt_timeout: 10s
+    reconnect_attempts: 1
+    retry_initial: 1s
+    retry_max: 60s
+```
+
+Endpoint objects support only `address` and optional `tls_server_name`; they
+inherit existing TLS credentials and verification policy. A server-name override
+requires TLS. A CLI selector replaces configured selectors. Scalar/list selectors
+at the same priority conflict; the legacy `--upstream` and
+`tap.upstream_addr` aliases remain supported individually.
+
+Upstream selection supports both forwarding modes. Authenticated raw relay v1
+preserves original hunter identities and requires explicit mutual-TLS origin
+delegation. Optional reliable central-scope delivery retains records at the source
+until the common destination signs durable acceptance. Independent upstreams keep
+separate analysis and deduplication state.
+
+See [processor failover and reliable packets](../../docs/PROCESSOR_FAILOVER.md) for
+upgrade order, `relay_origins`, signed shared policy, reliable receiver configuration,
+offline store provisioning, encryption and the exact delivery limits.
+
+Tap capture and local outputs remain in process while an external upstream is
+unavailable. Omitting an upstream keeps standalone operation.
 
 ## Configuration File
 

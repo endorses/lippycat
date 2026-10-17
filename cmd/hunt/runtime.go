@@ -33,6 +33,11 @@ func runHunterRuntime(config hunter.Config, protocol protocolcatalog.Spec, hooks
 	if err != nil {
 		return fmt.Errorf("failed to create hunter: %w", err)
 	}
+	defer func() {
+		if err := h.Close(); err != nil {
+			logger.Error("Failed to release hunter persistent stores", "error", err)
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

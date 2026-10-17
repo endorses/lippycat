@@ -68,6 +68,9 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 	if err := p.filterManager.Initialize(); err != nil {
 		return fmt.Errorf("initialize managed filter storage: %w", err)
 	}
+	if err := p.startSharedPolicy(p.ctx); err != nil {
+		return fmt.Errorf("start shared filter policy: %w", err)
+	}
 
 	// Apply loaded filters to the filter target (needed for tap/local mode)
 	// In distributed mode, filters are pushed when hunters connect.
@@ -257,6 +260,9 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 	if err := p.startLIManager(); err != nil {
 		return fmt.Errorf("failed to start LI manager: %w", err)
 	}
+	if err := p.startLIHandoverPolicy(p.ctx); err != nil {
+		return fmt.Errorf("start LI capture authority: %w", err)
+	}
 
 	// Accept remote input only after LI state and startup policy reconciliation.
 	p.wg.Add(1)
@@ -290,11 +296,15 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 	}
 
 	logger.Info("Processor started", "listen_addr", p.config.ListenAddr)
+	p.startPacketCustody(p.ctx)
 
 	// Start local capture loop if using LocalSource. Its startup and runtime
 	// capture failures must fault the processor, not leave a serving empty node.
 	var localFailure chan error
 	if localSource, ok := p.packetSource.(*source.LocalSource); ok {
+		if err := p.waitSharedPolicy(p.ctx); err != nil {
+			return fmt.Errorf("wait for local capture policy: %w", err)
+		}
 		logger.Info("Starting local capture mode")
 		localFailure = make(chan error, 1)
 
@@ -329,7 +339,10 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 }
 
 func (p *Processor) registerGRPCServices(registrar grpc.ServiceRegistrar) {
+	p.registerPacketCustody(registrar)
+	p.registerSharedPolicy(registrar)
 	data.RegisterDataServiceServer(registrar, p)
+	data.RegisterRelayDataServiceServer(registrar, p)
 	management.RegisterManagementServiceServer(registrar, p)
 	eventsv1.RegisterEventServiceServer(registrar, p.eventService)
 }
@@ -369,6 +382,9 @@ func (p *Processor) Shutdown() error {
 		// Includes the gRPC Serve goroutine and local source/consumer goroutines.
 		// Once this returns there is no producer that can call processBatch.
 		p.wg.Wait()
+		p.shutdownErr = errors.Join(p.shutdownErr, p.closePacketCustody())
+		p.closeLIHandoverPolicy()
+		p.shutdownErr = errors.Join(p.shutdownErr, p.closeSharedPolicy())
 		p.sdpDiagnostics.close()
 		// Capture is closed before persistent LI drains, while administration,
 		// delivery journals and file ownership remain available.

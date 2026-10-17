@@ -83,17 +83,26 @@ type PacketBufferProvider interface {
 
 // Config contains forwarding configuration
 type Config struct {
-	RADIUSPorts        []uint16
-	RADIUSScope        radius.CaptureScope
-	RADIUSOnly         bool
-	RADIUSCorrelation  radius.CorrelatorConfig
-	RADIUSMatcher      radius.ObservationMatcher
-	HunterID           string
-	BatchSize          int
-	BatchTimeout       time.Duration
-	BufferSize         int
-	BatchQueueSize     int // Number of batches to buffer for async sending (0 = default)
-	IncludeHTTPHeaders bool
+	// BatchSink makes this manager a lifetime producer. It uses the same packet
+	// processing/batching path without owning a connection or an overflow sender.
+	BatchSink func(*pipeline.PacketBatch) error
+	// ExternalProducer prevents connection generations consuming capture twice.
+	ExternalProducer bool
+	// DurableSendNext sends bounded retained work and waits for verified custody.
+	DurableSendNext      func(context.Context, data.DataService_StreamPacketsClient, func(context.Context) error) (uint64, error)
+	CaptureAllowed       func(time.Time) bool
+	InitialCapturePolicy []byte
+	RADIUSPorts          []uint16
+	RADIUSScope          radius.CaptureScope
+	RADIUSOnly           bool
+	RADIUSCorrelation    radius.CorrelatorConfig
+	RADIUSMatcher        radius.ObservationMatcher
+	HunterID             string
+	BatchSize            int
+	BatchTimeout         time.Duration
+	BufferSize           int
+	BatchQueueSize       int // Number of batches to buffer for async sending (0 = default)
+	IncludeHTTPHeaders   bool
 
 	// Disk overflow buffer (optional)
 	DiskBufferEnabled bool   // Enable disk overflow buffer
@@ -135,11 +144,15 @@ type Manager struct {
 	config          Config
 
 	// Streaming
-	stream   data.DataService_StreamPacketsClient
-	streamMu sync.Mutex
+	stream          data.DataService_StreamPacketsClient
+	streamMu        sync.Mutex
+	streamReady     chan struct{}
+	streamReadyOnce sync.Once
 
 	// Batching
 	batchMu       sync.Mutex
+	processingMu  sync.Mutex
+	capturePolicy []byte
 	currentBatch  []*pipeline.PacketEnvelope
 	batchSequence uint64
 
@@ -163,6 +176,9 @@ type Manager struct {
 	consecutiveFailures atomic.Int32 // Track consecutive send failures
 	disconnectCallback  func()       // Called when connection appears dead
 	disconnectOnce      sync.Once
+	disconnectMu        sync.Mutex
+	disconnectPending   bool
+	disconnectNotified  bool
 
 	// Optional packet processing
 	packetProcessor     PacketProcessor
@@ -199,6 +215,8 @@ func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBu
 		flowChanged:      make(chan struct{}, 1),
 		slowSendInterval: config.SlowSendInterval,
 		clock:            config.Clock,
+		streamReady:      make(chan struct{}),
+		capturePolicy:    append([]byte(nil), config.InitialCapturePolicy...),
 	}
 
 	var radiusErr error
@@ -224,8 +242,14 @@ func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBu
 	}
 
 	// Start async batch sender goroutine
-	m.senderWg.Add(1)
-	go m.batchSender()
+	if config.BatchSink == nil {
+		m.senderWg.Add(1)
+		if config.DurableSendNext != nil {
+			go m.durableSender()
+		} else {
+			go m.batchSender()
+		}
+	}
 
 	return m
 }
@@ -235,6 +259,9 @@ func (m *Manager) SetStream(stream data.DataService_StreamPacketsClient) {
 	m.streamMu.Lock()
 	m.stream = stream
 	m.streamMu.Unlock()
+	if stream != nil {
+		m.streamReadyOnce.Do(func() { close(m.streamReady) })
+	}
 }
 
 // SetPacketProcessor sets an optional packet processor for custom filtering
@@ -244,7 +271,16 @@ func (m *Manager) SetPacketProcessor(processor PacketProcessor) {
 
 // SetDisconnectCallback sets a callback to be invoked when connection appears dead
 func (m *Manager) SetDisconnectCallback(callback func()) {
+	m.disconnectMu.Lock()
 	m.disconnectCallback = callback
+	notify := m.disconnectPending && !m.disconnectNotified && callback != nil
+	if notify {
+		m.disconnectNotified = true
+	}
+	m.disconnectMu.Unlock()
+	if notify {
+		go callback()
+	}
 }
 
 // SetApplicationFilter sets an optional application-layer filter
@@ -312,6 +348,10 @@ func (m *Manager) HandleFlowControl(ctrl *data.StreamControl) {
 // ForwardPackets reads from packet buffer and forwards batches to processor
 func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 	defer wg.Done()
+	if m.config.ExternalProducer {
+		<-m.connCtx.Done()
+		return
+	}
 
 	ticker := time.NewTicker(m.config.BatchTimeout)
 	defer ticker.Stop()
@@ -334,91 +374,98 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 				return
 			}
 
-			// Increment captured counter
-			m.statsCollector.IncrementCaptured()
-
-			// Track matched filter IDs for LI correlation
-			var matchedFilterIDs []string
-
-			if boundary, ok := m.packetBufferProv.(interface{ CaptureBoundary() time.Time }); ok {
-				if err := m.radiusProcessor.AdvanceBoundary(boundary.CaptureBoundary()); err != nil {
-					logger.Error("Failed to reset RADIUS capture epoch", "error", err)
+			func() {
+				m.processingMu.Lock()
+				defer m.processingMu.Unlock()
+				if m.config.CaptureAllowed != nil && !m.config.CaptureAllowed(time.Now()) {
+					return
 				}
-			}
-			radiusMatcher, _ := m.applicationFilter.(radius.ObservationMatcher)
-			radiusMatcher = radius.CombineMatchers(radiusMatcher, m.config.RADIUSMatcher)
-			radiusObservation := m.radiusProcessor.Process(pktInfo.Packet, pktInfo.LinkType, pktInfo.Interface, radiusMatcher)
-			if m.config.RADIUSOnly && radiusObservation == nil {
-				continue
-			}
-			radiusSelected := radiusObservation != nil && (len(radiusObservation.Direct) > 0 || len(radiusObservation.Inherited) > 0)
-			if m.config.RADIUSMatcher != nil && !radiusSelected {
-				continue
-			}
+				// Increment captured counter
+				m.statsCollector.IncrementCaptured()
 
-			// Apply custom packet processor if set (for VoIP buffering, etc.)
-			if m.packetProcessor != nil {
-				forward := m.packetProcessor.ProcessPacket(pktInfo)
-				if provider, ok := m.packetProcessor.(rtpAttributionProvider); ok {
-					attribution := provider.RTPAttributionStats()
-					if sink, ok := m.statsCollector.(rtpAttributionStatsSink); ok {
-						sink.SetRTPAttribution(attribution.OwnershipUnresolved, attribution.OwnershipAmbiguous, attribution.InheritanceSuppressed)
+				// Track matched filter IDs for LI correlation
+				var matchedFilterIDs []string
+
+				if boundary, ok := m.packetBufferProv.(interface{ CaptureBoundary() time.Time }); ok {
+					if err := m.radiusProcessor.AdvanceBoundary(boundary.CaptureBoundary()); err != nil {
+						logger.Error("Failed to reset RADIUS capture epoch", "error", err)
 					}
 				}
-				if !forward && !radiusSelected {
-					// Packet was buffered or filtered out by processor
-					continue
+				radiusMatcher, _ := m.applicationFilter.(radius.ObservationMatcher)
+				radiusMatcher = radius.CombineMatchers(radiusMatcher, m.config.RADIUSMatcher)
+				radiusObservation := m.radiusProcessor.Process(pktInfo.Packet, pktInfo.LinkType, pktInfo.Interface, radiusMatcher)
+				if m.config.RADIUSOnly && radiusObservation == nil {
+					return
 				}
-				// Packet should be forwarded - count it as matched
-				m.statsCollector.IncrementMatched()
-				// Note: VoIP processor doesn't provide filter IDs currently
-			} else if m.applicationFilter != nil {
-				// Fall back to application-layer filter if no custom processor
-				// Use MatchPacketWithIDs to get filter IDs for LI correlation
-				matched, filterIDs := m.applicationFilter.MatchPacketWithIDs(pktInfo.Packet)
-				if !matched && !radiusSelected {
-					// Packet didn't match application filter - skip it
-					continue
+				radiusSelected := radiusObservation != nil && (len(radiusObservation.Direct) > 0 || len(radiusObservation.Inherited) > 0)
+				if m.config.RADIUSMatcher != nil && !radiusSelected {
+					return
 				}
-				// Packet matched - count it and save filter IDs
-				m.statsCollector.IncrementMatched()
-				matchedFilterIDs = filterIDs
-			}
 
-			envelope := convertPacket(pktInfo, matchedFilterIDs)
-			envelope.RADIUS = radiusObservation
-			metadata := protocolmeta.Enrich(pktInfo.Packet, nil, m.config.IncludeHTTPHeaders)
-
-			// Add DNS metadata if DNS processor is set
-			if m.dnsMetadataProvider != nil {
-				if dnsMetadata := m.dnsMetadataProvider.ProcessPacket(pktInfo.Packet); dnsMetadata != nil {
-					if metadata == nil {
-						metadata = &data.PacketMetadata{}
+				// Apply custom packet processor if set (for VoIP buffering, etc.)
+				if m.packetProcessor != nil {
+					forward := m.packetProcessor.ProcessPacket(pktInfo)
+					if provider, ok := m.packetProcessor.(rtpAttributionProvider); ok {
+						attribution := provider.RTPAttributionStats()
+						if sink, ok := m.statsCollector.(rtpAttributionStatsSink); ok {
+							sink.SetRTPAttribution(attribution.OwnershipUnresolved, attribution.OwnershipAmbiguous, attribution.InheritanceSuppressed)
+						}
 					}
-					metadata.Dns = grpcadapter.DNSMetadataToProto(dnsMetadata)
+					if !forward && !radiusSelected {
+						// Packet was buffered or filtered out by processor
+						return
+					}
+					// Packet should be forwarded - count it as matched
+					m.statsCollector.IncrementMatched()
+					// Note: VoIP processor doesn't provide filter IDs currently
+				} else if m.applicationFilter != nil {
+					// Fall back to application-layer filter if no custom processor
+					// Use MatchPacketWithIDs to get filter IDs for LI correlation
+					matched, filterIDs := m.applicationFilter.MatchPacketWithIDs(pktInfo.Packet)
+					if !matched && !radiusSelected {
+						// Packet didn't match application filter - skip it
+						return
+					}
+					// Packet matched - count it and save filter IDs
+					m.statsCollector.IncrementMatched()
+					matchedFilterIDs = filterIDs
 				}
-			}
-			if metadata != nil {
-				encoded, err := grpcadapter.MetadataFromProto(metadata)
-				if err != nil {
-					logger.Error("Failed to normalize packet metadata", "error", err)
-					m.statsCollector.IncrementDropped(1)
-					continue
+
+				envelope := convertPacket(pktInfo, matchedFilterIDs)
+				envelope.RADIUS = radiusObservation
+				metadata := protocolmeta.Enrich(pktInfo.Packet, nil, m.config.IncludeHTTPHeaders)
+
+				// Add DNS metadata if DNS processor is set
+				if m.dnsMetadataProvider != nil {
+					if dnsMetadata := m.dnsMetadataProvider.ProcessPacket(pktInfo.Packet); dnsMetadata != nil {
+						if metadata == nil {
+							metadata = &data.PacketMetadata{}
+						}
+						metadata.Dns = grpcadapter.DNSMetadataToProto(dnsMetadata)
+					}
 				}
-				envelope.Metadata = encoded
-				envelope.Stages = envelope.Stages.With(pipeline.StageDetected).With(pipeline.StageAnalyzed)
-			}
+				if metadata != nil {
+					encoded, err := grpcadapter.MetadataFromProto(metadata)
+					if err != nil {
+						logger.Error("Failed to normalize packet metadata", "error", err)
+						m.statsCollector.IncrementDropped(1)
+						return
+					}
+					envelope.Metadata = encoded
+					envelope.Stages = envelope.Stages.With(pipeline.StageDetected).With(pipeline.StageAnalyzed)
+				}
 
-			// Add to current batch with minimal lock duration
-			m.batchMu.Lock()
-			m.currentBatch = append(m.currentBatch, envelope)
-			batchLen := len(m.currentBatch)
-			m.batchMu.Unlock()
+				// Add to current batch with minimal lock duration
+				m.batchMu.Lock()
+				m.currentBatch = append(m.currentBatch, envelope)
+				batchLen := len(m.currentBatch)
+				m.batchMu.Unlock()
 
-			// Check size outside lock
-			if batchLen >= m.config.BatchSize {
-				m.SendBatch()
-			}
+				// Check size outside lock
+				if batchLen >= m.config.BatchSize {
+					m.SendBatch()
+				}
+			}()
 
 		case <-ticker.C:
 			// Send batch on timeout
@@ -454,11 +501,12 @@ func (m *Manager) SendBatch() {
 	// Create batch message
 	m.batchSequence++
 	batch := &pipeline.PacketBatch{
-		Source:    pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, NodeID: m.config.HunterID},
-		Sequence:  m.batchSequence,
-		CreatedAt: time.Now(),
-		Packets:   m.currentBatch,
-		HasStats:  true,
+		SignedCapturePolicy: append([]byte(nil), m.capturePolicy...),
+		Source:              pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, NodeID: m.config.HunterID},
+		Sequence:            m.batchSequence,
+		CreatedAt:           time.Now(),
+		Packets:             m.currentBatch,
+		HasStats:            true,
 		Stats: pipeline.BatchStats{
 			TotalCaptured:                m.statsCollector.GetCaptured(),
 			FilteredMatched:              m.statsCollector.GetMatched(),
@@ -480,6 +528,12 @@ func (m *Manager) SendBatch() {
 	// Reset batch
 	m.currentBatch = make([]*pipeline.PacketEnvelope, 0, m.config.BatchSize)
 	m.batchMu.Unlock()
+	if m.config.BatchSink != nil {
+		if err := m.config.BatchSink(batch); err != nil {
+			logger.Error("Failed to retain raw packet batch", "sequence", batch.Sequence, "error", err)
+		}
+		return
+	}
 
 	// Serialize admission across the memory and disk tiers. Once a batch spills
 	// to disk, all later batches must follow it there until the sender drains the
@@ -497,6 +551,75 @@ func (m *Manager) SendBatch() {
 		// Successfully queued to memory
 	default:
 		m.writeBatchToDisk(batch)
+	}
+}
+
+// ApplyCapturePolicy seals the old batch before installing matchers and the new
+// authenticated token. No capture packet straddles that producer boundary.
+func (m *Manager) ApplyCapturePolicy(encoded []byte, apply func() error) error {
+	m.processingMu.Lock()
+	defer m.processingMu.Unlock()
+	m.SendBatch()
+	if err := apply(); err != nil {
+		return err
+	}
+	m.batchMu.Lock()
+	m.capturePolicy = append([]byte(nil), encoded...)
+	m.batchMu.Unlock()
+	return nil
+}
+
+func (m *Manager) WithCaptureBoundary(apply func() error) error {
+	m.processingMu.Lock()
+	defer m.processingMu.Unlock()
+	return apply()
+}
+
+func (m *Manager) durableSender() {
+	defer m.senderWg.Done()
+	defer m.closeStream()
+	select {
+	case <-m.connCtx.Done():
+		return
+	case <-m.streamReady:
+	}
+	m.streamMu.Lock()
+	stream := m.stream
+	m.streamMu.Unlock()
+	slow := m.clock.NewTicker(m.slowSendInterval)
+	defer slow.Stop()
+	wait := func(ctx context.Context) error {
+		for {
+			if m.paused.Load() {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-m.flowChanged:
+				}
+				continue
+			}
+			if m.GetFlowControlState() == data.FlowControl_FLOW_SLOW {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-m.flowChanged:
+					continue
+				case <-slow.Chan():
+				}
+			}
+			return nil
+		}
+	}
+	for m.connCtx.Err() == nil {
+		count, err := m.config.DurableSendNext(m.connCtx, stream, wait)
+		if err != nil {
+			if m.connCtx.Err() == nil {
+				logger.Error("Reliable raw sender stopped; retained records remain pending", "error", err)
+				m.signalDisconnect()
+			}
+			return
+		}
+		m.statsCollector.IncrementForwarded(count)
 	}
 }
 
@@ -649,8 +772,15 @@ func (m *Manager) sendBatch(batch *pipeline.PacketBatch) bool {
 
 func (m *Manager) signalDisconnect() {
 	m.disconnectOnce.Do(func() {
-		if m.disconnectCallback != nil {
-			go m.disconnectCallback()
+		m.disconnectMu.Lock()
+		m.disconnectPending = true
+		callback := m.disconnectCallback
+		if callback != nil {
+			m.disconnectNotified = true
+		}
+		m.disconnectMu.Unlock()
+		if callback != nil {
+			go callback()
 		}
 	})
 }

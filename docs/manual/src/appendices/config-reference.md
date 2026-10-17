@@ -405,6 +405,11 @@ Hunter nodes capture packets at the network edge and forward them to a processor
 | `hunter.id`                             | string   | `""`                              | Hunter identifier. Auto-generated from hostname if empty.                                                  |
 | `hunter.hunter_id`                      | string   | `""`                              | Alias for `hunter.id`.                                                                                     |
 | `hunter.processor_addr`                 | string   | `""`                              | Address of the processor to connect to (e.g., `"processor:55555"`).                                        |
+| `hunter.processors`                     | list     | `[]`                              | Ordered address strings or endpoint objects; alternative to the scalar selector.                           |
+| `hunter.failover.attempt_timeout`       | duration | `"10s"`                           | Positive deadline for each processor setup attempt.                                                        |
+| `hunter.failover.reconnect_attempts`    | integer  | `1`                               | Active processor retries; `0` advances immediately.                                                        |
+| `hunter.failover.retry_initial`         | duration | `"1s"`                            | Positive initial endpoint retry delay before jitter.                                                       |
+| `hunter.failover.retry_max`             | duration | `"60s"`                           | Positive maximum retry delay; must not be less than the initial delay.                                     |
 | `hunter.interfaces`                     | list     | `["any"]`                         | Network interfaces to capture from.                                                                        |
 | `hunter.bpf_filter`                     | string   | `""`                              | BPF filter expression for kernel-level packet filtering. See [BPF Filter Reference](bpf-reference.md).     |
 | `hunter.buffer_size`                    | integer  | `10000`                           | Internal packet buffer size (number of packets).                                                           |
@@ -519,6 +524,11 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 | `processor.processor_id`                   | string   | `""`                                        | Alias for `processor.id`.                                                                                    |
 | `processor.listen_addr`                    | string   | `":55555"`                                  | Address to listen on for hunter and TUI connections.                                                         |
 | `processor.processor_addr`                 | string   | `""`                                        | Address of an upstream processor for hierarchical forwarding.                                                |
+| `processor.processors`                     | list     | `[]`                                        | Ordered address strings or endpoint objects; alternative to the scalar selector.                             |
+| `processor.failover.attempt_timeout`       | duration | `"10s"`                                     | Positive deadline for each processor setup attempt.                                                          |
+| `processor.failover.reconnect_attempts`    | integer  | `1`                                         | Active processor retries; `0` advances immediately.                                                          |
+| `processor.failover.retry_initial`         | duration | `"1s"`                                      | Positive initial endpoint retry delay before jitter.                                                         |
+| `processor.failover.retry_max`             | duration | `"60s"`                                     | Positive maximum retry delay; must not be less than the initial delay.                                       |
 | `processor.upstream_addr`                  | string   | `""`                                        | Alias for `processor.processor_addr`.                                                                        |
 | `processor.forward_mode`                   | string   | `"packets"`                                 | Upstream representation: `"packets"` or normalized `"events"`.                                               |
 | `processor.events.fallback_to_packets`     | boolean  | `false`                                     | Explicitly allow visible packet fallback after failed event negotiation.                                     |
@@ -687,17 +697,22 @@ TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_f
 
 #### Tap Upstream Forwarding {#tap-upstream-forwarding}
 
-| Key                                  | Type     | Default                               | Description                                                        |
-| ------------------------------------ | -------- | ------------------------------------- | ------------------------------------------------------------------ |
-| `tap.processor_addr`                 | string   | `""`                                  | Upstream processor address for forwarding captured packets.        |
-| `tap.upstream_addr`                  | string   | `""`                                  | Alias for `tap.processor_addr`.                                    |
-| `tap.forward_mode`                   | string   | `"packets"`                           | Upstream representation: `"packets"` or `"events"`.                |
-| `tap.events.fallback_to_packets`     | boolean  | `false`                               | Explicitly permit packet fallback after event negotiation failure. |
-| `tap.events.delivery_profile`        | string   | `"reliable"`                          | Upstream event delivery: `"reliable"` or `"memory-only"`.          |
-| `tap.events.spool.dir`               | string   | `"/var/tmp/lippycat-tap-event-spool"` | Recoverable upstream event spool directory.                        |
-| `tap.events.spool.max_bytes`         | integer  | `1073741824`                          | Upstream event spool byte limit (0 = unlimited).                   |
-| `tap.events.spool.max_age`           | duration | `"24h"`                               | Upstream event spool age limit (0 = unlimited).                    |
-| `tap.events.spool.exhaustion_policy` | string   | `"drop_oldest"`                       | Upstream spool exhaustion behavior.                                |
+| Key                                  | Type     | Default                               | Description                                                                      |
+| ------------------------------------ | -------- | ------------------------------------- | -------------------------------------------------------------------------------- |
+| `tap.processor_addr`                 | string   | `""`                                  | Upstream processor address for forwarding captured packets.                      |
+| `tap.processors`                     | list     | `[]`                                  | Ordered address strings or endpoint objects; alternative to the scalar selector. |
+| `tap.failover.attempt_timeout`       | duration | `"10s"`                               | Positive deadline for each processor setup attempt.                              |
+| `tap.failover.reconnect_attempts`    | integer  | `1`                                   | Active processor retries; `0` advances immediately.                              |
+| `tap.failover.retry_initial`         | duration | `"1s"`                                | Positive initial endpoint retry delay before jitter.                             |
+| `tap.failover.retry_max`             | duration | `"60s"`                               | Positive maximum retry delay; must not be less than the initial delay.           |
+| `tap.upstream_addr`                  | string   | `""`                                  | Alias for `tap.processor_addr`.                                                  |
+| `tap.forward_mode`                   | string   | `"packets"`                           | Upstream representation: `"packets"` or `"events"`.                              |
+| `tap.events.fallback_to_packets`     | boolean  | `false`                               | Explicitly permit packet fallback after event negotiation failure.               |
+| `tap.events.delivery_profile`        | string   | `"reliable"`                          | Upstream event delivery: `"reliable"` or `"memory-only"`.                        |
+| `tap.events.spool.dir`               | string   | `"/var/tmp/lippycat-tap-event-spool"` | Recoverable upstream event spool directory.                                      |
+| `tap.events.spool.max_bytes`         | integer  | `1073741824`                          | Upstream event spool byte limit (0 = unlimited).                                 |
+| `tap.events.spool.max_age`           | duration | `"24h"`                               | Upstream event spool age limit (0 = unlimited).                                  |
+| `tap.events.spool.exhaustion_policy` | string   | `"drop_oldest"`                       | Upstream spool exhaustion behavior.                                              |
 
 #### Tap Per-Call PCAP {#tap-per-call-pcap}
 
@@ -1008,3 +1023,15 @@ restrictions remain effective during shadow and runtime-open admission. These
 settings do not preserve pre-match RTP. See
 [selective VoIP media capture](../part5-advanced/voip.md#selective-media-capture-with-ebpf)
 for behavior and implementation status.
+
+## Failover Policy and Packet Custody {#failover-policy-and-packet-custody}
+
+The [failover and reliable delivery chapter](../part3-distributed/processor-failover.md#failover-and-reliable-delivery) describes the selector precedence, signed policies, receipt boundaries and offline initialization. Processor and tap `relay_origins` map authenticated relay IDs to explicit original hunter IDs; topology membership grants no delegation.
+
+Optional shared policy uses `hunter.filter_policy`, `processor.filter_policy` or `tap.filter_policy`. Keys are `mode` (default processor), `owner` (default shared), `domain`, `authority`, `trusted_cert`, `state_file`, `startup` (wait, cached or local), authority-only `signing_key`, `replicas` and `sync_interval` (default 5s). Encrypted state adds `storage_protection: encrypted` and `storage_keys`; the LI owner requires them. Key references have `active: {id, file}` and optional `prior` entries. Preserve state and signing identity across restart; changing a pin or deleting a usage ledger is not migration.
+
+The hunter's `packets` section selects `delivery_profile` (best_effort or reliable), `ack_scope` (receiver by default in reliable mode, or central), `destination_id`, `trusted_cert` and `spool`. The spool specifies `dir`, explicit `protection`, optional encryption `keys`, `max_bytes`, `max_age`, `max_record_bytes`, `max_read_bytes`, `max_records`, `max_loss_ranges` and `exhaustion_policy` (drop_oldest or drop_new). Receipt and spool settings require reliable raw packet mode; they do not configure normalized-event delivery.
+
+Receiver configuration is `processor.packets.receiver` or `tap.packets.receiver`: `enabled`, matching receipt `authority`, `signing_cert`, `signing_key` and `store`. The store requires `dir`, matching `destination_id`, explicit `protection`, `max_bytes`, `max_record_bytes`, `max_sessions`, `max_records` and `max_loss_ranges`; encrypted stores also require independent `keys`. Receiver custody is currently terminal-only. Relay processors use central scope and leave unconfirmed records at the source.
+
+Optional root-level `li.handover` contains `enabled`, `lease_duration`, `allow_offline`, `clock_uncertainty` and `source_ids`. Offline LI capture defaults to disabled; ordinary shared policy has no lease. The LI-owned hunter profile currently requires encrypted policy/raw stores and synchronous reliable packet filtering, and rejects VoIP call-buffer mode.

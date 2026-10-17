@@ -296,7 +296,7 @@ func TestNew(t *testing.T) {
 	assert.Equal(t, config.VoIPMode, manager.config.VoIPMode)
 	assert.Equal(t, 0, manager.reconnectAttempts)
 	assert.False(t, manager.reconnecting)
-	assert.NotNil(t, manager.circuitBreaker)
+	assert.NotNil(t, manager.modeReady)
 }
 
 func TestNew_WithTLS(t *testing.T) {

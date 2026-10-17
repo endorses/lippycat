@@ -25,16 +25,18 @@ const (
 // SourceProvenance describes where a packet was observed. Batch fields are set
 // only for transports that batch packets.
 type SourceProvenance struct {
-	PacketProvenance *offline.PacketProvenance
-	ArgumentIndex    uint32
-	LogicalSequence  uint64
-	Kind             SourceKind
-	NodeID           string
-	InterfaceName    string
-	InputFile        string
-	InterfaceIndex   uint32
-	BatchSequence    uint64
-	BatchTimestamp   time.Time
+	PacketProvenance  *offline.PacketProvenance
+	ArgumentIndex     uint32
+	LogicalSequence   uint64
+	Kind              SourceKind
+	NodeID            string
+	ProducerSessionID string
+	CaptureEpoch      string
+	InterfaceName     string
+	InputFile         string
+	InterfaceIndex    uint32
+	BatchSequence     uint64
+	BatchTimestamp    time.Time
 }
 
 // Stage is a named pipeline capability. It is deliberately a bit set rather
@@ -111,12 +113,13 @@ type PacketEnvelope struct {
 
 // PacketBatch preserves transport ordering provenance while keeping packets normalized.
 type PacketBatch struct {
-	Source    SourceProvenance
-	Sequence  uint64
-	CreatedAt time.Time
-	Packets   []*PacketEnvelope
-	HasStats  bool
-	Stats     BatchStats
+	SignedCapturePolicy []byte
+	Source              SourceProvenance
+	Sequence            uint64
+	CreatedAt           time.Time
+	Packets             []*PacketEnvelope
+	HasStats            bool
+	Stats               BatchStats
 }
 
 type BatchStats struct {

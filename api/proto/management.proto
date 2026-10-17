@@ -133,6 +133,8 @@ message ProcessorRegistrationResponse {
     repeated int32 accepted_event_kinds = 6;
     uint32 accepted_semantic_profile_revision = 7;
     string forwarding_notice = 8;
+    // Zero means legacy direct-style packet streaming only.
+    uint32 raw_relay_version = 9;
 }
 
 // HunterCapabilities describes what a hunter can do
@@ -323,6 +325,8 @@ message HunterStats {
     // Unix nanoseconds identifying the actual CPU/memory sample, not a status poll.
     // Zero means unknown. Consumers must not count repeated samples as fresh data.
     int64 metrics_sample_time_ns = 39;
+    ProcessorSelectionStatus processor_selection = 40;
+    RawPacketStatus raw_packets = 41;
 }
 
 // ProcessorHeartbeat response from processor
@@ -713,6 +717,8 @@ message ProcessorStats {
     MediaAdmissionStatus rtp_ebpf = 18;
     // Aggregate optional call-leg grouping observations; absent when disabled.
     LICallCorrelationStats li_call_correlation = 19;
+    RouteStatus upstream_route = 20;
+    RawPacketStatus raw_packets = 21;
 }
 
 // No call identifiers, selectors, addresses or SIP header values are exposed.
@@ -1305,4 +1311,85 @@ message MediaAdmissionUncertainty {
  // conservative interval is a gauge; sustained overload may extend it.
  uint64 replay_unrecorded = 17;
  uint64 replay_degraded_ns = 18;
+}
+
+// Signed full replacement policy, independent of transport route. All filter
+// IDs are preserved and belong to shared/<domain>/; an empty list deletes the
+// previous owned policy. The signature covers deterministic Snapshot bytes.
+message PolicySnapshot {
+    uint32 protocol_version = 1;
+    string domain = 2;
+    string authority_id = 3;
+    uint64 revision = 4;
+    repeated Filter filters = 5;
+    string owner_kind = 6; // empty legacy value means shared; li is explicit
+    bytes capture_authority = 7; // signed opaque consumer authority, LI only
+    int64 valid_from_ns = 8;
+    int64 valid_until_ns = 9;
+    bool allow_offline_capture = 10;
+    repeated string source_ids = 11;
+}
+message SignedPolicySnapshot {
+    PolicySnapshot snapshot = 1;
+    bytes signature = 2;
+}
+message PolicySnapshotRequest { string domain = 1; string authority_id = 2; }
+message PolicyPublication {
+    string domain = 1;
+    string authority_id = 2;
+    uint64 expected_revision = 3;
+    repeated Filter filters = 4;
+    string owner_kind = 5;
+    bytes capture_authority = 6;
+    int64 valid_from_ns = 7;
+    int64 valid_until_ns = 8;
+    bool allow_offline_capture = 9;
+    repeated string source_ids = 10;
+}
+message PolicyReceipt { uint64 revision = 1; }
+
+// Signer identity is configured separately from the upstream relationship.
+// Publish requires a verified publisher certificate pinned to the signing key;
+// forwarding an already signed snapshot never grants publication authority.
+service FilterPolicyService {
+    rpc GetSnapshot(PolicySnapshotRequest) returns (SignedPolicySnapshot);
+    rpc SubscribeSnapshots(PolicySnapshotRequest) returns (stream SignedPolicySnapshot);
+    rpc ApplySnapshot(SignedPolicySnapshot) returns (PolicyReceipt);
+    rpc PublishSnapshot(PolicyPublication) returns (SignedPolicySnapshot);
+}
+
+message ProcessorSelectionStatus {
+ repeated string candidates = 1;
+ string active_endpoint = 2;
+ string attempt_endpoint = 3;
+ string state = 4;
+ string reason = 5;
+ int64 last_connected_ns = 6;
+ uint64 failover_count = 7;
+}
+message RouteStatus {
+ bool configured = 1;
+ bool connected = 2;
+ string endpoint = 3;
+ string upstream_processor_id = 4;
+ uint64 queued_batches = 5;
+ uint64 dropped_batches = 6;
+ uint64 dropped_packets = 7;
+ bool policy_ready = 8;
+}
+
+message RawPacketStatus {
+ string profile = 1;
+ string ack_scope = 2;
+ string destination_id = 3;
+ string producer_session_id = 4;
+ uint64 queued_records = 5;
+ uint64 queued_bytes = 6;
+ int64 oldest_age_ns = 7;
+ uint64 acked_sequence = 8;
+ uint64 replayed = 9;
+ uint64 duplicates = 10;
+ uint64 dropped = 11;
+ uint64 late = 12;
+ uint64 policy_revision = 13;
 }

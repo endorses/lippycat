@@ -53,13 +53,16 @@ type DNSProcessor interface {
 
 // PacketBatch contains a normalized batch of packets from a source.
 type PacketBatch struct {
+	SignedCapturePolicy []byte
 	// RADIUSSourceTrusted is set only at local or authenticated direct ingress.
 	// It is never accepted from, or forwarded onto, the wire.
 	RADIUSSourceTrusted bool
 	// SourceID identifies where this batch came from.
 	// For hunters, this is the hunter ID.
 	// For local capture, this is "local" or the interface name.
-	SourceID string
+	SourceID          string
+	ProducerSessionID string
+	CaptureEpoch      string
 
 	// Envelopes is the sole internal packet representation.
 	Envelopes []*pipeline.PacketEnvelope
@@ -305,11 +308,14 @@ func FromProtoBatchE(pb *data.PacketBatch) (*PacketBatch, error) {
 		return nil, fmt.Errorf("normalize gRPC packet batch: %w", err)
 	}
 	return &PacketBatch{
-		SourceID:    pb.HunterId,
-		Envelopes:   normalized.Packets,
-		Sequence:    pb.Sequence,
-		TimestampNs: pb.TimestampNs,
-		Stats:       pb.Stats,
+		SourceID:            pb.HunterId,
+		ProducerSessionID:   pb.ProducerSessionId,
+		CaptureEpoch:        pb.CaptureEpoch,
+		SignedCapturePolicy: append([]byte(nil), pb.SignedCapturePolicy...),
+		Envelopes:           normalized.Packets,
+		Sequence:            pb.Sequence,
+		TimestampNs:         pb.TimestampNs,
+		Stats:               pb.Stats,
 	}, nil
 }
 
@@ -328,7 +334,8 @@ func (b *PacketBatch) ToProtoBatchE() (*data.PacketBatch, error) {
 		return nil, nil
 	}
 	normalized := &pipeline.PacketBatch{
-		Source: pipeline.SourceProvenance{NodeID: b.SourceID}, Sequence: b.Sequence,
+		SignedCapturePolicy: append([]byte(nil), b.SignedCapturePolicy...),
+		Source:              pipeline.SourceProvenance{NodeID: b.SourceID, ProducerSessionID: b.ProducerSessionID, CaptureEpoch: b.CaptureEpoch}, Sequence: b.Sequence,
 		CreatedAt: time.Unix(0, b.TimestampNs), Packets: b.Envelopes,
 	}
 	if b.Stats != nil {

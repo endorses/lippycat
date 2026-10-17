@@ -36,7 +36,8 @@ type PolicyChangeCoordinator interface {
 
 // Manager handles filter subscription and updates from processor
 type Manager struct {
-	hunterID string
+	hunterID     string
+	sharedPolicy *sharedPolicyConsumer
 	// Serialize state changes through capture/application publication.
 	applyMu sync.Mutex
 	mu      sync.RWMutex
@@ -72,8 +73,14 @@ func New(hunterID string, captureRestarter CaptureRestarter, disconnectMarker Di
 // This is optional - if not set, all filter updates will trigger capture restart
 func (m *Manager) SetApplicationFilterUpdater(updater ApplicationFilterUpdater) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.appFilterUpdater = updater
+	filters := cloneFilters(m.filters)
+	applied := m.initialApplied
+	m.mu.Unlock()
+	// Cached policy may precede Start's matcher; publish the verified snapshot.
+	if applied && updater != nil {
+		updater.UpdateFilters(filters)
+	}
 }
 
 // GetFilters returns a copy of current filters (thread-safe)
@@ -96,6 +103,13 @@ func (m *Manager) GetFilterCount() int {
 
 // SetInitialFilters sets the initial filters from registration response
 func (m *Manager) SetInitialFilters(filters []*management.Filter) error {
+	if m.sharedPolicy != nil {
+		return nil
+	}
+	return m.setInitialFilters(filters)
+}
+
+func (m *Manager) setInitialFilters(filters []*management.Filter) error {
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
 	m.mu.Lock()
@@ -136,20 +150,27 @@ func (m *Manager) SetInitialFilters(filters []*management.Filter) error {
 }
 
 func (m *Manager) ApplyPendingInitial() {
+	if err := m.ApplyPendingInitialE(); err != nil {
+		logger.Error("Failed to apply changed registration filter policy", "error", err)
+	}
+}
+
+func (m *Manager) ApplyPendingInitialE() error {
+	if m.sharedPolicy != nil {
+		return m.applyPendingSharedPolicy()
+	}
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
 	m.mu.Lock()
 	if !m.hasPendingInitial {
 		m.mu.Unlock()
-		return
+		return nil
 	}
 	next := m.pendingInitial
 	m.pendingInitial = nil
 	m.hasPendingInitial = false
 	m.mu.Unlock()
-	if err := m.replaceSnapshot(next); err != nil {
-		logger.Error("Failed to apply changed registration filter policy", "error", err)
-	}
+	return m.replaceSnapshot(next)
 }
 
 func filtersEqual(left, right []*management.Filter) bool {
@@ -177,6 +198,10 @@ func containsAnyBPF(filters []*management.Filter) bool {
 
 // Subscribe subscribes to filter updates from processor
 func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.ManagementServiceClient) {
+	if m.sharedPolicy != nil {
+		m.subscribeSharedPolicy(ctx, connCtx)
+		return
+	}
 	logger.Debug("Subscribe() called", "hunter_id", m.hunterID)
 	logger.Info("Subscribing to filter updates")
 
@@ -271,6 +296,11 @@ func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.
 // handleUpdate applies filter updates from processor
 // Routes updates by filter type: BPF filters require restart, app-level filters hot-reload
 func (m *Manager) handleUpdate(update *management.FilterUpdate) {
+	if m.sharedPolicy != nil {
+		logger.Error("Rejected unsigned filter update in shared mode")
+		m.disconnectMarker.MarkDisconnected()
+		return
+	}
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
 	if update != nil && update.Snapshot {
@@ -461,6 +491,9 @@ func (m *Manager) replaceSnapshot(filters []*management.Filter) error {
 		err = apply()
 	}
 	if err != nil {
+		if updater != nil {
+			updater.UpdateFilters(previous)
+		}
 		return err
 	}
 	m.mu.Lock()

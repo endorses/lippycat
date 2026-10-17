@@ -100,6 +100,23 @@ func (c *Client) SetAcceptedKinds(kinds []eventsv1.EventKind) error {
 	if same {
 		return nil
 	}
+	if err := c.validateAcceptedKindsLocked(kinds); err != nil {
+		return err
+	}
+	c.acceptedKinds = append([]eventsv1.EventKind(nil), kinds...)
+	c.negotiated = true
+	return nil
+}
+
+// ValidateAcceptedKinds checks a candidate against durable pending data without
+// publishing its tentative profile to a running producer.
+func (c *Client) ValidateAcceptedKinds(kinds []eventsv1.EventKind) error {
+	c.kindsMu.RLock()
+	defer c.kindsMu.RUnlock()
+	return c.validateAcceptedKindsLocked(kinds)
+}
+
+func (c *Client) validateAcceptedKindsLocked(kinds []eventsv1.EventKind) error {
 	supported := func(kind eventsv1.EventKind) bool {
 		for _, k := range kinds {
 			if k == kind {
@@ -134,8 +151,6 @@ func (c *Client) SetAcceptedKinds(kinds []eventsv1.EventKind) error {
 			break
 		}
 	}
-	c.acceptedKinds = append([]eventsv1.EventKind(nil), kinds...)
-	c.negotiated = true
 	return nil
 }
 
@@ -228,6 +243,29 @@ func logCommittedCleanup(err error) {
 // create stream; Serve calls it on every return path so a concurrent Recv is
 // released before the caller reconnects with a replacement stream.
 func (c *Client) Serve(ctx context.Context, stream Stream, cancelStream context.CancelFunc) error {
+	return c.serve(ctx, stream, cancelStream, nil, nil)
+}
+
+// ServeNegotiated opens a candidate with a tentative kind profile. The accepted
+// callback runs after peer acceptance and profile validation, before replay. It
+// must commit SetAcceptedKinds only after the owner has completed setup; a failed
+// setup can return without changing the producer's accepted profile.
+func (c *Client) ServeNegotiated(ctx context.Context, stream Stream, cancelStream context.CancelFunc, kinds []eventsv1.EventKind, accepted func() error) error {
+	if cancelStream == nil {
+		return errors.New("serve event forwarding: stream cancel is required")
+	}
+	if accepted == nil {
+		cancelStream()
+		return errors.New("serve negotiated event forwarding: acceptance callback is required")
+	}
+	if err := c.ValidateAcceptedKinds(kinds); err != nil {
+		cancelStream()
+		return err
+	}
+	return c.serve(ctx, stream, cancelStream, kinds, accepted)
+}
+
+func (c *Client) serve(ctx context.Context, stream Stream, cancelStream context.CancelFunc, candidateKinds []eventsv1.EventKind, acceptedCallback func() error) error {
 	if cancelStream == nil {
 		return errors.New("serve event forwarding: stream cancel is required")
 	}
@@ -238,6 +276,9 @@ func (c *Client) Serve(ctx context.Context, stream Stream, cancelStream context.
 	c.kindsMu.RLock()
 	kinds := append([]eventsv1.EventKind(nil), c.eventKindsLocked()...)
 	c.kindsMu.RUnlock()
+	if candidateKinds != nil {
+		kinds = append([]eventsv1.EventKind(nil), candidateKinds...)
+	}
 	open := &eventsv1.EventIngressOpen{SourceNodeId: c.config.SourceNodeID, ProducerSessionId: c.config.ProducerSessionID, EventApiMajor: c.config.EventAPIMajor, SemanticProfileRevision: c.config.SemanticProfileRevision, EventKinds: kinds, Profile: c.config.Profile, RelayNodeId: c.config.RelayNodeID}
 	if err := stream.Send(&eventsv1.EventIngressMessage{Message: &eventsv1.EventIngressMessage_Open{Open: open}}); err != nil {
 		return fmt.Errorf("serve event forwarding: send open: %w", err)
@@ -251,6 +292,12 @@ func (c *Client) Serve(ctx context.Context, stream Stream, cancelStream context.
 	}
 	if accepted.GetAcceptedProfile() != c.config.Profile {
 		return fmt.Errorf("serve event forwarding: processor accepted profile %s, requested %s", accepted.GetAcceptedProfile(), c.config.Profile)
+	}
+
+	if acceptedCallback != nil {
+		if err := acceptedCallback(); err != nil {
+			return fmt.Errorf("serve event forwarding: commit candidate: %w", err)
+		}
 	}
 
 	serveCtx, cancelServe := context.WithCancel(ctx)

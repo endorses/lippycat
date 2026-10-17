@@ -77,6 +77,9 @@ for evidence, privacy, configuration, and old-peer behavior.
 
 - `-I, --id` - Unique processor identifier (default: hostname)
 - `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
+- `--processors` - Ordered upstream addresses (comma-separated; one active connection)
+- `--processor-attempt-timeout` - Connection setup deadline (default: `10s`)
+- `--processor-reconnect-attempts` - Active upstream retry count (default: `1`; `0` advances immediately)
 - `-m, --max-hunters` - Maximum concurrent hunter connections (default: 100, 0 = unlimited)
 - `--max-subscribers` - Maximum TUI/monitoring subscribers (default: 100, 0 = unlimited)
 - `--event-allow-sensitive-fields` - Allow subscribers to request sensitive HTTP, SMTP, DHCP, inventory, and file fields (default: false)
@@ -633,6 +636,43 @@ lc process --listen :55555 \
 - Fault isolation
 
 See [docs/DISTRIBUTED_MODE.md](../../docs/DISTRIBUTED_MODE.md#hierarchical-mode) for complete hierarchical setup.
+
+### Upstream failover
+
+Use `--processors upstream-a:55555,upstream-b:55555` instead of the scalar
+`--processor` to configure ordered alternatives. The first successful connection
+stays active until it fails; recovery of an earlier candidate does not trigger
+failback. Attempt timeout, reconnect count, and endpoint backoff use the same
+[selection settings as hunters](../hunt/README.md#processor-failover).
+
+```yaml
+processor:
+  processors:
+    - address: 192.0.2.20:55555
+      tls_server_name: upstream-a.example.com
+    - upstream-b.example.com:55555
+  failover:
+    attempt_timeout: 10s
+    reconnect_attempts: 1
+    retry_initial: 1s
+    retry_max: 60s
+```
+
+Endpoint objects support only `address` and optional `tls_server_name`; they
+inherit existing TLS credentials and verification policy. A server-name override
+requires TLS. A CLI selector replaces configured selectors. Scalar/list selectors
+at the same priority conflict; the legacy `--upstream` and
+`processor.upstream_addr` aliases remain supported individually.
+
+Upstream selection supports both forwarding modes. Authenticated raw relay v1
+preserves original hunter identities and requires explicit mutual-TLS origin
+delegation. Optional reliable central-scope delivery retains records at the source
+until the common destination signs durable acceptance. Independent upstreams keep
+separate analysis and deduplication state.
+
+See [processor failover and reliable packets](../../docs/PROCESSOR_FAILOVER.md) for
+upgrade order, `relay_origins`, signed shared policy, reliable receiver configuration,
+offline store provisioning, encryption and the exact delivery limits.
 
 ## Configuration File
 

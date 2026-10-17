@@ -52,7 +52,7 @@ Most capture flags (`-i`, `-f`, `--sip-port`, `--rtp-port-range`) carry over. Wh
 
 | Flag                                  | Purpose                                                                        |
 | ------------------------------------- | ------------------------------------------------------------------------------ |
-| `-P, --processor`                     | Processor address (host:port) — **required**                                   |
+| `-P, --processor`                     | Single processor address; use this or `--processors`                           |
 | `-I, --id`                            | Hunter identifier (default: hostname)                                          |
 | `-b, --buffer-size`                   | Packet buffer size (default: 10000)                                            |
 | `--sip-buffer-size`                   | SIP priority-lane size (default: 0, automatically matches `--buffer-size`)     |
@@ -87,6 +87,33 @@ sudo lc hunt --processor localhost:55555 -i eth0 --tls-ca ca.crt
 ```
 
 The hunter captures packets on `eth0`, batches them, and streams them to the processor via gRPC. The processor writes everything to `captured.pcap`.
+
+## Processor Failover {#processor-failover}
+
+Use `--processors relay-a:55555,relay-b:55555` instead of `--processor` for ordered alternatives. One processor is active at a time. Startup tries candidates in order; failed setup or reconnection advances to another candidate. A working backup stays active when an earlier candidate recovers. There is no automatic failback. This feature works without LI or a common central processor.
+
+`--processor-attempt-timeout` bounds each setup attempt (default `10s`). `--processor-reconnect-attempts` defaults to `1`; `0` advances immediately after disconnection. Unavailable candidates have separate exponential backoff with jitter. YAML `retry_initial` and `retry_max` default to `1s` and `60s`. Durations must be positive, the initial delay must not exceed the maximum, and the reconnect count must be nonnegative.
+
+<!-- i18n:skip -->
+
+```yaml
+hunter:
+  processors:
+    - address: 192.0.2.10:55555
+      tls_server_name: relay-a.example.com
+    - relay-b.example.com:55555
+  failover:
+    attempt_timeout: 10s
+    reconnect_attempts: 1
+    retry_initial: 1s
+    retry_max: 60s
+  tls:
+    ca_file: /etc/lippycat/ca.crt
+```
+
+An explicit CLI selector replaces configured selectors, including the other selector's YAML form. Simultaneous scalar and list selectors at the same priority are rejected. Lists must contain valid, unique `host:port` addresses. Endpoint objects support only `address` and optional `tls_server_name`; credentials and verification policy come from existing TLS configuration. A server-name override requires TLS.
+
+Raw packets default to best effort. Optional reliable raw delivery uses explicitly initialized stores and signed receiver or central receipts; signed shared policy can reconcile cold backup filters. See [Failover and Reliable Delivery](processor-failover.md#failover-and-reliable-delivery) for authenticated relay delegation, configuration, provisioning, upgrade order and the exact retention and delivery limits.
 
 ## Packet or Event Forwarding {#packet-or-event-forwarding}
 

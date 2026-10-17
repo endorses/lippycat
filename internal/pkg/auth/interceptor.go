@@ -18,11 +18,17 @@ type InterceptorConfig struct {
 // Method paths must match the proto package names exactly.
 var methodRoles = map[string]Role{
 	// Data service methods (lippycat.data package)
-	"/lippycat.data.DataService/StreamPackets":            RoleHunter,
-	"/lippycat.data.DataService/SubscribePackets":         RoleSubscriber,
-	"/lippycat.data.DataService/SubscribeCorrelatedCalls": RoleSubscriber,
-	"/lippycat.events.v1.EventService/StreamEvents":       RoleHunter,
-	"/lippycat.events.v1.EventService/SubscribeEvents":    RoleSubscriber,
+	"/lippycat.data.DataService/StreamPackets":                    RoleHunter,
+	"/lippycat.data.DataService/SubscribePackets":                 RoleSubscriber,
+	"/lippycat.data.DataService/SubscribeCorrelatedCalls":         RoleSubscriber,
+	"/lippycat.events.v1.EventService/StreamEvents":               RoleHunter,
+	"/lippycat.events.v1.EventService/SubscribeEvents":            RoleSubscriber,
+	"/lippycat.data.RelayDataService/StreamRelayPackets":          RoleHunter,
+	"/lippycat.data.ReliablePacketService/StreamReliablePackets":  RoleHunter,
+	"/lippycat.management.FilterPolicyService/GetSnapshot":        RoleHunter,
+	"/lippycat.management.FilterPolicyService/SubscribeSnapshots": RoleHunter,
+	"/lippycat.management.FilterPolicyService/ApplySnapshot":      RoleAdmin,
+	"/lippycat.management.FilterPolicyService/PublishSnapshot":    RoleAdmin,
 
 	// Management service methods (lippycat.management package)
 	"/lippycat.management.ManagementService/RegisterHunter":          RoleHunter,

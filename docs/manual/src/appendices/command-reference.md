@@ -47,7 +47,10 @@ lc
 │   ├── filter             Filter details
 │   └── config             Local configuration
 ├── set                    Configure resources
-│   └── filter             Create/update a filter
+│   ├── filter             Create/update a filter
+│   ├── packet-spool       Initialize a raw source spool (offline)
+│   ├── packet-custody     Initialize raw receiver custody (offline)
+│   └── policy-store       Initialize encrypted signed policy (offline)
 ├── rm                     Remove resources
 │   └── filter             Remove a filter
 ├── migrate                Offline encrypted store initialization/migration
@@ -582,6 +585,9 @@ lc tap [flags]
 | Flag                              | Short | Type     | Default                             | Description                                                     |
 | --------------------------------- | ----- | -------- | ----------------------------------- | --------------------------------------------------------------- |
 | `--processor`                     | `-P`  | string   |                                     | Upstream processor address for forwarding                       |
+| `--processors`                    |       | strings  |                                     | Ordered processor candidate addresses                           |
+| `--processor-attempt-timeout`     |       | duration | `10s`                               | Deadline for each processor setup attempt                       |
+| `--processor-reconnect-attempts`  |       | int      | `1`                                 | Active processor retries; `0` advances immediately              |
 | `--forward-mode`                  |       | string   | `packets`                           | Upstream representation: `packets` or `events`                  |
 | `--event-fallback-to-packets`     |       | bool     | `false`                             | Explicitly allow packet fallback after failed event negotiation |
 | `--event-delivery-profile`        |       | string   | `reliable`                          | `reliable` or `memory-only` event delivery                      |
@@ -738,7 +744,10 @@ lc hunt [flags]
 
 | Flag                              | Short | Type     | Default                         | Description                                                     |
 | --------------------------------- | ----- | -------- | ------------------------------- | --------------------------------------------------------------- |
-| `--processor`                     | `-P`  | string   | **required**                    | Processor address (`host:port`)                                 |
+| `--processor`                     | `-P`  | string   |                                 | Single processor address; use this or `--processors`            |
+| `--processors`                    |       | strings  |                                 | Ordered processor candidate addresses                           |
+| `--processor-attempt-timeout`     |       | duration | `10s`                           | Deadline for each processor setup attempt                       |
+| `--processor-reconnect-attempts`  |       | int      | `1`                             | Active processor retries; `0` advances immediately              |
 | `--forward-mode`                  |       | string   | `packets`                       | Upstream representation: `packets` or `events`                  |
 | `--event-fallback-to-packets`     |       | bool     | `false`                         | Explicitly allow packet fallback after failed event negotiation |
 | `--event-delivery-profile`        |       | string   | `reliable`                      | `reliable` or `memory-only` event delivery                      |
@@ -954,6 +963,9 @@ lc process [flags]
 | Flag                              | Short | Type     | Default                                   | Description                                                     |
 | --------------------------------- | ----- | -------- | ----------------------------------------- | --------------------------------------------------------------- |
 | `--processor`                     | `-P`  | string   |                                           | Upstream processor for hierarchical topology                    |
+| `--processors`                    |       | strings  |                                           | Ordered processor candidate addresses                           |
+| `--processor-attempt-timeout`     |       | duration | `10s`                                     | Deadline for each processor setup attempt                       |
+| `--processor-reconnect-attempts`  |       | int      | `1`                                       | Active processor retries; `0` advances immediately              |
 | `--forward-mode`                  |       | string   | `packets`                                 | Upstream representation: `packets` or `events`                  |
 | `--event-fallback-to-packets`     |       | bool     | `false`                                   | Explicitly allow packet fallback after failed event negotiation |
 | `--event-delivery-profile`        |       | string   | `reliable`                                | `reliable` or `memory-only` event delivery                      |
@@ -1362,3 +1374,9 @@ Enabling unavailable functionality is a startup error. Explicit `--filter`,
 generated default RTP ranges do not limit learned selected endpoints. See
 [VoIP capture](../part5-advanced/voip.md#selective-media-capture-with-ebpf) and the
 [configuration members](config-reference.md#voip-ebpf-media-admission).
+
+## Failover and Offline Packet Stores {#failover-and-offline-packet-stores}
+
+Hunter, tap and processor accept ordered `--processors` alternatives, `--processor-attempt-timeout` and `--processor-reconnect-attempts`. Hunter additionally accepts `--packet-delivery-profile` (best-effort by default) and `--packet-ack-scope` (receiver by default only inside reliable mode). See [Failover and Reliable Delivery](../part3-distributed/processor-failover.md#failover-and-reliable-delivery) for YAML identities, trust, storage limits and compatible receipt paths.
+
+`lc set packet-spool` and `lc set packet-custody` explicitly initialize raw source/receiver stores offline, with required `--dir`, `--destination-id` and `--protection`; source initialization also requires `--source-id`. Encrypted initialization adds `--key-id`/`--key-file` and optional repeatable `--read-key`. `lc set policy-store --node hunter|processor|tap` reads the selected node's encrypted shared-policy configuration. These commands never reset existing evidence; runtime open never silently recreates a missing identity or usage ledger.

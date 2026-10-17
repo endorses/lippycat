@@ -129,6 +129,469 @@ func (MonitorEventAnalysis) EnumDescriptor() ([]byte, []int) {
 	return file_data_proto_rawDescGZIP(), []int{1}
 }
 
+type RawPacketIdentity struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	SourceId          string                 `protobuf:"bytes,1,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	ProducerSessionId string                 `protobuf:"bytes,2,opt,name=producer_session_id,json=producerSessionId,proto3" json:"producer_session_id,omitempty"`
+	CaptureEpoch      string                 `protobuf:"bytes,3,opt,name=capture_epoch,json=captureEpoch,proto3" json:"capture_epoch,omitempty"`
+	DestinationId     string                 `protobuf:"bytes,4,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"`
+	AckScope          string                 `protobuf:"bytes,5,opt,name=ack_scope,json=ackScope,proto3" json:"ack_scope,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *RawPacketIdentity) Reset() {
+	*x = RawPacketIdentity{}
+	mi := &file_data_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RawPacketIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RawPacketIdentity) ProtoMessage() {}
+
+func (x *RawPacketIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RawPacketIdentity.ProtoReflect.Descriptor instead.
+func (*RawPacketIdentity) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *RawPacketIdentity) GetSourceId() string {
+	if x != nil {
+		return x.SourceId
+	}
+	return ""
+}
+
+func (x *RawPacketIdentity) GetProducerSessionId() string {
+	if x != nil {
+		return x.ProducerSessionId
+	}
+	return ""
+}
+
+func (x *RawPacketIdentity) GetCaptureEpoch() string {
+	if x != nil {
+		return x.CaptureEpoch
+	}
+	return ""
+}
+
+func (x *RawPacketIdentity) GetDestinationId() string {
+	if x != nil {
+		return x.DestinationId
+	}
+	return ""
+}
+
+func (x *RawPacketIdentity) GetAckScope() string {
+	if x != nil {
+		return x.AckScope
+	}
+	return ""
+}
+
+type RawPacketLossRange struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	First         uint64                 `protobuf:"varint,1,opt,name=first,proto3" json:"first,omitempty"`
+	Last          uint64                 `protobuf:"varint,2,opt,name=last,proto3" json:"last,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RawPacketLossRange) Reset() {
+	*x = RawPacketLossRange{}
+	mi := &file_data_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RawPacketLossRange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RawPacketLossRange) ProtoMessage() {}
+
+func (x *RawPacketLossRange) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RawPacketLossRange.ProtoReflect.Descriptor instead.
+func (*RawPacketLossRange) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *RawPacketLossRange) GetFirst() uint64 {
+	if x != nil {
+		return x.First
+	}
+	return 0
+}
+
+func (x *RawPacketLossRange) GetLast() uint64 {
+	if x != nil {
+		return x.Last
+	}
+	return 0
+}
+
+type ReliablePacketMessage struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ProtocolVersion uint32                 `protobuf:"varint,1,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	Identity        *RawPacketIdentity     `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
+	// Empty on direct hunter streams; otherwise verified origin delegation is
+	// required for this immediate relay, independently of the receipt signer.
+	RelayId string `protobuf:"bytes,3,opt,name=relay_id,json=relayId,proto3" json:"relay_id,omitempty"`
+	// The first message opens the session without payload or loss coverage.
+	Batch          *PacketBatch          `protobuf:"bytes,4,opt,name=batch,proto3" json:"batch,omitempty"`
+	Losses         []*RawPacketLossRange `protobuf:"bytes,5,rep,name=losses,proto3" json:"losses,omitempty"`
+	LossGeneration uint64                `protobuf:"varint,6,opt,name=loss_generation,json=lossGeneration,proto3" json:"loss_generation,omitempty"`
+	// Explicit retirement leaves a durable tombstone; it cannot reopen a session.
+	RetireSession bool `protobuf:"varint,7,opt,name=retire_session,json=retireSession,proto3" json:"retire_session,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReliablePacketMessage) Reset() {
+	*x = ReliablePacketMessage{}
+	mi := &file_data_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReliablePacketMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReliablePacketMessage) ProtoMessage() {}
+
+func (x *ReliablePacketMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReliablePacketMessage.ProtoReflect.Descriptor instead.
+func (*ReliablePacketMessage) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ReliablePacketMessage) GetProtocolVersion() uint32 {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return 0
+}
+
+func (x *ReliablePacketMessage) GetIdentity() *RawPacketIdentity {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
+func (x *ReliablePacketMessage) GetRelayId() string {
+	if x != nil {
+		return x.RelayId
+	}
+	return ""
+}
+
+func (x *ReliablePacketMessage) GetBatch() *PacketBatch {
+	if x != nil {
+		return x.Batch
+	}
+	return nil
+}
+
+func (x *ReliablePacketMessage) GetLosses() []*RawPacketLossRange {
+	if x != nil {
+		return x.Losses
+	}
+	return nil
+}
+
+func (x *ReliablePacketMessage) GetLossGeneration() uint64 {
+	if x != nil {
+		return x.LossGeneration
+	}
+	return 0
+}
+
+func (x *ReliablePacketMessage) GetRetireSession() bool {
+	if x != nil {
+		return x.RetireSession
+	}
+	return false
+}
+
+type RawPacketReceipt struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ProtocolVersion uint32                 `protobuf:"varint,1,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	Identity        *RawPacketIdentity     `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
+	Sequence        uint64                 `protobuf:"varint,3,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// Hash of deterministic protobuf packet bytes; prevents identity reuse.
+	ContentSha256  []byte                `protobuf:"bytes,4,opt,name=content_sha256,json=contentSha256,proto3" json:"content_sha256,omitempty"`
+	LossGeneration uint64                `protobuf:"varint,5,opt,name=loss_generation,json=lossGeneration,proto3" json:"loss_generation,omitempty"`
+	Losses         []*RawPacketLossRange `protobuf:"bytes,6,rep,name=losses,proto3" json:"losses,omitempty"`
+	Retired        bool                  `protobuf:"varint,7,opt,name=retired,proto3" json:"retired,omitempty"`
+	AuthorityId    string                `protobuf:"bytes,8,opt,name=authority_id,json=authorityId,proto3" json:"authority_id,omitempty"`
+	// Signature over the deterministic encoding with this field cleared.
+	Signature     []byte `protobuf:"bytes,9,opt,name=signature,proto3" json:"signature,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RawPacketReceipt) Reset() {
+	*x = RawPacketReceipt{}
+	mi := &file_data_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RawPacketReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RawPacketReceipt) ProtoMessage() {}
+
+func (x *RawPacketReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RawPacketReceipt.ProtoReflect.Descriptor instead.
+func (*RawPacketReceipt) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *RawPacketReceipt) GetProtocolVersion() uint32 {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return 0
+}
+
+func (x *RawPacketReceipt) GetIdentity() *RawPacketIdentity {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
+func (x *RawPacketReceipt) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *RawPacketReceipt) GetContentSha256() []byte {
+	if x != nil {
+		return x.ContentSha256
+	}
+	return nil
+}
+
+func (x *RawPacketReceipt) GetLossGeneration() uint64 {
+	if x != nil {
+		return x.LossGeneration
+	}
+	return 0
+}
+
+func (x *RawPacketReceipt) GetLosses() []*RawPacketLossRange {
+	if x != nil {
+		return x.Losses
+	}
+	return nil
+}
+
+func (x *RawPacketReceipt) GetRetired() bool {
+	if x != nil {
+		return x.Retired
+	}
+	return false
+}
+
+func (x *RawPacketReceipt) GetAuthorityId() string {
+	if x != nil {
+		return x.AuthorityId
+	}
+	return ""
+}
+
+func (x *RawPacketReceipt) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
+type ReliablePacketControl struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Control *StreamControl         `protobuf:"bytes,1,opt,name=control,proto3" json:"control,omitempty"`
+	// Open replies identify the actual destination/scope and protocol version.
+	ProtocolVersion uint32             `protobuf:"varint,2,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	Identity        *RawPacketIdentity `protobuf:"bytes,3,opt,name=identity,proto3" json:"identity,omitempty"`
+	Receipt         *RawPacketReceipt  `protobuf:"bytes,4,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ReliablePacketControl) Reset() {
+	*x = ReliablePacketControl{}
+	mi := &file_data_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReliablePacketControl) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReliablePacketControl) ProtoMessage() {}
+
+func (x *ReliablePacketControl) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReliablePacketControl.ProtoReflect.Descriptor instead.
+func (*ReliablePacketControl) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ReliablePacketControl) GetControl() *StreamControl {
+	if x != nil {
+		return x.Control
+	}
+	return nil
+}
+
+func (x *ReliablePacketControl) GetProtocolVersion() uint32 {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return 0
+}
+
+func (x *ReliablePacketControl) GetIdentity() *RawPacketIdentity {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
+func (x *ReliablePacketControl) GetReceipt() *RawPacketReceipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
+type RelayPacketMessage struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	RelayId         string                 `protobuf:"bytes,1,opt,name=relay_id,json=relayId,proto3" json:"relay_id,omitempty"`
+	ProtocolVersion uint32                 `protobuf:"varint,2,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	Batch           *PacketBatch           `protobuf:"bytes,3,opt,name=batch,proto3" json:"batch,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *RelayPacketMessage) Reset() {
+	*x = RelayPacketMessage{}
+	mi := &file_data_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RelayPacketMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RelayPacketMessage) ProtoMessage() {}
+
+func (x *RelayPacketMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RelayPacketMessage.ProtoReflect.Descriptor instead.
+func (*RelayPacketMessage) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RelayPacketMessage) GetRelayId() string {
+	if x != nil {
+		return x.RelayId
+	}
+	return ""
+}
+
+func (x *RelayPacketMessage) GetProtocolVersion() uint32 {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return 0
+}
+
+func (x *RelayPacketMessage) GetBatch() *PacketBatch {
+	if x != nil {
+		return x.Batch
+	}
+	return nil
+}
+
 // PacketBatch contains multiple packets captured by a hunter
 type PacketBatch struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -146,13 +609,19 @@ type PacketBatch struct {
 	// Each serving node sets its own value; ingress never trusts a sender's
 	// claim about the current node's analysis policy.
 	MonitorEventAnalysis MonitorEventAnalysis `protobuf:"varint,6,opt,name=monitor_event_analysis,json=monitorEventAnalysis,proto3,enum=lippycat.data.MonitorEventAnalysis" json:"monitor_event_analysis,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Capture lifetime identity; independent of the selected transport route.
+	ProducerSessionId string `protobuf:"bytes,7,opt,name=producer_session_id,json=producerSessionId,proto3" json:"producer_session_id,omitempty"`
+	CaptureEpoch      string `protobuf:"bytes,8,opt,name=capture_epoch,json=captureEpoch,proto3" json:"capture_epoch,omitempty"`
+	// Deterministic SignedPolicySnapshot for the effective capture policy.
+	// Its original authority signature and IDs survive every relay and replay.
+	SignedCapturePolicy []byte `protobuf:"bytes,9,opt,name=signed_capture_policy,json=signedCapturePolicy,proto3" json:"signed_capture_policy,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *PacketBatch) Reset() {
 	*x = PacketBatch{}
-	mi := &file_data_proto_msgTypes[0]
+	mi := &file_data_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -164,7 +633,7 @@ func (x *PacketBatch) String() string {
 func (*PacketBatch) ProtoMessage() {}
 
 func (x *PacketBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[0]
+	mi := &file_data_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -177,7 +646,7 @@ func (x *PacketBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PacketBatch.ProtoReflect.Descriptor instead.
 func (*PacketBatch) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{0}
+	return file_data_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PacketBatch) GetHunterId() string {
@@ -222,6 +691,27 @@ func (x *PacketBatch) GetMonitorEventAnalysis() MonitorEventAnalysis {
 	return MonitorEventAnalysis_MONITOR_EVENT_ANALYSIS_UNSPECIFIED
 }
 
+func (x *PacketBatch) GetProducerSessionId() string {
+	if x != nil {
+		return x.ProducerSessionId
+	}
+	return ""
+}
+
+func (x *PacketBatch) GetCaptureEpoch() string {
+	if x != nil {
+		return x.CaptureEpoch
+	}
+	return ""
+}
+
+func (x *PacketBatch) GetSignedCapturePolicy() []byte {
+	if x != nil {
+		return x.SignedCapturePolicy
+	}
+	return nil
+}
+
 // CapturedPacket represents a single captured network packet
 type CapturedPacket struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -264,7 +754,7 @@ type CapturedPacket struct {
 
 func (x *CapturedPacket) Reset() {
 	*x = CapturedPacket{}
-	mi := &file_data_proto_msgTypes[1]
+	mi := &file_data_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -276,7 +766,7 @@ func (x *CapturedPacket) String() string {
 func (*CapturedPacket) ProtoMessage() {}
 
 func (x *CapturedPacket) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[1]
+	mi := &file_data_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -289,7 +779,7 @@ func (x *CapturedPacket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapturedPacket.ProtoReflect.Descriptor instead.
 func (*CapturedPacket) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{1}
+	return file_data_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CapturedPacket) GetData() []byte {
@@ -422,7 +912,7 @@ type PacketMetadata struct {
 
 func (x *PacketMetadata) Reset() {
 	*x = PacketMetadata{}
-	mi := &file_data_proto_msgTypes[2]
+	mi := &file_data_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -434,7 +924,7 @@ func (x *PacketMetadata) String() string {
 func (*PacketMetadata) ProtoMessage() {}
 
 func (x *PacketMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[2]
+	mi := &file_data_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -447,7 +937,7 @@ func (x *PacketMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PacketMetadata.ProtoReflect.Descriptor instead.
 func (*PacketMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{2}
+	return file_data_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *PacketMetadata) GetProtocol() string {
@@ -579,7 +1069,7 @@ type TLSMetadata struct {
 
 func (x *TLSMetadata) Reset() {
 	*x = TLSMetadata{}
-	mi := &file_data_proto_msgTypes[3]
+	mi := &file_data_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +1081,7 @@ func (x *TLSMetadata) String() string {
 func (*TLSMetadata) ProtoMessage() {}
 
 func (x *TLSMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[3]
+	mi := &file_data_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +1094,7 @@ func (x *TLSMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TLSMetadata.ProtoReflect.Descriptor instead.
 func (*TLSMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{3}
+	return file_data_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *TLSMetadata) GetVersion() string {
@@ -799,7 +1289,7 @@ type HTTPMetadata struct {
 
 func (x *HTTPMetadata) Reset() {
 	*x = HTTPMetadata{}
-	mi := &file_data_proto_msgTypes[4]
+	mi := &file_data_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -811,7 +1301,7 @@ func (x *HTTPMetadata) String() string {
 func (*HTTPMetadata) ProtoMessage() {}
 
 func (x *HTTPMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[4]
+	mi := &file_data_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -824,7 +1314,7 @@ func (x *HTTPMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HTTPMetadata.ProtoReflect.Descriptor instead.
 func (*HTTPMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{4}
+	return file_data_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HTTPMetadata) GetType() string {
@@ -1033,7 +1523,7 @@ type SIPMetadata struct {
 
 func (x *SIPMetadata) Reset() {
 	*x = SIPMetadata{}
-	mi := &file_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1045,7 +1535,7 @@ func (x *SIPMetadata) String() string {
 func (*SIPMetadata) ProtoMessage() {}
 
 func (x *SIPMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1058,7 +1548,7 @@ func (x *SIPMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SIPMetadata.ProtoReflect.Descriptor instead.
 func (*SIPMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{5}
+	return file_data_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SIPMetadata) GetMethod() string {
@@ -1193,7 +1683,7 @@ type AccessNetworkInfo struct {
 
 func (x *AccessNetworkInfo) Reset() {
 	*x = AccessNetworkInfo{}
-	mi := &file_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1205,7 +1695,7 @@ func (x *AccessNetworkInfo) String() string {
 func (*AccessNetworkInfo) ProtoMessage() {}
 
 func (x *AccessNetworkInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1218,7 +1708,7 @@ func (x *AccessNetworkInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccessNetworkInfo.ProtoReflect.Descriptor instead.
 func (*AccessNetworkInfo) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{6}
+	return file_data_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AccessNetworkInfo) GetAccessType() string {
@@ -1273,7 +1763,7 @@ type RTPMetadata struct {
 
 func (x *RTPMetadata) Reset() {
 	*x = RTPMetadata{}
-	mi := &file_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1285,7 +1775,7 @@ func (x *RTPMetadata) String() string {
 func (*RTPMetadata) ProtoMessage() {}
 
 func (x *RTPMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1298,7 +1788,7 @@ func (x *RTPMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RTPMetadata.ProtoReflect.Descriptor instead.
 func (*RTPMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{7}
+	return file_data_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RTPMetadata) GetSsrc() uint32 {
@@ -1367,7 +1857,7 @@ type DNSMetadata struct {
 
 func (x *DNSMetadata) Reset() {
 	*x = DNSMetadata{}
-	mi := &file_data_proto_msgTypes[8]
+	mi := &file_data_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1379,7 +1869,7 @@ func (x *DNSMetadata) String() string {
 func (*DNSMetadata) ProtoMessage() {}
 
 func (x *DNSMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[8]
+	mi := &file_data_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1392,7 +1882,7 @@ func (x *DNSMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DNSMetadata.ProtoReflect.Descriptor instead.
 func (*DNSMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{8}
+	return file_data_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DNSMetadata) GetTransactionId() uint32 {
@@ -1563,7 +2053,7 @@ type DNSAnswer struct {
 
 func (x *DNSAnswer) Reset() {
 	*x = DNSAnswer{}
-	mi := &file_data_proto_msgTypes[9]
+	mi := &file_data_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1575,7 +2065,7 @@ func (x *DNSAnswer) String() string {
 func (*DNSAnswer) ProtoMessage() {}
 
 func (x *DNSAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[9]
+	mi := &file_data_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1588,7 +2078,7 @@ func (x *DNSAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DNSAnswer.ProtoReflect.Descriptor instead.
 func (*DNSAnswer) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{9}
+	return file_data_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DNSAnswer) GetName() string {
@@ -1650,7 +2140,7 @@ type EmailMetadata struct {
 
 func (x *EmailMetadata) Reset() {
 	*x = EmailMetadata{}
-	mi := &file_data_proto_msgTypes[10]
+	mi := &file_data_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1662,7 +2152,7 @@ func (x *EmailMetadata) String() string {
 func (*EmailMetadata) ProtoMessage() {}
 
 func (x *EmailMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[10]
+	mi := &file_data_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1675,7 +2165,7 @@ func (x *EmailMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmailMetadata.ProtoReflect.Descriptor instead.
 func (*EmailMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{10}
+	return file_data_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *EmailMetadata) GetMailFrom() string {
@@ -1766,7 +2256,7 @@ type BatchStats struct {
 
 func (x *BatchStats) Reset() {
 	*x = BatchStats{}
-	mi := &file_data_proto_msgTypes[11]
+	mi := &file_data_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1778,7 +2268,7 @@ func (x *BatchStats) String() string {
 func (*BatchStats) ProtoMessage() {}
 
 func (x *BatchStats) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[11]
+	mi := &file_data_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1791,7 +2281,7 @@ func (x *BatchStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchStats.ProtoReflect.Descriptor instead.
 func (*BatchStats) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{11}
+	return file_data_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *BatchStats) GetTotalCaptured() uint64 {
@@ -1907,7 +2397,7 @@ type StreamControl struct {
 
 func (x *StreamControl) Reset() {
 	*x = StreamControl{}
-	mi := &file_data_proto_msgTypes[12]
+	mi := &file_data_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1919,7 +2409,7 @@ func (x *StreamControl) String() string {
 func (*StreamControl) ProtoMessage() {}
 
 func (x *StreamControl) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[12]
+	mi := &file_data_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1932,7 +2422,7 @@ func (x *StreamControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamControl.ProtoReflect.Descriptor instead.
 func (*StreamControl) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{12}
+	return file_data_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *StreamControl) GetAckSequence() uint64 {
@@ -1977,7 +2467,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_data_proto_msgTypes[13]
+	mi := &file_data_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1989,7 +2479,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[13]
+	mi := &file_data_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2002,7 +2492,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{13}
+	return file_data_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SubscribeRequest) GetHunterIds() []string {
@@ -2058,7 +2548,7 @@ type CorrelatedCallUpdate struct {
 
 func (x *CorrelatedCallUpdate) Reset() {
 	*x = CorrelatedCallUpdate{}
-	mi := &file_data_proto_msgTypes[14]
+	mi := &file_data_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2070,7 +2560,7 @@ func (x *CorrelatedCallUpdate) String() string {
 func (*CorrelatedCallUpdate) ProtoMessage() {}
 
 func (x *CorrelatedCallUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[14]
+	mi := &file_data_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2083,7 +2573,7 @@ func (x *CorrelatedCallUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CorrelatedCallUpdate.ProtoReflect.Descriptor instead.
 func (*CorrelatedCallUpdate) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{14}
+	return file_data_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CorrelatedCallUpdate) GetCorrelationId() string {
@@ -2169,7 +2659,7 @@ type CallLegInfo struct {
 
 func (x *CallLegInfo) Reset() {
 	*x = CallLegInfo{}
-	mi := &file_data_proto_msgTypes[15]
+	mi := &file_data_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2181,7 +2671,7 @@ func (x *CallLegInfo) String() string {
 func (*CallLegInfo) ProtoMessage() {}
 
 func (x *CallLegInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[15]
+	mi := &file_data_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2194,7 +2684,7 @@ func (x *CallLegInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallLegInfo.ProtoReflect.Descriptor instead.
 func (*CallLegInfo) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{15}
+	return file_data_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *CallLegInfo) GetCallId() string {
@@ -2298,7 +2788,7 @@ type TLSSessionKeys struct {
 
 func (x *TLSSessionKeys) Reset() {
 	*x = TLSSessionKeys{}
-	mi := &file_data_proto_msgTypes[16]
+	mi := &file_data_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2310,7 +2800,7 @@ func (x *TLSSessionKeys) String() string {
 func (*TLSSessionKeys) ProtoMessage() {}
 
 func (x *TLSSessionKeys) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[16]
+	mi := &file_data_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2323,7 +2813,7 @@ func (x *TLSSessionKeys) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TLSSessionKeys.ProtoReflect.Descriptor instead.
 func (*TLSSessionKeys) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{16}
+	return file_data_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *TLSSessionKeys) GetClientRandom() []byte {
@@ -2449,7 +2939,7 @@ type RADIUSIdentity struct {
 
 func (x *RADIUSIdentity) Reset() {
 	*x = RADIUSIdentity{}
-	mi := &file_data_proto_msgTypes[17]
+	mi := &file_data_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2461,7 +2951,7 @@ func (x *RADIUSIdentity) String() string {
 func (*RADIUSIdentity) ProtoMessage() {}
 
 func (x *RADIUSIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[17]
+	mi := &file_data_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2474,7 +2964,7 @@ func (x *RADIUSIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RADIUSIdentity.ProtoReflect.Descriptor instead.
 func (*RADIUSIdentity) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{17}
+	return file_data_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *RADIUSIdentity) GetEpoch() []byte {
@@ -2504,7 +2994,7 @@ type RADIUSScope struct {
 
 func (x *RADIUSScope) Reset() {
 	*x = RADIUSScope{}
-	mi := &file_data_proto_msgTypes[18]
+	mi := &file_data_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2516,7 +3006,7 @@ func (x *RADIUSScope) String() string {
 func (*RADIUSScope) ProtoMessage() {}
 
 func (x *RADIUSScope) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[18]
+	mi := &file_data_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2529,7 +3019,7 @@ func (x *RADIUSScope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RADIUSScope.ProtoReflect.Descriptor instead.
 func (*RADIUSScope) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{18}
+	return file_data_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *RADIUSScope) GetOriginNodeId() string {
@@ -2582,7 +3072,7 @@ type RADIUSCriterion struct {
 
 func (x *RADIUSCriterion) Reset() {
 	*x = RADIUSCriterion{}
-	mi := &file_data_proto_msgTypes[19]
+	mi := &file_data_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2594,7 +3084,7 @@ func (x *RADIUSCriterion) String() string {
 func (*RADIUSCriterion) ProtoMessage() {}
 
 func (x *RADIUSCriterion) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[19]
+	mi := &file_data_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2607,7 +3097,7 @@ func (x *RADIUSCriterion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RADIUSCriterion.ProtoReflect.Descriptor instead.
 func (*RADIUSCriterion) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{19}
+	return file_data_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *RADIUSCriterion) GetTargetKind() string {
@@ -2672,7 +3162,7 @@ type RADIUSAttribution struct {
 
 func (x *RADIUSAttribution) Reset() {
 	*x = RADIUSAttribution{}
-	mi := &file_data_proto_msgTypes[20]
+	mi := &file_data_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2684,7 +3174,7 @@ func (x *RADIUSAttribution) String() string {
 func (*RADIUSAttribution) ProtoMessage() {}
 
 func (x *RADIUSAttribution) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[20]
+	mi := &file_data_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2697,7 +3187,7 @@ func (x *RADIUSAttribution) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RADIUSAttribution.ProtoReflect.Descriptor instead.
 func (*RADIUSAttribution) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{20}
+	return file_data_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RADIUSAttribution) GetCriterionGroupId() string {
@@ -2754,7 +3244,7 @@ type RADIUSObservation struct {
 
 func (x *RADIUSObservation) Reset() {
 	*x = RADIUSObservation{}
-	mi := &file_data_proto_msgTypes[21]
+	mi := &file_data_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2766,7 +3256,7 @@ func (x *RADIUSObservation) String() string {
 func (*RADIUSObservation) ProtoMessage() {}
 
 func (x *RADIUSObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[21]
+	mi := &file_data_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2779,7 +3269,7 @@ func (x *RADIUSObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RADIUSObservation.ProtoReflect.Descriptor instead.
 func (*RADIUSObservation) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{21}
+	return file_data_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *RADIUSObservation) GetVersion() uint32 {
@@ -2864,14 +3354,53 @@ var File_data_proto protoreflect.FileDescriptor
 const file_data_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"data.proto\x12\rlippycat.data\"\xae\x02\n" +
+	"data.proto\x12\rlippycat.data\"\xc9\x01\n" +
+	"\x11RawPacketIdentity\x12\x1b\n" +
+	"\tsource_id\x18\x01 \x01(\tR\bsourceId\x12.\n" +
+	"\x13producer_session_id\x18\x02 \x01(\tR\x11producerSessionId\x12#\n" +
+	"\rcapture_epoch\x18\x03 \x01(\tR\fcaptureEpoch\x12%\n" +
+	"\x0edestination_id\x18\x04 \x01(\tR\rdestinationId\x12\x1b\n" +
+	"\tack_scope\x18\x05 \x01(\tR\backScope\">\n" +
+	"\x12RawPacketLossRange\x12\x14\n" +
+	"\x05first\x18\x01 \x01(\x04R\x05first\x12\x12\n" +
+	"\x04last\x18\x02 \x01(\x04R\x04last\"\xd8\x02\n" +
+	"\x15ReliablePacketMessage\x12)\n" +
+	"\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12<\n" +
+	"\bidentity\x18\x02 \x01(\v2 .lippycat.data.RawPacketIdentityR\bidentity\x12\x19\n" +
+	"\brelay_id\x18\x03 \x01(\tR\arelayId\x120\n" +
+	"\x05batch\x18\x04 \x01(\v2\x1a.lippycat.data.PacketBatchR\x05batch\x129\n" +
+	"\x06losses\x18\x05 \x03(\v2!.lippycat.data.RawPacketLossRangeR\x06losses\x12'\n" +
+	"\x0floss_generation\x18\x06 \x01(\x04R\x0elossGeneration\x12%\n" +
+	"\x0eretire_session\x18\a \x01(\bR\rretireSession\"\xfd\x02\n" +
+	"\x10RawPacketReceipt\x12)\n" +
+	"\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12<\n" +
+	"\bidentity\x18\x02 \x01(\v2 .lippycat.data.RawPacketIdentityR\bidentity\x12\x1a\n" +
+	"\bsequence\x18\x03 \x01(\x04R\bsequence\x12%\n" +
+	"\x0econtent_sha256\x18\x04 \x01(\fR\rcontentSha256\x12'\n" +
+	"\x0floss_generation\x18\x05 \x01(\x04R\x0elossGeneration\x129\n" +
+	"\x06losses\x18\x06 \x03(\v2!.lippycat.data.RawPacketLossRangeR\x06losses\x12\x18\n" +
+	"\aretired\x18\a \x01(\bR\aretired\x12!\n" +
+	"\fauthority_id\x18\b \x01(\tR\vauthorityId\x12\x1c\n" +
+	"\tsignature\x18\t \x01(\fR\tsignature\"\xf3\x01\n" +
+	"\x15ReliablePacketControl\x126\n" +
+	"\acontrol\x18\x01 \x01(\v2\x1c.lippycat.data.StreamControlR\acontrol\x12)\n" +
+	"\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x12<\n" +
+	"\bidentity\x18\x03 \x01(\v2 .lippycat.data.RawPacketIdentityR\bidentity\x129\n" +
+	"\areceipt\x18\x04 \x01(\v2\x1f.lippycat.data.RawPacketReceiptR\areceipt\"\x8c\x01\n" +
+	"\x12RelayPacketMessage\x12\x19\n" +
+	"\brelay_id\x18\x01 \x01(\tR\arelayId\x12)\n" +
+	"\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x120\n" +
+	"\x05batch\x18\x03 \x01(\v2\x1a.lippycat.data.PacketBatchR\x05batch\"\xb7\x03\n" +
 	"\vPacketBatch\x12\x1b\n" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12!\n" +
 	"\ftimestamp_ns\x18\x03 \x01(\x03R\vtimestampNs\x127\n" +
 	"\apackets\x18\x04 \x03(\v2\x1d.lippycat.data.CapturedPacketR\apackets\x12/\n" +
 	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\x12Y\n" +
-	"\x16monitor_event_analysis\x18\x06 \x01(\x0e2#.lippycat.data.MonitorEventAnalysisR\x14monitorEventAnalysis\"\xdd\x04\n" +
+	"\x16monitor_event_analysis\x18\x06 \x01(\x0e2#.lippycat.data.MonitorEventAnalysisR\x14monitorEventAnalysis\x12.\n" +
+	"\x13producer_session_id\x18\a \x01(\tR\x11producerSessionId\x12#\n" +
+	"\rcapture_epoch\x18\b \x01(\tR\fcaptureEpoch\x122\n" +
+	"\x15signed_capture_policy\x18\t \x01(\fR\x13signedCapturePolicy\"\xdd\x04\n" +
 	"\x0eCapturedPacket\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x12%\n" +
@@ -3169,7 +3698,11 @@ const file_data_proto_rawDesc = "" +
 	"\vDataService\x12M\n" +
 	"\rStreamPackets\x12\x1a.lippycat.data.PacketBatch\x1a\x1c.lippycat.data.StreamControl(\x010\x01\x12Q\n" +
 	"\x10SubscribePackets\x12\x1f.lippycat.data.SubscribeRequest\x1a\x1a.lippycat.data.PacketBatch0\x01\x12b\n" +
-	"\x18SubscribeCorrelatedCalls\x12\x1f.lippycat.data.SubscribeRequest\x1a#.lippycat.data.CorrelatedCallUpdate0\x01B+Z)github.com/endorses/lippycat/api/gen/datab\x06proto3"
+	"\x18SubscribeCorrelatedCalls\x12\x1f.lippycat.data.SubscribeRequest\x1a#.lippycat.data.CorrelatedCallUpdate0\x012m\n" +
+	"\x10RelayDataService\x12Y\n" +
+	"\x12StreamRelayPackets\x12!.lippycat.data.RelayPacketMessage\x1a\x1c.lippycat.data.StreamControl(\x010\x012\x80\x01\n" +
+	"\x15ReliablePacketService\x12g\n" +
+	"\x15StreamReliablePackets\x12$.lippycat.data.ReliablePacketMessage\x1a$.lippycat.data.ReliablePacketControl(\x010\x01B+Z)github.com/endorses/lippycat/api/gen/datab\x06proto3"
 
 var (
 	file_data_proto_rawDescOnce sync.Once
@@ -3184,75 +3717,94 @@ func file_data_proto_rawDescGZIP() []byte {
 }
 
 var file_data_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_data_proto_goTypes = []any{
-	(FlowControl)(0),             // 0: lippycat.data.FlowControl
-	(MonitorEventAnalysis)(0),    // 1: lippycat.data.MonitorEventAnalysis
-	(*PacketBatch)(nil),          // 2: lippycat.data.PacketBatch
-	(*CapturedPacket)(nil),       // 3: lippycat.data.CapturedPacket
-	(*PacketMetadata)(nil),       // 4: lippycat.data.PacketMetadata
-	(*TLSMetadata)(nil),          // 5: lippycat.data.TLSMetadata
-	(*HTTPMetadata)(nil),         // 6: lippycat.data.HTTPMetadata
-	(*SIPMetadata)(nil),          // 7: lippycat.data.SIPMetadata
-	(*AccessNetworkInfo)(nil),    // 8: lippycat.data.AccessNetworkInfo
-	(*RTPMetadata)(nil),          // 9: lippycat.data.RTPMetadata
-	(*DNSMetadata)(nil),          // 10: lippycat.data.DNSMetadata
-	(*DNSAnswer)(nil),            // 11: lippycat.data.DNSAnswer
-	(*EmailMetadata)(nil),        // 12: lippycat.data.EmailMetadata
-	(*BatchStats)(nil),           // 13: lippycat.data.BatchStats
-	(*StreamControl)(nil),        // 14: lippycat.data.StreamControl
-	(*SubscribeRequest)(nil),     // 15: lippycat.data.SubscribeRequest
-	(*CorrelatedCallUpdate)(nil), // 16: lippycat.data.CorrelatedCallUpdate
-	(*CallLegInfo)(nil),          // 17: lippycat.data.CallLegInfo
-	(*TLSSessionKeys)(nil),       // 18: lippycat.data.TLSSessionKeys
-	(*RADIUSIdentity)(nil),       // 19: lippycat.data.RADIUSIdentity
-	(*RADIUSScope)(nil),          // 20: lippycat.data.RADIUSScope
-	(*RADIUSCriterion)(nil),      // 21: lippycat.data.RADIUSCriterion
-	(*RADIUSAttribution)(nil),    // 22: lippycat.data.RADIUSAttribution
-	(*RADIUSObservation)(nil),    // 23: lippycat.data.RADIUSObservation
-	nil,                          // 24: lippycat.data.PacketMetadata.DetailsEntry
-	nil,                          // 25: lippycat.data.HTTPMetadata.HeadersEntry
-	nil,                          // 26: lippycat.data.AccessNetworkInfo.ParametersEntry
+	(FlowControl)(0),              // 0: lippycat.data.FlowControl
+	(MonitorEventAnalysis)(0),     // 1: lippycat.data.MonitorEventAnalysis
+	(*RawPacketIdentity)(nil),     // 2: lippycat.data.RawPacketIdentity
+	(*RawPacketLossRange)(nil),    // 3: lippycat.data.RawPacketLossRange
+	(*ReliablePacketMessage)(nil), // 4: lippycat.data.ReliablePacketMessage
+	(*RawPacketReceipt)(nil),      // 5: lippycat.data.RawPacketReceipt
+	(*ReliablePacketControl)(nil), // 6: lippycat.data.ReliablePacketControl
+	(*RelayPacketMessage)(nil),    // 7: lippycat.data.RelayPacketMessage
+	(*PacketBatch)(nil),           // 8: lippycat.data.PacketBatch
+	(*CapturedPacket)(nil),        // 9: lippycat.data.CapturedPacket
+	(*PacketMetadata)(nil),        // 10: lippycat.data.PacketMetadata
+	(*TLSMetadata)(nil),           // 11: lippycat.data.TLSMetadata
+	(*HTTPMetadata)(nil),          // 12: lippycat.data.HTTPMetadata
+	(*SIPMetadata)(nil),           // 13: lippycat.data.SIPMetadata
+	(*AccessNetworkInfo)(nil),     // 14: lippycat.data.AccessNetworkInfo
+	(*RTPMetadata)(nil),           // 15: lippycat.data.RTPMetadata
+	(*DNSMetadata)(nil),           // 16: lippycat.data.DNSMetadata
+	(*DNSAnswer)(nil),             // 17: lippycat.data.DNSAnswer
+	(*EmailMetadata)(nil),         // 18: lippycat.data.EmailMetadata
+	(*BatchStats)(nil),            // 19: lippycat.data.BatchStats
+	(*StreamControl)(nil),         // 20: lippycat.data.StreamControl
+	(*SubscribeRequest)(nil),      // 21: lippycat.data.SubscribeRequest
+	(*CorrelatedCallUpdate)(nil),  // 22: lippycat.data.CorrelatedCallUpdate
+	(*CallLegInfo)(nil),           // 23: lippycat.data.CallLegInfo
+	(*TLSSessionKeys)(nil),        // 24: lippycat.data.TLSSessionKeys
+	(*RADIUSIdentity)(nil),        // 25: lippycat.data.RADIUSIdentity
+	(*RADIUSScope)(nil),           // 26: lippycat.data.RADIUSScope
+	(*RADIUSCriterion)(nil),       // 27: lippycat.data.RADIUSCriterion
+	(*RADIUSAttribution)(nil),     // 28: lippycat.data.RADIUSAttribution
+	(*RADIUSObservation)(nil),     // 29: lippycat.data.RADIUSObservation
+	nil,                           // 30: lippycat.data.PacketMetadata.DetailsEntry
+	nil,                           // 31: lippycat.data.HTTPMetadata.HeadersEntry
+	nil,                           // 32: lippycat.data.AccessNetworkInfo.ParametersEntry
 }
 var file_data_proto_depIdxs = []int32{
-	3,  // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
-	13, // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
-	1,  // 2: lippycat.data.PacketBatch.monitor_event_analysis:type_name -> lippycat.data.MonitorEventAnalysis
-	4,  // 3: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
-	18, // 4: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
-	23, // 5: lippycat.data.CapturedPacket.radius:type_name -> lippycat.data.RADIUSObservation
-	7,  // 6: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
-	9,  // 7: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
-	24, // 8: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
-	12, // 9: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
-	10, // 10: lippycat.data.PacketMetadata.dns:type_name -> lippycat.data.DNSMetadata
-	5,  // 11: lippycat.data.PacketMetadata.tls:type_name -> lippycat.data.TLSMetadata
-	6,  // 12: lippycat.data.PacketMetadata.http:type_name -> lippycat.data.HTTPMetadata
-	25, // 13: lippycat.data.HTTPMetadata.headers:type_name -> lippycat.data.HTTPMetadata.HeadersEntry
-	8,  // 14: lippycat.data.SIPMetadata.access_network_info:type_name -> lippycat.data.AccessNetworkInfo
-	26, // 15: lippycat.data.AccessNetworkInfo.parameters:type_name -> lippycat.data.AccessNetworkInfo.ParametersEntry
-	11, // 16: lippycat.data.DNSMetadata.answers:type_name -> lippycat.data.DNSAnswer
-	0,  // 17: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
-	17, // 18: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
-	21, // 19: lippycat.data.RADIUSAttribution.criteria:type_name -> lippycat.data.RADIUSCriterion
-	20, // 20: lippycat.data.RADIUSAttribution.scope:type_name -> lippycat.data.RADIUSScope
-	20, // 21: lippycat.data.RADIUSObservation.scope:type_name -> lippycat.data.RADIUSScope
-	19, // 22: lippycat.data.RADIUSObservation.observation_id:type_name -> lippycat.data.RADIUSIdentity
-	19, // 23: lippycat.data.RADIUSObservation.request_instance_id:type_name -> lippycat.data.RADIUSIdentity
-	19, // 24: lippycat.data.RADIUSObservation.request_observation_id:type_name -> lippycat.data.RADIUSIdentity
-	22, // 25: lippycat.data.RADIUSObservation.direct:type_name -> lippycat.data.RADIUSAttribution
-	22, // 26: lippycat.data.RADIUSObservation.inherited:type_name -> lippycat.data.RADIUSAttribution
-	2,  // 27: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
-	15, // 28: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
-	15, // 29: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
-	14, // 30: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
-	2,  // 31: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
-	16, // 32: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
-	30, // [30:33] is the sub-list for method output_type
-	27, // [27:30] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	2,  // 0: lippycat.data.ReliablePacketMessage.identity:type_name -> lippycat.data.RawPacketIdentity
+	8,  // 1: lippycat.data.ReliablePacketMessage.batch:type_name -> lippycat.data.PacketBatch
+	3,  // 2: lippycat.data.ReliablePacketMessage.losses:type_name -> lippycat.data.RawPacketLossRange
+	2,  // 3: lippycat.data.RawPacketReceipt.identity:type_name -> lippycat.data.RawPacketIdentity
+	3,  // 4: lippycat.data.RawPacketReceipt.losses:type_name -> lippycat.data.RawPacketLossRange
+	20, // 5: lippycat.data.ReliablePacketControl.control:type_name -> lippycat.data.StreamControl
+	2,  // 6: lippycat.data.ReliablePacketControl.identity:type_name -> lippycat.data.RawPacketIdentity
+	5,  // 7: lippycat.data.ReliablePacketControl.receipt:type_name -> lippycat.data.RawPacketReceipt
+	8,  // 8: lippycat.data.RelayPacketMessage.batch:type_name -> lippycat.data.PacketBatch
+	9,  // 9: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
+	19, // 10: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
+	1,  // 11: lippycat.data.PacketBatch.monitor_event_analysis:type_name -> lippycat.data.MonitorEventAnalysis
+	10, // 12: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
+	24, // 13: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
+	29, // 14: lippycat.data.CapturedPacket.radius:type_name -> lippycat.data.RADIUSObservation
+	13, // 15: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
+	15, // 16: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
+	30, // 17: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
+	18, // 18: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
+	16, // 19: lippycat.data.PacketMetadata.dns:type_name -> lippycat.data.DNSMetadata
+	11, // 20: lippycat.data.PacketMetadata.tls:type_name -> lippycat.data.TLSMetadata
+	12, // 21: lippycat.data.PacketMetadata.http:type_name -> lippycat.data.HTTPMetadata
+	31, // 22: lippycat.data.HTTPMetadata.headers:type_name -> lippycat.data.HTTPMetadata.HeadersEntry
+	14, // 23: lippycat.data.SIPMetadata.access_network_info:type_name -> lippycat.data.AccessNetworkInfo
+	32, // 24: lippycat.data.AccessNetworkInfo.parameters:type_name -> lippycat.data.AccessNetworkInfo.ParametersEntry
+	17, // 25: lippycat.data.DNSMetadata.answers:type_name -> lippycat.data.DNSAnswer
+	0,  // 26: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
+	23, // 27: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
+	27, // 28: lippycat.data.RADIUSAttribution.criteria:type_name -> lippycat.data.RADIUSCriterion
+	26, // 29: lippycat.data.RADIUSAttribution.scope:type_name -> lippycat.data.RADIUSScope
+	26, // 30: lippycat.data.RADIUSObservation.scope:type_name -> lippycat.data.RADIUSScope
+	25, // 31: lippycat.data.RADIUSObservation.observation_id:type_name -> lippycat.data.RADIUSIdentity
+	25, // 32: lippycat.data.RADIUSObservation.request_instance_id:type_name -> lippycat.data.RADIUSIdentity
+	25, // 33: lippycat.data.RADIUSObservation.request_observation_id:type_name -> lippycat.data.RADIUSIdentity
+	28, // 34: lippycat.data.RADIUSObservation.direct:type_name -> lippycat.data.RADIUSAttribution
+	28, // 35: lippycat.data.RADIUSObservation.inherited:type_name -> lippycat.data.RADIUSAttribution
+	8,  // 36: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
+	21, // 37: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
+	21, // 38: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
+	7,  // 39: lippycat.data.RelayDataService.StreamRelayPackets:input_type -> lippycat.data.RelayPacketMessage
+	4,  // 40: lippycat.data.ReliablePacketService.StreamReliablePackets:input_type -> lippycat.data.ReliablePacketMessage
+	20, // 41: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
+	8,  // 42: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
+	22, // 43: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
+	20, // 44: lippycat.data.RelayDataService.StreamRelayPackets:output_type -> lippycat.data.StreamControl
+	6,  // 45: lippycat.data.ReliablePacketService.StreamReliablePackets:output_type -> lippycat.data.ReliablePacketControl
+	41, // [41:46] is the sub-list for method output_type
+	36, // [36:41] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_data_proto_init() }
@@ -3266,9 +3818,9 @@ func file_data_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_data_proto_rawDesc), len(file_data_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   25,
+			NumMessages:   31,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   3,
 		},
 		GoTypes:           file_data_proto_goTypes,
 		DependencyIndexes: file_data_proto_depIdxs,

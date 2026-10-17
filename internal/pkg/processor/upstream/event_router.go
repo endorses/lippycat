@@ -426,12 +426,13 @@ func (r *EventRouter) serve(ctx context.Context, client *eventforwarding.Client)
 			}
 			continue
 		}
-		service := r.manager.eventServiceClient()
-		if service == nil {
+		service, generation := r.manager.eventGeneration()
+		if service == nil || generation == nil {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 		attemptCtx, cancelAttempt := context.WithCancel(ctx)
+		stopGeneration := context.AfterFunc(generation.ctx, cancelAttempt)
 		stream, err := service.StreamEvents(attemptCtx)
 		if err == nil {
 			if err = client.SetAcceptedKinds(r.manager.eventKinds()); err == nil {
@@ -442,9 +443,11 @@ func (r *EventRouter) serve(ctx context.Context, client *eventforwarding.Client)
 		} else {
 			cancelAttempt()
 		}
-		if err != nil && ctx.Err() == nil {
+		stopGeneration()
+		cancelAttempt()
+		if err != nil && ctx.Err() == nil && generation.ctx.Err() == nil {
 			logger.Warn("Upstream event route disconnected", "error", err)
-			r.manager.MarkDisconnected()
+			r.manager.disconnectGeneration(generation)
 		}
 		select {
 		case <-ctx.Done():

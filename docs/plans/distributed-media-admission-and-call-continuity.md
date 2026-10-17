@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-17
 
-**Status:** Implementation verified. All technical steps, required checks and the
-bounded closure review pass. The implementation commit remains to be recorded.
+**Status:** Complete. All implementation tasks are verified and committed.
+Required checks and the bounded closure review pass.
 
 **Baseline:** local `main` at `adcf6f43`. Ordered processor failover, reliable
 raw-packet forwarding, packet receipts and packet spooling already exist. Extend
@@ -367,7 +367,7 @@ while unique traffic, legitimate repeats and independent consumers remain intact
 - [x] Record actual tests and any capture-loss/installation-delay observations.
       Performance observations are exploratory unless an existing sourced
       requirement establishes a threshold.
-- [ ] Format changed files before staging, check off only verified tasks, and
+- [x] Format changed files before staging, check off only verified tasks, and
       commit implementation changes with the updated plan. Preserve unrelated
       edits and name files by responsibility rather than step number.
 
@@ -488,5 +488,6 @@ checks and subscription lifecycle regressions pass under the race detector,
 including the LI-enabled query build. The integrated review found no further
 material defects; no supplemental remediation batch was needed.
 
-**Closure decision:** `CLOSED`. All technical obligations are verified. Record the
-implementation commit and complete the final repository task above.
+**Closure decision:** `CLOSED`. Implementation and updated plan committed in
+`bb991f88`; fixture repair committed separately in `b044038b`. All plan tasks are
+verified and complete.

@@ -25,7 +25,10 @@ import (
 type StatelessDecoder func(context.Context, []byte, Summary) (types.PacketDisplay, error)
 
 const compactHeaderBytes = 32
-const compactSchemaMinor = 3
+
+// Minor 4 appends observation-domain identity and presence to completed rows.
+// Other minor versions are rejected; temporary completed datasets are not migrated.
+const compactSchemaMinor = 4
 const compactBlockHeaderBytes = 72
 const compactRows = 128
 const compactRowSlotBytes = 1024
@@ -74,6 +77,8 @@ type compactRow struct {
 	Length                         int
 	LinkType                       layers.LinkType
 	Projection                     compactProjection
+	ObservationDomain              uint32
+	ObservationDomainKnown         bool
 }
 
 type compactMetadata struct {
@@ -102,7 +107,7 @@ func (m compactMetadata) apply(p *types.PacketDisplay) {
 	p.RADIUSData = m.RADIUS
 }
 func (r compactRow) summary(id PacketID) Summary {
-	p := types.PacketDisplay{Timestamp: r.Timestamp, SrcIP: r.SrcIP, DstIP: r.DstIP, SrcPort: r.SrcPort, DstPort: r.DstPort, Protocol: r.Protocol, Info: r.Info, NodeID: r.Node, Interface: r.Device, Transport: r.Transport, Length: r.Length, LinkType: r.LinkType}
+	p := types.PacketDisplay{Timestamp: r.Timestamp, SrcIP: r.SrcIP, DstIP: r.DstIP, SrcPort: r.SrcPort, DstPort: r.DstPort, Protocol: r.Protocol, Info: r.Info, NodeID: r.Node, Interface: r.Device, Transport: r.Transport, Length: r.Length, LinkType: r.LinkType, ObservationDomain: r.ObservationDomain, ObservationDomainKnown: r.ObservationDomainKnown}
 	r.Projection.apply(&p)
 	return Summary{ID: id, packet: p}
 }
@@ -285,7 +290,7 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 		}
 		b.detailEnd += size
 	}
-	r := compactRow{Argument: detail.Source.ArgumentIndex, Interface: detail.Source.InterfaceID, Sequence: detail.Source.Sequence, Locator: loc, Context: provenance.Context, PhysicalOrdinal: provenance.PhysicalOrdinal, OriginalCaptured: uint32(provenance.OriginalCapture.CaptureLength), OriginalWire: uint32(provenance.OriginalCapture.Length), OriginalLink: uint32(provenance.OriginalLinkType), Derived: provenance.Derived, Captured: detail.CapturedLength, Original: detail.OriginalLength, Timestamp: detail.Packet.Timestamp, SrcIP: detail.Packet.SrcIP, DstIP: detail.Packet.DstIP, SrcPort: detail.Packet.SrcPort, DstPort: detail.Packet.DstPort, Protocol: detail.Packet.Protocol, Info: detail.Packet.Info, Node: detail.Packet.NodeID, Device: detail.Packet.Interface, Transport: detail.Packet.Transport, Length: detail.Packet.Length, LinkType: detail.Packet.LinkType, Projection: projectionOf(summary.packet)}
+	r := compactRow{Argument: detail.Source.ArgumentIndex, Interface: detail.Source.InterfaceID, Sequence: detail.Source.Sequence, Locator: loc, Context: provenance.Context, PhysicalOrdinal: provenance.PhysicalOrdinal, OriginalCaptured: uint32(provenance.OriginalCapture.CaptureLength), OriginalWire: uint32(provenance.OriginalCapture.Length), OriginalLink: uint32(provenance.OriginalLinkType), Derived: provenance.Derived, Captured: detail.CapturedLength, Original: detail.OriginalLength, Timestamp: detail.Packet.Timestamp, SrcIP: detail.Packet.SrcIP, DstIP: detail.Packet.DstIP, SrcPort: detail.Packet.SrcPort, DstPort: detail.Packet.DstPort, Protocol: detail.Packet.Protocol, Info: detail.Packet.Info, Node: detail.Packet.NodeID, Device: detail.Packet.Interface, Transport: detail.Packet.Transport, Length: detail.Packet.Length, LinkType: detail.Packet.LinkType, Projection: projectionOf(summary.packet), ObservationDomain: detail.Packet.ObservationDomain, ObservationDomainKnown: detail.Packet.ObservationDomainKnown}
 	if err = b.internCompactRow(ctx, &r); err != nil {
 		return err
 	}

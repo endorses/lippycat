@@ -104,3 +104,12 @@ func TestPolicyOwnerPreservesOriginalLIIDsAndSeparatesGenericAuthority(t *testin
 	_, err = generic.SignSnapshot(key, &management.PolicySnapshot{ProtocolVersion: 1, Domain: cfg.Domain, AuthorityId: cfg.AuthorityID, Revision: 1, OwnerKind: "shared", AllowOfflineCapture: true})
 	require.ErrorIs(t, err, filterpolicy.ErrInvalid, "ordinary shared policy cannot grant disconnected LI capture")
 }
+
+func TestSignedCapturePolicyRejectsLocalOnlyExport(t *testing.T) {
+	cfg, key := policyfixture.Config(t)
+	verifier, err := filterpolicy.NewVerifier(cfg)
+	require.NoError(t, err)
+	f := &management.Filter{Id: "shared/capture/target", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice", Enabled: true, DistributionScope: management.FilterDistributionScope_FILTER_DISTRIBUTION_SCOPE_LOCAL_ONLY}
+	_, err = verifier.Sign(key, 1, []*management.Filter{f})
+	require.ErrorIs(t, err, filterpolicy.ErrInvalid, "shared capture snapshots must never export local-only patterns")
+}

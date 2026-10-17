@@ -26,10 +26,12 @@ type cachedStats struct {
 
 // Collector collects and caches processor statistics
 type Collector struct {
-	rawProvider   atomic.Value  // func() *management.RawPacketStatus
-	routeProvider atomic.Value  // func() *management.RouteStatus
-	cache         atomic.Value  // stores *cachedStats
-	updates       atomic.Uint64 // incremented on every stats change
+	mediaProvider     atomic.Value  // func() *management.MediaRuleStatus
+	duplicateProvider atomic.Value  // func() *management.PacketDuplicateStatus
+	rawProvider       atomic.Value  // func() *management.RawPacketStatus
+	routeProvider     atomic.Value  // func() *management.RouteStatus
+	cache             atomic.Value  // stores *cachedStats
+	updates           atomic.Uint64 // incremented on every stats change
 
 	packetsReceived  *atomic.Uint64
 	packetsForwarded *atomic.Uint64
@@ -102,6 +104,14 @@ func (c *Collector) SetUpstreamProcessor(upstreamAddr string) {
 // GetProto returns statistics as protobuf message
 func (c *Collector) GetProto() *management.ProcessorStats {
 	stats := c.Get()
+	var media *management.MediaRuleStatus
+	if provider := c.mediaProvider.Load(); provider != nil {
+		media = provider.(func() *management.MediaRuleStatus)()
+	}
+	var duplicates *management.PacketDuplicateStatus
+	if provider := c.duplicateProvider.Load(); provider != nil {
+		duplicates = provider.(func() *management.PacketDuplicateStatus)()
+	}
 	var route *management.RouteStatus
 	if provider := c.routeProvider.Load(); provider != nil {
 		route = provider.(func() *management.RouteStatus)()
@@ -112,6 +122,8 @@ func (c *Collector) GetProto() *management.ProcessorStats {
 	}
 
 	return &management.ProcessorStats{
+		MediaRules:            media,
+		PacketDuplicates:      duplicates,
 		RawPackets:            raw,
 		UpstreamRoute:         route,
 		TotalHunters:          stats.TotalHunters,
@@ -124,6 +136,13 @@ func (c *Collector) GetProto() *management.ProcessorStats {
 		ProcessorId:           c.processorID,
 		UpstreamProcessor:     c.upstreamProcessor,
 	}
+}
+
+func (c *Collector) SetMediaRuleProvider(provider func() *management.MediaRuleStatus) {
+	c.mediaProvider.Store(provider)
+}
+func (c *Collector) SetPacketDuplicateProvider(provider func() *management.PacketDuplicateStatus) {
+	c.duplicateProvider.Store(provider)
 }
 
 func (c *Collector) SetRawPacketProvider(provider func() *management.RawPacketStatus) {

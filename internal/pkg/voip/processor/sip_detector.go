@@ -9,6 +9,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
+	"github.com/endorses/lippycat/internal/pkg/voip/capturepolicy"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -47,9 +48,12 @@ func (p *Processor) detectSIPWithEnvelope(packet gopacket.Packet, udp *layers.UD
 	// The verdict is carried on the result so callers do not re-match the packet.
 	var filterEvaluated, filterMatched bool
 	var filterIDs []string
+	var proof capturepolicy.FilterSelectionProof
 	if p.appFilter != nil {
 		filterEvaluated = true
-		if p.needFilterIDs {
+		if matcher, ok := p.appFilter.(capturepolicy.SelectionProofMatcher); ok {
+			filterMatched, filterIDs, proof = matcher.MatchPacketWithSelectionProof(packet)
+		} else if p.needFilterIDs {
 			filterMatched, filterIDs = p.appFilter.MatchPacketWithIDs(packet)
 		} else {
 			filterMatched = p.appFilter.MatchPacket(packet)
@@ -78,6 +82,13 @@ func (p *Processor) detectSIPWithEnvelope(packet gopacket.Packet, udp *layers.UD
 		return nil
 	}
 	callID := analysis.SIP.CallID
+	if filterMatched && proof != nil {
+		p.mu.Lock()
+		if state := p.calls[callID]; state != nil {
+			state.selectionProof = capturepolicy.MergeCurrentProofs(p.appFilter.(capturepolicy.SelectionProofMatcher), state.selectionProof, proof)
+		}
+		p.mu.Unlock()
+	}
 	attachment, ok := analysis.Attachment.(processorSIPAttachment)
 	if !ok {
 		return nil

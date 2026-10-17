@@ -270,8 +270,12 @@ type ReliablePacketMessage struct {
 	LossGeneration uint64                `protobuf:"varint,6,opt,name=loss_generation,json=lossGeneration,proto3" json:"loss_generation,omitempty"`
 	// Explicit retirement leaves a durable tombstone; it cannot reopen a session.
 	RetireSession bool `protobuf:"varint,7,opt,name=retire_session,json=retireSession,proto3" json:"retire_session,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Live observation on this connection generation. Backlog present when the
+	// connection opened is evidence only and cannot rearm temporary capture.
+	// Kept outside PacketBatch so custody digest/receipts remain unchanged.
+	CurrentCapture bool `protobuf:"varint,8,opt,name=current_capture,json=currentCapture,proto3" json:"current_capture,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ReliablePacketMessage) Reset() {
@@ -349,6 +353,13 @@ func (x *ReliablePacketMessage) GetLossGeneration() uint64 {
 func (x *ReliablePacketMessage) GetRetireSession() bool {
 	if x != nil {
 		return x.RetireSession
+	}
+	return false
+}
+
+func (x *ReliablePacketMessage) GetCurrentCapture() bool {
+	if x != nil {
+		return x.CurrentCapture
 	}
 	return false
 }
@@ -747,9 +758,13 @@ type CapturedPacket struct {
 	// empty for unresolved or ambiguous media.
 	InheritedMatchedFilterIds []string `protobuf:"bytes,12,rep,name=inherited_matched_filter_ids,json=inheritedMatchedFilterIds,proto3" json:"inherited_matched_filter_ids,omitempty"`
 	// Capture-origin claims; validate against data and establish source trust.
-	Radius        *RADIUSObservation `protobuf:"bytes,13,opt,name=radius,proto3" json:"radius,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Radius *RADIUSObservation `protobuf:"bytes,13,opt,name=radius,proto3" json:"radius,omitempty"`
+	// Original capture-domain numbering; receiver configuration maps it to a
+	// processor domain. This claim is never source authentication by itself.
+	ObservationDomain      uint32 `protobuf:"varint,14,opt,name=observation_domain,json=observationDomain,proto3" json:"observation_domain,omitempty"`
+	ObservationDomainKnown bool   `protobuf:"varint,15,opt,name=observation_domain_known,json=observationDomainKnown,proto3" json:"observation_domain_known,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *CapturedPacket) Reset() {
@@ -871,6 +886,20 @@ func (x *CapturedPacket) GetRadius() *RADIUSObservation {
 		return x.Radius
 	}
 	return nil
+}
+
+func (x *CapturedPacket) GetObservationDomain() uint32 {
+	if x != nil {
+		return x.ObservationDomain
+	}
+	return 0
+}
+
+func (x *CapturedPacket) GetObservationDomainKnown() bool {
+	if x != nil {
+		return x.ObservationDomainKnown
+	}
+	return false
 }
 
 // PacketMetadata contains hunter-side analysis results
@@ -3363,7 +3392,7 @@ const file_data_proto_rawDesc = "" +
 	"\tack_scope\x18\x05 \x01(\tR\backScope\">\n" +
 	"\x12RawPacketLossRange\x12\x14\n" +
 	"\x05first\x18\x01 \x01(\x04R\x05first\x12\x12\n" +
-	"\x04last\x18\x02 \x01(\x04R\x04last\"\xd8\x02\n" +
+	"\x04last\x18\x02 \x01(\x04R\x04last\"\x81\x03\n" +
 	"\x15ReliablePacketMessage\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12<\n" +
 	"\bidentity\x18\x02 \x01(\v2 .lippycat.data.RawPacketIdentityR\bidentity\x12\x19\n" +
@@ -3371,7 +3400,8 @@ const file_data_proto_rawDesc = "" +
 	"\x05batch\x18\x04 \x01(\v2\x1a.lippycat.data.PacketBatchR\x05batch\x129\n" +
 	"\x06losses\x18\x05 \x03(\v2!.lippycat.data.RawPacketLossRangeR\x06losses\x12'\n" +
 	"\x0floss_generation\x18\x06 \x01(\x04R\x0elossGeneration\x12%\n" +
-	"\x0eretire_session\x18\a \x01(\bR\rretireSession\"\xfd\x02\n" +
+	"\x0eretire_session\x18\a \x01(\bR\rretireSession\x12'\n" +
+	"\x0fcurrent_capture\x18\b \x01(\bR\x0ecurrentCapture\"\xfd\x02\n" +
 	"\x10RawPacketReceipt\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12<\n" +
 	"\bidentity\x18\x02 \x01(\v2 .lippycat.data.RawPacketIdentityR\bidentity\x12\x1a\n" +
@@ -3400,7 +3430,7 @@ const file_data_proto_rawDesc = "" +
 	"\x16monitor_event_analysis\x18\x06 \x01(\x0e2#.lippycat.data.MonitorEventAnalysisR\x14monitorEventAnalysis\x12.\n" +
 	"\x13producer_session_id\x18\a \x01(\tR\x11producerSessionId\x12#\n" +
 	"\rcapture_epoch\x18\b \x01(\tR\fcaptureEpoch\x122\n" +
-	"\x15signed_capture_policy\x18\t \x01(\fR\x13signedCapturePolicy\"\xdd\x04\n" +
+	"\x15signed_capture_policy\x18\t \x01(\fR\x13signedCapturePolicy\"\xc6\x05\n" +
 	"\x0eCapturedPacket\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x12%\n" +
@@ -3415,7 +3445,9 @@ const file_data_proto_rawDesc = "" +
 	" \x01(\v2\x1d.lippycat.data.TLSSessionKeysR\atlsKeys\x129\n" +
 	"\x19direct_matched_filter_ids\x18\v \x03(\tR\x16directMatchedFilterIds\x12?\n" +
 	"\x1cinherited_matched_filter_ids\x18\f \x03(\tR\x19inheritedMatchedFilterIds\x128\n" +
-	"\x06radius\x18\r \x01(\v2 .lippycat.data.RADIUSObservationR\x06radius\"\xe1\x04\n" +
+	"\x06radius\x18\r \x01(\v2 .lippycat.data.RADIUSObservationR\x06radius\x12-\n" +
+	"\x12observation_domain\x18\x0e \x01(\rR\x11observationDomain\x128\n" +
+	"\x18observation_domain_known\x18\x0f \x01(\bR\x16observationDomainKnown\"\xe1\x04\n" +
 	"\x0ePacketMetadata\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x15\n" +
 	"\x06src_ip\x18\x02 \x01(\tR\x05srcIp\x12\x15\n" +

@@ -539,15 +539,17 @@ func (s *bufferedSIPStream) processLoop() {
 }
 
 type streamChunkReader struct {
-	stream    *bufferedSIPStream
-	current   []byte
-	timestamp time.Time
-	gotData   bool
-	state     TCPState
-	pending   *streamChunk
-	spans     []streamCaptureSpan
-	position  int
-	source    pipeline.SourceProvenance
+	policyObserved   bool
+	policyGeneration uint64
+	stream           *bufferedSIPStream
+	current          []byte
+	timestamp        time.Time
+	gotData          bool
+	state            TCPState
+	pending          *streamChunk
+	spans            []streamCaptureSpan
+	position         int
+	source           pipeline.SourceProvenance
 }
 
 // recoverableFramingError marks loss of framing without weakening SIP security
@@ -713,6 +715,14 @@ func (r *streamChunkReader) Read(dst []byte) (int, error) {
 		r.timestamp, r.source = span.timestamp, span.source
 		data = data[:min(len(data), span.end-r.position)]
 	}
+	if r.source.CapturePolicyGeneration != r.policyGeneration {
+		previouslyObserved := r.policyObserved
+		r.policyGeneration = r.source.CapturePolicyGeneration
+		if previouslyObserved {
+			return 0, &recoverableFramingError{reason: "capture policy boundary"}
+		}
+	}
+	r.policyObserved = true
 	n := copy(dst, data)
 	r.current = r.current[n:]
 	r.position += n
@@ -762,7 +772,7 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 			if errors.As(err, &framingErr) {
 				IncrementParserFramingDiscontinuity()
 				recoveryPending = true
-				if framingErr.reason == "transport gap" {
+				if framingErr.reason == "transport gap" || framingErr.reason == "capture policy boundary" {
 					// bufio may retain bytes from the incomplete pre-gap message.
 					// Drop them; streamChunkReader retained the post-gap chunk.
 					bufReader = bufio.NewReader(reader)

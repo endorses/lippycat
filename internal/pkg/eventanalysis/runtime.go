@@ -229,15 +229,31 @@ func (r *Runtime) resetState() error {
 // packet bytes. Live/default delivery never blocks on dispatcher capacity;
 // lossless offline delivery may wait for sinks to drain.
 func (r *Runtime) ObserveCaptured(source Source, packets []*data.CapturedPacket) error {
+	_, err := r.observeCapturedBatch(source, packets, false)
+	return err
+}
+
+// ObserveCapturedAccepted reports per-packet analysis ownership while preserving
+// whole-batch expiry. Acceptance concerns the analysis runtime, not guaranteed
+// delivery to each optional asynchronous output sink.
+func (r *Runtime) ObserveCapturedAccepted(source Source, packets []*data.CapturedPacket) ([]bool, error) {
+	return r.observeCapturedBatch(source, packets, true)
+}
+
+func (r *Runtime) observeCapturedBatch(source Source, packets []*data.CapturedPacket, collect bool) ([]bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return fmt.Errorf("event analysis runtime is closed")
+		return nil, fmt.Errorf("event analysis runtime is closed")
+	}
+	var accepted []bool
+	if collect {
+		accepted = make([]bool, len(packets))
 	}
 	var firstErr error
 	invalid := 0
 	var newest time.Time
-	for _, raw := range packets {
+	for index, raw := range packets {
 		ts, err := r.observeCaptured(source, raw)
 		if err != nil {
 			r.stats.Invalid++
@@ -247,15 +263,18 @@ func (r *Runtime) ObserveCaptured(source Source, packets []*data.CapturedPacket)
 			}
 			continue
 		}
+		if collect {
+			accepted[index] = true
+		}
 		if ts.After(newest) {
 			newest = ts
 		}
 	}
 	r.expireAfterBatch(newest)
 	if invalid > 0 {
-		return fmt.Errorf("analyze captured packets: %d of %d invalid: %w", invalid, len(packets), firstErr)
+		return accepted, fmt.Errorf("analyze captured packets: %d of %d invalid: %w", invalid, len(packets), firstErr)
 	}
-	return nil
+	return accepted, nil
 }
 
 // ObservePacket adapts local capture through the existing protocol analyzers

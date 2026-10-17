@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/li"
+	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/google/uuid"
 )
@@ -161,11 +162,14 @@ func (c *Client) sweepTaskCutoffs() {
 // AcceptedX3 owns one bounded reservation between authorized producer admission
 // and reorder emission. It is never authorization for a different product.
 type AcceptedX3 struct {
-	client      *Client
-	queue       *destinationQueue
-	item        *deliveryItem
-	used        atomic.Bool
-	reservation *JournalAdmission
+	trackCall        bool
+	deferredSequence bool
+	sequenceContext  x2x3.SequenceContext
+	client           *Client
+	queue            *destinationQueue
+	item             *deliveryItem
+	used             atomic.Bool
+	reservation      *JournalAdmission
 }
 
 func (a *AcceptedX3) Release() {
@@ -177,7 +181,9 @@ func (a *AcceptedX3) Release() {
 	a.queue.reservedBytes[1] -= int64(len(a.item.data))
 	a.queue.mu.Unlock()
 	a.reservation.Release()
-	a.client.releasePreparedCall(a.item, false)
+	if a.trackCall {
+		a.client.releasePreparedCall(a.item, false)
+	}
 	a.item.payload.release()
 }
 
@@ -274,6 +280,10 @@ func controlMatches(control *li.StateRevocation, did uuid.UUID, item *deliveryIt
 }
 
 func (c *Client) PrepareX3(xid, did uuid.UUID, data []byte, m DeliveryMetadata) (*AcceptedX3, error) {
+	return c.prepareX3(xid, did, data, m, true)
+}
+
+func (c *Client) prepareX3(xid, did uuid.UUID, data []byte, m DeliveryMetadata, trackCall bool) (*AcceptedX3, error) {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
 	if c.initErr != nil {
@@ -352,7 +362,7 @@ func (c *Client) PrepareX3(xid, did uuid.UUID, data []byte, m DeliveryMetadata) 
 			return nil, err
 		}
 	}
-	if m.CallIncarnation != uuid.Nil {
+	if trackCall && m.CallIncarnation != uuid.Nil {
 		c.gateMu.Lock()
 		identity := deliveryCall(xid, m)
 		if !c.acceptedCalls[identity] && c.preparedCalls[identity] == 0 && len(c.acceptedCalls)+len(c.closedCalls)+len(c.preparedCalls) >= maxDeliveryGateIdentities {
@@ -369,18 +379,29 @@ func (c *Client) PrepareX3(xid, did uuid.UUID, data []byte, m DeliveryMetadata) 
 	}
 	item.data = append([]byte(nil), data...)
 	item.payload = c.newPayload(int64(len(data)))
-	return &AcceptedX3{client: c, queue: q, item: item, reservation: reservation}, nil
+	return &AcceptedX3{client: c, queue: q, item: item, reservation: reservation, trackCall: trackCall}, nil
 }
 
 // SendAcceptedX3 performs no manager/call authorization lookup. All input facts
 // were captured by PrepareX3; the monotonic gate can only withdraw eligibility.
 func (c *Client) SendAcceptedX3(a *AcceptedX3) (result error) {
+	if a != nil && a.deferredSequence {
+		return fmt.Errorf("deferred X3 admission requires sequence completion")
+	}
 	if a == nil || a.client != c || !a.used.CompareAndSwap(false, true) {
 		return fmt.Errorf("invalid or consumed X3 admission")
 	}
+	return c.sendAcceptedX3Claimed(a)
+}
+
+func (c *Client) sendAcceptedX3Claimed(a *AcceptedX3) (result error) {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
-	defer func() { c.releasePreparedCall(a.item, result == nil) }()
+	defer func() {
+		if a.trackCall {
+			c.releasePreparedCall(a.item, result == nil)
+		}
+	}()
 	q, item := a.queue, a.item
 	item.journalAdmission = a.reservation
 	q.mu.Lock()

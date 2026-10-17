@@ -282,6 +282,9 @@ func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 	filters := make([]*management.Filter, 0)
 
 	for _, filter := range m.filters {
+		if !filtering.IsDistributedFilter(filter) {
+			continue
+		}
 		// Check if hunter supports this filter type
 		if !hunterSupportsFilterType(hunterCaps, filter.Type) {
 			logger.Debug("Skipping filter incompatible with hunter capabilities",
@@ -345,7 +348,7 @@ func (m *Manager) UpdateValidated(input *management.Filter, validate func(*manag
 	if err := filtering.ValidateManagedFilter(filter); err != nil {
 		return nil, 0, ErrFilterInvalid
 	}
-	if filtering.IsRADIUSFilter(filter.Type) {
+	if filtering.IsDistributedFilter(filter) && filtering.IsRADIUSFilter(filter.Type) {
 		for _, hunterID := range filter.TargetHunters {
 			var caps *management.HunterCapabilities
 			if m.capabilityProvider != nil {
@@ -526,6 +529,9 @@ func (m *Manager) getHuntersToRemove(oldFilter, newFilter *management.Filter) []
 	defer m.channelsMu.RUnlock()
 
 	targetsHunter := func(filter *management.Filter, hunterID string) bool {
+		if !filtering.IsDistributedFilter(filter) {
+			return false
+		}
 		if len(filter.TargetHunters) == 0 {
 			return true
 		}
@@ -614,6 +620,9 @@ func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *
 
 // pushFilterUpdate sends filter update to affected hunters
 func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management.FilterUpdate) (uint32, error) {
+	if !filtering.IsDistributedFilter(filter) {
+		return 0, nil
+	}
 	m.channelsMu.RLock()
 	// A missed policy update invalidates the stream. Remove it after releasing
 	// the read lock, using channel identity so reconnect replacements survive.

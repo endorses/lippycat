@@ -121,7 +121,7 @@ Offline capture continues only while policy permits and retention has capacity. 
 
 ## Apply Optional LI Authority {#apply-optional-li-authority}
 
-LI-enabled central processors manage ADMF/MDF integration. Generic hunters can carry signed `owner: li` policy without an LI build, preserving original `li-` IDs. This profile currently requires encrypted policy and raw stores, reliable raw packet delivery and synchronous filtering; VoIP call-buffer mode is explicitly rejected. Ordinary capture does not need an ADMF, MDF or interception lease.
+LI-enabled central processors manage ADMF/MDF integration. Generic hunters can carry signed `owner: li` policy without an LI build, preserving original `li-` IDs. This profile requires verified mTLS, encrypted policy and raw stores, reliable raw packet delivery and a current signed finite capture policy. VoIP capture supports `signalling_policy: matched` or `none`; `all` is rejected because unselected signalling exceeds the capture grant. Processor media rules alone do not grant capture authority. Ordinary capture does not need an ADMF, MDF or interception lease.
 
 Root-level `li.handover` configures `enabled`, positive `lease_duration`, `allow_offline` (default false), bounded `clock_uncertainty` and explicit `source_ids`. Signed grants bind authority incarnation, activation/filter revisions, source and validity. Offline capture, when explicitly allowed, remains bounded by the signed lease; contact loss, clock rollback or reboot cannot renew it. A disconnected source cannot receive immediate revocation.
 

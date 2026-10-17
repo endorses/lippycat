@@ -51,6 +51,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/logstream"
 	logrecords "github.com/endorses/lippycat/internal/pkg/logstream/records"
+	"github.com/endorses/lippycat/internal/pkg/packetdedup"
 	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
 	"github.com/endorses/lippycat/internal/pkg/processor/enrichment"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
@@ -71,6 +72,8 @@ import (
 
 // Config contains processor configuration
 type Config struct {
+	MediaRules                         MediaRulesConfig
+	PacketDedup                        packetdedup.Settings
 	PrepareUpstream                    func(context.Context, failover.Endpoint) error
 	PacketCustody                      PacketCustodyConfig
 	FilterPolicy                       filterpolicy.Config
@@ -218,6 +221,8 @@ type StructuredLogConfig struct {
 
 // Processor represents a processor node
 type Processor struct {
+	mediaControl     *processorMediaControl
+	packetDuplicates *packetdedup.Detector
 	liHandoverCancel context.CancelFunc
 	liHandoverWG     sync.WaitGroup
 	packetCustody    *packetCustody
@@ -421,6 +426,9 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	}
 	if err := p.initPacketCustody(); err != nil {
 		return nil, fmt.Errorf("initialize raw packet custody: %w", err)
+	}
+	if err := p.initMediaControl(); err != nil {
+		return nil, fmt.Errorf("initialize media control: %w", err)
 	}
 	p.initLIManager()
 	if err := p.prepareLIStorage(); err != nil {
@@ -873,6 +881,8 @@ func New(config Config) (_ *Processor, constructorErr error) {
 		return route
 	})
 	p.statsCollector.SetRawPacketProvider(p.rawPacketStatus)
+	p.statsCollector.SetMediaRuleProvider(p.mediaRulesStatusProto)
+	p.statsCollector.SetPacketDuplicateProvider(p.packetDuplicateStatusProto)
 	return p, nil
 }
 

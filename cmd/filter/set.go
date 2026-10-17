@@ -15,19 +15,20 @@ import (
 )
 
 var (
-	setFilterID              string
-	setFilterType            string
-	setFilterPattern         string
-	setFilterDescription     string
-	setFilterEnabled         bool
-	setFilterHunters         []string
-	setFilterFile            string
-	setFilterRevision        uint64
-	setRadiusMACProfile      string
-	setRadiusOperatorScope   string
-	setRadiusProfileRevision string
-	setRadiusOriginNode      string
-	setRadiusSource          string
+	setFilterID                string
+	setFilterType              string
+	setFilterPattern           string
+	setFilterDescription       string
+	setFilterEnabled           bool
+	setFilterDistributionScope string
+	setFilterHunters           []string
+	setFilterFile              string
+	setFilterRevision          uint64
+	setRadiusMACProfile        string
+	setRadiusOperatorScope     string
+	setRadiusProfileRevision   string
+	setRadiusOriginNode        string
+	setRadiusSource            string
 )
 
 // SetFilterResult represents the result of a set operation
@@ -123,6 +124,7 @@ func init() {
 	SetFilterCmd.Flags().StringVar(&setFilterPattern, "pattern", "", "Filter pattern")
 	SetFilterCmd.Flags().StringVar(&setFilterDescription, "description", "", "Filter description")
 	SetFilterCmd.Flags().BoolVar(&setFilterEnabled, "enabled", true, "Enable the filter")
+	SetFilterCmd.Flags().StringVar(&setFilterDistributionScope, "distribution-scope", "distributed", "Filter distribution: distributed or local_only (processor/tap matching only)")
 	SetFilterCmd.Flags().StringSliceVar(&setFilterHunters, "hunters", nil, "Target hunter IDs (comma-separated)")
 	SetFilterCmd.Flags().Uint64Var(&setFilterRevision, "revision", 1, "Filter revision (increment when changing or replacing a RADIUS filter)")
 	SetFilterCmd.Flags().StringVar(&setRadiusMACProfile, "radius-mac-profile", "", "Subscriber MAC interpretation profile")
@@ -171,14 +173,21 @@ func runSetFilter(cmd *cobra.Command, args []string) {
 		filterID = uuid.New().String()
 	}
 
+	scope, err := filtering.ParseDistributionScope(setFilterDistributionScope)
+	if err != nil {
+		OutputError(err, ExitValidationError)
+		return
+	}
+
 	// Build filter proto
 	filter := &management.Filter{
-		Id:            filterID,
-		Type:          filterType,
-		Pattern:       setFilterPattern,
-		Description:   setFilterDescription,
-		Enabled:       setFilterEnabled,
-		TargetHunters: setFilterHunters,
+		DistributionScope: scope,
+		Id:                filterID,
+		Type:              filterType,
+		Pattern:           setFilterPattern,
+		Description:       setFilterDescription,
+		Enabled:           setFilterEnabled,
+		TargetHunters:     setFilterHunters,
 	}
 
 	if filtering.IsRADIUSFilterType(filter.Type) || cmd.Flags().Changed("revision") {

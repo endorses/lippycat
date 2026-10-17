@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/cobra"
@@ -39,8 +40,13 @@ var voipHuntCmd = &cobra.Command{
 	Long: `Run lippycat in VoIP hunter mode with packet buffering and call filtering.
 
 VoIP hunter mode captures SIP/RTP packets, buffers them until the call can be
-identified, then applies filters received from the processor. Only matched calls
-are forwarded, reducing bandwidth and storage.
+identified, then applies filters received from the processor. By default, only
+matched calls are forwarded, reducing bandwidth and storage.
+
+Signalling export and media capture can be controlled independently. Use
+--signalling-policy=all to export eligible SIP for central selection, or none to
+suppress SIP export. Use --media-policy=processor to capture media only while a
+current processor rule permits it; local SIP or IP matches cannot bypass rules.
 
 Features:
 - SIP header extraction (From, To, P-Asserted-Identity)
@@ -62,13 +68,17 @@ Example:
 func init() {
 	HuntCmd.AddCommand(voipHuntCmd)
 	cmdutil.RegisterMediaAdmissionFlags(voipHuntCmd, viper.GetViper(), "hunter.voip.rtp_ebpf")
+	voipHuntCmd.Flags().String("signalling-policy", "matched", "SIP forwarding policy: matched, all or none")
+	voipHuntCmd.Flags().String("media-policy", "local", "Media selection authority: local or processor")
+	_ = viper.BindPFlag("hunter.voip.signalling_policy", voipHuntCmd.Flags().Lookup("signalling-policy"))
+	_ = viper.BindPFlag("hunter.voip.media_policy", voipHuntCmd.Flags().Lookup("media-policy"))
 
 	// BPF Filter Optimization Flags (VoIP-specific)
 	voipHuntCmd.Flags().BoolVarP(&hunterUDPOnly, "udp-only", "U", false, "")
 	voipHuntCmd.Flags().Lookup("udp-only").Deprecated = "this flag misses TCP SIP traffic; use --sip-port instead for proper BPF filtering"
 	voipHuntCmd.Flags().Lookup("udp-only").Hidden = true
 	voipHuntCmd.Flags().StringVarP(&hunterSIPPorts, "sip-port", "S", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
-	voipHuntCmd.Flags().StringVarP(&hunterRTPPortRanges, "rtp-port-range", "R", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default: 10000-32768")
+	voipHuntCmd.Flags().StringVarP(&hunterRTPPortRanges, "rtp-port-range", "R", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default with local media: 10000-32768; processor media has no implicit range")
 
 	// Pattern Matching Algorithm Flags (VoIP-specific)
 	voipHuntCmd.Flags().StringVar(&hunterPatternAlgorithm, "pattern-algorithm", "auto", "Pattern matching algorithm: 'auto', 'linear', 'aho-corasick' (default: auto)")
@@ -91,6 +101,10 @@ func init() {
 }
 
 func runVoIPHunt(cmd *cobra.Command, args []string) error {
+	policies, err := huntCapturePolicies()
+	if err != nil {
+		return err
+	}
 	admissionConfig, err := cmdutil.ReadMediaAdmissionConfig(viper.GetViper(), "hunter.voip.rtp_ebpf")
 	if err != nil {
 		return err
@@ -140,6 +154,11 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid --rtp-port-range value: %w", err)
 		}
 
+		if policies.Media == voip.MediaProcessor && len(parsedRTPRanges) == 0 {
+			// Processor-selected endpoints may use any UDP port. An operator-specified
+			// RTP range remains a hard capture constraint.
+			parsedRTPRanges = []voip.PortRange{{Start: 1, End: 65535}}
+		}
 		// Build optimized filter
 		builder := voip.NewVoIPFilterBuilder()
 		filterConfig := voip.VoIPFilterConfig{
@@ -250,15 +269,18 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 		},
 		start: func(ctx context.Context, h *hunter.Hunter) error {
 			if config.MediaAdmission != nil {
-				return runAdmissionVoIPHunter(ctx, h, config.MediaAdmission, config.Interfaces, streamConfig)
+				return runAdmissionVoIPHunter(ctx, h, config.MediaAdmission, config.Interfaces, streamConfig, policies)
 			}
-			return runVoIPHunterWithBuffering(ctx, h, bufferMgr, streamConfig)
+			if len(config.VoIPInterfaceDomains) > 0 {
+				return runScopedVoIPHunter(ctx, h, mediaadmission.Config{InterfaceDomains: config.VoIPInterfaceDomains}, config.Interfaces, streamConfig, nil, policies)
+			}
+			return runVoIPHunterWithBuffering(ctx, h, bufferMgr, streamConfig, policies)
 		},
 	})
 }
 
 // runVoIPHunterWithBuffering wraps hunter packet processing with VoIP buffering and TCP reassembly
-func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr *voip.BufferManager, streamConfig voip.Config) error {
+func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr *voip.BufferManager, streamConfig voip.Config, policyOptions ...voip.CapturePolicies) error {
 	tracker := voip.NewCallTracker()
 	defer tracker.Shutdown()
 	// Create TCP SIP handler for hunter mode
@@ -287,6 +309,13 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 	// This enables proper multi-filter support (phone_number, sip_user, etc.)
 	// for both UDP and TCP SIP traffic
 	processor.SetTCPHandler(tcpHandler)
+	policies := voip.CapturePolicies{}
+	if len(policyOptions) > 0 {
+		policies = policyOptions[0]
+	}
+	if err := processor.SetCapturePolicies(policies, hunterMediaResolver(h)); err != nil {
+		return err
+	}
 
 	// Wire the TCP assembler to the processor
 	// TCP packets will be fed to the assembler for stream reconstruction
@@ -339,4 +368,19 @@ func huntSIPStreamConfig(cmd *cobra.Command) (voip.Config, error) {
 	}
 	config.MaxStreams = limit
 	return config, nil
+}
+
+func huntCapturePolicies() (voip.CapturePolicies, error) {
+	return (voip.CapturePolicies{Signalling: voip.SignallingPolicy(viper.GetString("hunter.voip.signalling_policy")), Media: voip.MediaPolicy(viper.GetString("hunter.voip.media_policy"))}).Normalize()
+}
+
+// A dynamic resolver can be installed before the first control connection.
+// Hunters without a rule service remain fail closed in processor media mode.
+func hunterMediaResolver(h any) voip.RemoteMediaResolver {
+	if provider, ok := h.(interface {
+		VoIPMediaResolver() voip.RemoteMediaResolver
+	}); ok {
+		return provider.VoIPMediaResolver()
+	}
+	return nil
 }

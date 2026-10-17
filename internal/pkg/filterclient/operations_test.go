@@ -6,9 +6,67 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/endorses/lippycat/api/gen/management"
 )
+
+func TestFilterClientAdministrativeQueriesPreserveScope(t *testing.T) {
+	mock := newMockServer()
+	local := &management.Filter{Id: "central-alice", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice", Enabled: true, DistributionScope: management.FilterDistributionScope_FILTER_DISTRIBUTION_SCOPE_LOCAL_ONLY}
+	distributed := &management.Filter{Id: "edge-bob", Type: management.FilterType_FILTER_SIP_USER, Pattern: "bob", Enabled: true}
+	mock.filters = []*management.Filter{local, distributed}
+	client, cleanup := createTestClient(t, mock)
+	defer cleanup()
+
+	listed, err := client.List(ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, listed, 2)
+	require.True(t, proto.Equal(local, listed[0]))
+	require.True(t, proto.Equal(distributed, listed[1]))
+	request := <-mock.adminQueries
+	require.Empty(t, request.ProcessorId, "empty processor selects the connected processor")
+	require.Empty(t, request.HunterId)
+	require.Nil(t, request.AuthToken)
+
+	found, err := client.Get(local.Id)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(local, found), "show/get must retain local-only scope and selector")
+	request = <-mock.adminQueries
+	require.Empty(t, request.ProcessorId)
+	require.Empty(t, request.HunterId)
+	require.Empty(t, mock.hunterQueries, "administrative list/get must never use the hunter distribution RPC")
+}
+
+func TestFilterClientTargetedListUsesAdministrativeQuery(t *testing.T) {
+	mock := newMockServer()
+	client, cleanup := createTestClient(t, mock)
+	defer cleanup()
+	_, err := client.List(ListOptions{HunterID: "hunter-a"})
+	require.NoError(t, err)
+	request := <-mock.adminQueries
+	require.Empty(t, request.ProcessorId)
+	require.Equal(t, "hunter-a", request.HunterId)
+	require.Empty(t, mock.hunterQueries)
+}
+
+func TestFilterClientAdministrativeQueryFailureDoesNotFallBack(t *testing.T) {
+	for _, code := range []codes.Code{codes.PermissionDenied, codes.Unimplemented} {
+		t.Run(code.String(), func(t *testing.T) {
+			mock := newMockServer()
+			mock.getFiltersErr = status.Error(code, "administrative query unavailable")
+			client, cleanup := createTestClient(t, mock)
+			defer cleanup()
+			_, err := client.List(ListOptions{})
+			require.Error(t, err)
+			require.Equal(t, code, status.Code(err))
+			require.Len(t, mock.adminQueries, 1)
+			require.Empty(t, mock.hunterQueries, "authorization or compatibility errors must not trigger a hunter RPC fallback")
+		})
+	}
+}
 
 func TestFilterClient_List(t *testing.T) {
 	t.Run("empty list", func(t *testing.T) {

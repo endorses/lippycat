@@ -55,6 +55,8 @@ func TestEnvelopeGRPCRoundTripPreservesTransportFields(t *testing.T) {
 			Metadata:                  &pipeline.Metadata{Encoding: pipeline.MetadataProtobuf, Payload: payload},
 		}},
 	}
+	in.Packets[0].Source.ObservationDomain = 42
+	in.Packets[0].Source.ObservationDomainKnown = true
 
 	wire, err := ToPacketBatch(in)
 	require.NoError(t, err)
@@ -70,6 +72,8 @@ func TestEnvelopeGRPCRoundTripPreservesTransportFields(t *testing.T) {
 	require.Equal(t, in.Packets[0].OriginalLength, out.Packets[0].OriginalLength)
 	require.Equal(t, in.Packets[0].Source.InterfaceName, out.Packets[0].Source.InterfaceName)
 	require.Equal(t, in.Packets[0].Source.InterfaceIndex, out.Packets[0].Source.InterfaceIndex)
+	require.Equal(t, in.Packets[0].Source.ObservationDomain, out.Packets[0].Source.ObservationDomain)
+	require.True(t, out.Packets[0].Source.ObservationDomainKnown)
 	require.Equal(t, in.Packets[0].MatchedFilterIDs, out.Packets[0].MatchedFilterIDs)
 	require.Equal(t, in.Packets[0].DirectMatchedFilterIDs, out.Packets[0].DirectMatchedFilterIDs)
 	require.Equal(t, in.Packets[0].InheritedMatchedFilterIDs, out.Packets[0].InheritedMatchedFilterIDs)

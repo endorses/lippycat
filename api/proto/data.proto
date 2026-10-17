@@ -57,6 +57,10 @@ message ReliablePacketMessage {
     uint64 loss_generation = 6;
     // Explicit retirement leaves a durable tombstone; it cannot reopen a session.
     bool retire_session = 7;
+    // Live observation on this connection generation. Backlog present when the
+    // connection opened is evidence only and cannot rearm temporary capture.
+    // Kept outside PacketBatch so custody digest/receipts remain unchanged.
+    bool current_capture = 8;
 }
 
 message RawPacketReceipt {
@@ -165,6 +169,10 @@ message CapturedPacket {
 
     // Capture-origin claims; validate against data and establish source trust.
     RADIUSObservation radius = 13;
+    // Original capture-domain numbering; receiver configuration maps it to a
+    // processor domain. This claim is never source authentication by itself.
+    uint32 observation_domain = 14;
+    bool observation_domain_known = 15;
 }
 
 // PacketMetadata contains hunter-side analysis results

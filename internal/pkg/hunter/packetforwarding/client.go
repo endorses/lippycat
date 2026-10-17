@@ -19,6 +19,7 @@ import (
 )
 
 type Stream struct {
+	backlogThrough uint64
 	data.ReliablePacketService_StreamReliablePacketsClient
 	spool        *packetspool.Spool
 	identity     *data.RawPacketIdentity
@@ -48,7 +49,7 @@ func Open(ctx context.Context, conn grpc.ClientConnInterface, spool *packetspool
 		closeErr := stream.CloseSend()
 		return nil, errors.Join(err, closeErr)
 	}
-	return &Stream{ReliablePacketService_StreamReliablePacketsClient: stream, spool: spool, identity: identity, verifier: verifier, changed: make(chan struct{}, 1), cancel: cancel}, nil
+	return &Stream{backlogThrough: spool.Status().LastSequence, ReliablePacketService_StreamReliablePacketsClient: stream, spool: spool, identity: identity, verifier: verifier, changed: make(chan struct{}, 1), cancel: cancel}, nil
 }
 
 // A stalled HTTP/2 sender must release its generation just like a missing
@@ -69,7 +70,7 @@ func (s *Stream) Send(batch *data.PacketBatch) error {
 	s.mu.Lock()
 	s.expected = proto.Clone(batch).(*data.PacketBatch)
 	s.mu.Unlock()
-	return s.ReliablePacketService_StreamReliablePacketsClient.Send(&data.ReliablePacketMessage{ProtocolVersion: 1, Identity: s.identity, Batch: batch})
+	return s.ReliablePacketService_StreamReliablePacketsClient.Send(&data.ReliablePacketMessage{ProtocolVersion: 1, Identity: s.identity, Batch: batch, CurrentCapture: batch.Sequence > s.backlogThrough})
 }
 
 func (s *Stream) Recv() (*data.StreamControl, error) {

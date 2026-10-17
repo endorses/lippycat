@@ -659,6 +659,12 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	if err := viper.UnmarshalKey("processor.packets.receiver", &config.PacketCustody); err != nil {
 		return fmt.Errorf("decode raw packet custody: %w", err)
 	}
+	if err := viper.UnmarshalKey("processor.voip.media_rules", &config.MediaRules); err != nil {
+		return fmt.Errorf("decode media rule publication: %w", err)
+	}
+	if err := viper.UnmarshalKey("processor.packet_dedup", &config.PacketDedup); err != nil {
+		return fmt.Errorf("decode packet duplicate suppression: %w", err)
+	}
 	if err := viper.UnmarshalKey("li.handover", &config.LIHandover); err != nil {
 		return fmt.Errorf("decode LI handover policy: %w", err)
 	}

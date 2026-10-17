@@ -14,7 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
-// Schema v1 is little endian. The 32-byte frame has magic, version, kind,
+// The declaration-order oracle format is little endian. The 32-byte frame has magic, version, kind,
 // payload length, packet ID, CRC32 and four reserved zero bytes. Payload structs
 // follow declaration order; changing their field layout requires a version bump.
 const frameHeaderBytes = 32
@@ -32,7 +32,7 @@ type detailWire struct {
 
 var timestampType = reflect.TypeOf(time.Time{})
 
-// recordFields borrows record fields in schema-v1 wire order, avoiding a second
+// recordFields borrows record fields in declaration-order wire order, avoiding a second
 // boxed copy of PacketDisplay. The framing code does not retain these values.
 func recordFields(value any) ([4]reflect.Value, int, uint16, error) {
 	switch v := value.(type) {

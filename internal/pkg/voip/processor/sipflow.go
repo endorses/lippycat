@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	"github.com/endorses/lippycat/internal/pkg/voip/capturepolicy"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -17,7 +18,12 @@ type processorSelectionStore struct{ processor *Processor }
 func (s processorSelectionStore) Selected(callID string) bool {
 	s.processor.mu.RLock()
 	defer s.processor.mu.RUnlock()
-	_, selected := s.processor.calls[callID]
+	state, selected := s.processor.calls[callID]
+	if selected {
+		if matcher, ok := s.processor.appFilter.(capturepolicy.SelectionProofMatcher); ok {
+			selected, _ = matcher.CurrentSelection(state.selectionProof)
+		}
+	}
 	return selected
 }
 
@@ -62,7 +68,7 @@ func (r processorSIPRegistry) Observe(result pipeline.SIPResult) (sipflow.Regist
 	}
 	metadata := callMetadataFromResult(result)
 	p.updateCallState(result.CallID, result.Method, metadata)
-	if len(result.SDP) > 0 {
+	if len(result.SDP) > 0 && !p.config.DeferSDPAssociations {
 		for _, port := range p.parseSDPEndpointKeys(string(result.SDP)) {
 			p.registry.TryAssociateEndpointForLifetime(result.CallID, call.Lifetime, port)
 		}

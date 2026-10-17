@@ -32,6 +32,10 @@ type PacketCustodyConfig struct {
 }
 
 type packetCustody struct {
+	// Current authority is deliberately volatile and bounded by accepted records.
+	// Restoring retained payload never restores current capture selection.
+	currentMu  sync.Mutex
+	current    map[currentPacketKey]bool
 	replayed   atomic.Uint64
 	duplicates atomic.Uint64
 	late       atomic.Uint64
@@ -41,6 +45,15 @@ type packetCustody struct {
 	wake       chan struct{}
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
+}
+
+type currentPacketKey struct {
+	source, session, epoch, destination, scope string
+	sequence                                   uint64
+}
+
+func captureRecordKey(id *data.RawPacketIdentity, sequence uint64) currentPacketKey {
+	return currentPacketKey{id.SourceId, id.ProducerSessionId, id.CaptureEpoch, id.DestinationId, id.AckScope, sequence}
 }
 
 func (p *Processor) initPacketCustody() error {
@@ -65,7 +78,7 @@ func (p *Processor) initPacketCustody() error {
 	if err != nil {
 		return err
 	}
-	p.packetCustody = &packetCustody{store: store, signer: signer, wake: make(chan struct{}, 1), watermarks: make(map[string]int64)}
+	p.packetCustody = &packetCustody{store: store, signer: signer, wake: make(chan struct{}, 1), watermarks: make(map[string]int64), current: make(map[currentPacketKey]bool)}
 	return nil
 }
 
@@ -83,7 +96,13 @@ func (p *Processor) startPacketCustody(ctx context.Context) {
 		defer ticker.Stop()
 		for ctx.Err() == nil {
 			if !p.filterProcessingBlocked() {
+				runtime.currentMu.Lock()
 				pending, err := runtime.store.Pending(1)
+				current := false
+				if len(pending) > 0 {
+					current = runtime.current[captureRecordKey(pending[0].Identity, pending[0].Batch.Sequence)]
+				}
+				runtime.currentMu.Unlock()
 				if err != nil {
 					logger.Error("Raw custody replay fault", "error", err)
 					p.blockFilterProcessing()
@@ -98,6 +117,16 @@ func (p *Processor) startPacketCustody(ctx context.Context) {
 						return
 					}
 					batch.RADIUSSourceTrusted = true // verified identity/delegation was required before durable acceptance
+					batch.MediaSourceTrusted = true
+					batch.HistoricalReplay = !current
+					if p.mediaControl != nil {
+						for _, envelope := range batch.Envelopes {
+							if envelope.CaptureTime.Before(p.mediaControl.started) {
+								batch.HistoricalReplay = true
+								break
+							}
+						}
+					}
 					key := item.Identity.SourceId + "\x00" + item.Identity.ProducerSessionId + "\x00" + item.Identity.CaptureEpoch
 					watermark := runtime.watermarks[key]
 					for _, packet := range item.Batch.Packets {
@@ -122,6 +151,9 @@ func (p *Processor) startPacketCustody(ctx context.Context) {
 						p.blockFilterProcessing()
 						return
 					}
+					runtime.currentMu.Lock()
+					delete(runtime.current, captureRecordKey(item.Identity, item.Batch.Sequence))
+					runtime.currentMu.Unlock()
 					runtime.replayed.Add(uint64(len(item.Batch.Packets)))
 					continue
 				}
@@ -253,7 +285,12 @@ func (p *Processor) StreamReliablePackets(stream data.ReliablePacketService_Stre
 				return status.Error(codes.InvalidArgument, "invalid raw packet batch")
 			}
 		}
+		p.packetCustody.currentMu.Lock()
 		receipt, duplicate, err := p.packetCustody.store.Accept(message)
+		if err == nil && !duplicate && message.Batch != nil && message.CurrentCapture && len(p.packetCustody.current) < p.config.PacketCustody.Store.MaxRecords {
+			p.packetCustody.current[captureRecordKey(id, message.Batch.Sequence)] = true
+		}
+		p.packetCustody.currentMu.Unlock()
 		if err != nil {
 			return status.Errorf(codes.FailedPrecondition, "raw custody rejected: %v", err)
 		}

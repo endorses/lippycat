@@ -51,6 +51,12 @@ type Manager struct {
 	initialApplied    bool
 	pendingInitial    []*management.Filter
 	hasPendingInitial bool
+	filterValidator   func([]*management.Filter) error
+}
+
+// SetFilterValidator installs a startup-only source-policy constraint.
+func (m *Manager) SetFilterValidator(validate func([]*management.Filter) error) {
+	m.filterValidator = validate
 }
 
 func (m *Manager) SetPolicyChangeCoordinator(coordinator PolicyChangeCoordinator) {
@@ -110,6 +116,11 @@ func (m *Manager) SetInitialFilters(filters []*management.Filter) error {
 }
 
 func (m *Manager) setInitialFilters(filters []*management.Filter) error {
+	if m.filterValidator != nil {
+		if err := m.filterValidator(filters); err != nil {
+			return err
+		}
+	}
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
 	m.mu.Lock()
@@ -392,6 +403,15 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 		}
 	}
 
+	if m.filterValidator != nil {
+		if err := m.filterValidator(m.filters); err != nil {
+			m.filters = previousFilters
+			m.mu.Unlock()
+			logger.Error("Rejected incompatible source filter update", "error", err)
+			m.disconnectMarker.MarkDisconnected()
+			return
+		}
+	}
 	// Get current filters and appFilterUpdater before unlocking
 	currentFilters := append([]*management.Filter(nil), m.filters...)
 	appFilterUpdater := m.appFilterUpdater
@@ -464,6 +484,11 @@ func cloneFilters(filters []*management.Filter) []*management.Filter {
 // replaceSnapshot replaces the complete registration/reconnect policy, including
 // deleted filters. Publish once so application matching never sees partial policy.
 func (m *Manager) replaceSnapshot(filters []*management.Filter) error {
+	if m.filterValidator != nil {
+		if err := m.filterValidator(filters); err != nil {
+			return err
+		}
+	}
 	current := cloneFilters(filters)
 	m.mu.Lock()
 	previous := m.filters

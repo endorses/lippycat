@@ -25,18 +25,22 @@ const (
 // SourceProvenance describes where a packet was observed. Batch fields are set
 // only for transports that batch packets.
 type SourceProvenance struct {
-	PacketProvenance  *offline.PacketProvenance
-	ArgumentIndex     uint32
-	LogicalSequence   uint64
-	Kind              SourceKind
-	NodeID            string
-	ProducerSessionID string
-	CaptureEpoch      string
-	InterfaceName     string
-	InputFile         string
-	InterfaceIndex    uint32
-	BatchSequence     uint64
-	BatchTimestamp    time.Time
+	ObservationDomain      uint32
+	ObservationDomainKnown bool
+	// CapturePolicyGeneration is a local producer capability, never serialized.
+	CapturePolicyGeneration uint64
+	PacketProvenance        *offline.PacketProvenance
+	ArgumentIndex           uint32
+	LogicalSequence         uint64
+	Kind                    SourceKind
+	NodeID                  string
+	ProducerSessionID       string
+	CaptureEpoch            string
+	InterfaceName           string
+	InputFile               string
+	InterfaceIndex          uint32
+	BatchSequence           uint64
+	BatchTimestamp          time.Time
 }
 
 // Stage is a named pipeline capability. It is deliberately a bit set rather
@@ -91,6 +95,12 @@ type TLSSessionKeys struct {
 
 // PacketEnvelope is the normalized unit passed between ingress and stages.
 type PacketEnvelope struct {
+	// CallLifecycleRejected is a local central-validation verdict. Raw forensic
+	// outputs can retain the packet, but it cannot mutate selected call owners.
+	CallLifecycleRejected bool
+	// CurrentCaptureSelection rechecks ephemeral selection at producer acceptance.
+	// It is local-only and is never decoded from a transport metadata claim.
+	CurrentCaptureSelection   func() bool
 	Data                      []byte
 	LinkType                  layers.LinkType
 	CaptureTime               time.Time

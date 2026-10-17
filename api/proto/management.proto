@@ -327,6 +327,7 @@ message HunterStats {
     int64 metrics_sample_time_ns = 39;
     ProcessorSelectionStatus processor_selection = 40;
     RawPacketStatus raw_packets = 41;
+    MediaRuleStatus media_rules = 42;
 }
 
 // ProcessorHeartbeat response from processor
@@ -377,6 +378,12 @@ message FilterResponse {
 }
 
 // Filter definition
+// Managed-filter distribution is independent of matching and target ownership.
+enum FilterDistributionScope {
+    FILTER_DISTRIBUTION_SCOPE_DISTRIBUTED = 0;
+    FILTER_DISTRIBUTION_SCOPE_LOCAL_ONLY = 1;
+}
+
 message Filter {
     // Unique filter identifier
     string id = 1;
@@ -399,6 +406,9 @@ message Filter {
     // RADIUS structured exact criteria; never interpreted as independent OR filters.
     RadiusFilterCriteria radius = 7;
     uint64 revision = 8;
+
+    // Local-only filters never leave this processor/tap for hunter capture.
+    FilterDistributionScope distribution_scope = 9;
 }
 
 message RadiusScopeBinding {
@@ -719,6 +729,43 @@ message ProcessorStats {
     LICallCorrelationStats li_call_correlation = 19;
     RouteStatus upstream_route = 20;
     RawPacketStatus raw_packets = 21;
+    MediaRuleStatus media_rules = 22;
+    PacketDuplicateStatus packet_duplicates = 23;
+}
+
+// Fixed-cardinality current capture-control state. No selectors or call IDs.
+message MediaRuleStatus {
+    bool enabled = 1;
+    bool ready = 2;
+    uint64 generation = 3;
+    uint64 revision = 4;
+    uint64 sequence = 5;
+    uint64 rules = 6;
+    uint64 endpoints = 7;
+    uint64 bytes = 8;
+    uint64 subscribers = 9;
+    uint64 expired = 10;
+    uint64 stale_updates = 11;
+    uint64 resyncs = 12;
+    uint64 active_calls = 13;
+    bool application_failed = 14;
+}
+
+// Volatile overlap evidence is separate from durable transport retry receipts.
+message PacketDuplicateStatus {
+    uint64 attempts = 1;
+    uint64 committed = 2;
+    uint64 duplicates = 3;
+    uint64 in_flight = 4;
+    uint64 repeats_retained = 5;
+    uint64 unsupported_retained = 6;
+    uint64 ambiguous_retained = 7;
+    uint64 capacity_retained = 8;
+    uint64 outside_window_retained = 9;
+    uint64 aborted = 10;
+    uint64 entries = 11;
+    uint64 contributors = 12;
+    uint64 bytes = 13;
 }
 
 // No call identifiers, selectors, addresses or SIP header values are exposed.

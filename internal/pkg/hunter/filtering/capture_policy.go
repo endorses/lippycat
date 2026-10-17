@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"google.golang.org/protobuf/proto"
 )
@@ -19,14 +20,15 @@ type captureSnapshotCoordinator interface {
 }
 
 type capturePolicyLease struct {
-	mu           sync.Mutex
-	encoded      []byte
-	snapshot     *management.PolicySnapshot
-	bootRevision uint64
-	lastWall     int64
-	deadline     time.Time
-	connected    bool
-	fault        bool
+	mu            sync.Mutex
+	encoded       []byte
+	snapshot      *management.PolicySnapshot
+	authorizedIDs map[string]struct{}
+	bootRevision  uint64
+	lastWall      int64
+	deadline      time.Time
+	connected     bool
+	fault         bool
 }
 
 func (m *Manager) CapturePolicyStorageKeyring() *securestore.Keyring {
@@ -41,6 +43,22 @@ func (m *Manager) PolicyRevision() uint64 {
 		return 0
 	}
 	return m.sharedPolicy.state.Revision()
+}
+
+// EffectiveCapturePolicyRevision reads installed policy, not durable State
+// ordering. Capture callbacks may hold the producer boundary while State.Accept
+// waits to install a replacement, so they must not reenter State.Revision.
+func (m *Manager) EffectiveCapturePolicyRevision() uint64 {
+	if m.sharedPolicy == nil {
+		return 0
+	}
+	lease := &m.sharedPolicy.lease
+	lease.mu.Lock()
+	defer lease.mu.Unlock()
+	if lease.snapshot == nil || lease.fault {
+		return 0
+	}
+	return lease.snapshot.Revision
 }
 
 func (m *Manager) EffectiveCapturePolicy() []byte {
@@ -206,6 +224,7 @@ func (m *Manager) installCaptureSnapshot(signed *management.SignedPolicySnapshot
 		now := time.Now()
 		lease.encoded = append([]byte(nil), encoded...)
 		lease.snapshot = proto.Clone(signed.Snapshot).(*management.PolicySnapshot)
+		lease.authorizedIDs = m.captureSelectionIndex(lease.snapshot)
 		lease.lastWall = now.UnixNano()
 		lease.deadline = now.Add(time.Duration(signed.Snapshot.ValidUntilNs - now.UnixNano()))
 		lease.fault = false
@@ -246,4 +265,40 @@ func (m *Manager) QuiesceExpiredPolicy(ctx context.Context) error {
 		return capture.Quiesce(ctx)
 	}
 	return nil
+}
+
+// CaptureSelectionAllowed validates every claimed ID against the currently
+// installed verified source policy. It never enters durable policy State locks.
+func (m *Manager) CaptureSelectionAllowed(ids []string) bool {
+	if m.sharedPolicy == nil || m.sharedPolicy.config.Owner != "li" {
+		return true
+	}
+	lease := &m.sharedPolicy.lease
+	lease.mu.Lock()
+	defer lease.mu.Unlock()
+	if lease.snapshot == nil || lease.fault || len(ids) == 0 {
+		return false
+	}
+	for _, id := range ids {
+		if _, ok := lease.authorizedIDs[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+func (m *Manager) captureSelectionIndex(snapshot *management.PolicySnapshot) map[string]struct{} {
+	ids := make(map[string]struct{})
+	for _, filter := range snapshot.Filters {
+		if !sharedfilter.IsDistributedFilter(filter) || !filter.Enabled || filter.Id == "" {
+			continue
+		}
+		applies := len(filter.TargetHunters) == 0
+		for _, source := range filter.TargetHunters {
+			applies = applies || source == m.hunterID
+		}
+		if applies {
+			ids[filter.Id] = struct{}{}
+		}
+	}
+	return ids
 }

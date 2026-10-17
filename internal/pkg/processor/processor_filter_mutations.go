@@ -73,6 +73,9 @@ func (p *Processor) updateManagedFilter(filter *management.Filter) (uint32, erro
 			return count, &securestore.CommitError{Outcome: securestore.Committed, Op: "apply committed filter policy", Err: errors.Join(err, ErrFilterReconciliation)}
 		}
 	}
+	if mediaErr := p.reconcileMediaSelection(); mediaErr != nil {
+		return count, &securestore.CommitError{Outcome: securestore.Committed, Op: "reconcile committed media selection", Err: errors.Join(err, mediaErr)}
+	}
 	return count, err
 }
 
@@ -99,6 +102,9 @@ func (p *Processor) deleteManagedFilter(id string) (uint32, error) {
 			p.blockFilterProcessing()
 			return count, &securestore.CommitError{Outcome: securestore.Committed, Op: "apply committed filter deletion", Err: errors.Join(err, ErrFilterReconciliation)}
 		}
+	}
+	if mediaErr := p.reconcileMediaSelection(); mediaErr != nil {
+		return count, &securestore.CommitError{Outcome: securestore.Committed, Op: "reconcile committed media selection", Err: errors.Join(err, mediaErr)}
 	}
 	return count, err
 }

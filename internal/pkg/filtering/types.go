@@ -10,14 +10,15 @@ type FilterConfig struct {
 
 // FilterYAML represents a filter in YAML/JSON format
 type FilterYAML struct {
-	Radius        *RadiusFilterYAML `yaml:"radius,omitempty" json:"radius,omitempty"`
-	Revision      uint64            `yaml:"revision,omitempty" json:"revision,omitempty"`
-	ID            string            `yaml:"id" json:"id"`
-	Type          string            `yaml:"type" json:"type"`
-	Pattern       string            `yaml:"pattern" json:"pattern"`
-	TargetHunters []string          `yaml:"target_hunters,omitempty" json:"target_hunters,omitempty"`
-	Enabled       bool              `yaml:"enabled" json:"enabled"`
-	Description   string            `yaml:"description,omitempty" json:"description,omitempty"`
+	DistributionScope string            `yaml:"distribution_scope,omitempty" json:"distribution_scope,omitempty"`
+	Radius            *RadiusFilterYAML `yaml:"radius,omitempty" json:"radius,omitempty"`
+	Revision          uint64            `yaml:"revision,omitempty" json:"revision,omitempty"`
+	ID                string            `yaml:"id" json:"id"`
+	Type              string            `yaml:"type" json:"type"`
+	Pattern           string            `yaml:"pattern" json:"pattern"`
+	TargetHunters     []string          `yaml:"target_hunters,omitempty" json:"target_hunters,omitempty"`
+	Enabled           bool              `yaml:"enabled" json:"enabled"`
+	Description       string            `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
 // ValidFilterTypes contains all valid filter type strings

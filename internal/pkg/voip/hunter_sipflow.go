@@ -24,6 +24,7 @@ var errMissingSIPPacket = errors.New("hunter SIP sink received no packet")
 type hunterSelectionStore struct {
 	mu       sync.RWMutex
 	selected map[string]struct{}
+	current  func(string) bool
 }
 
 type hunterSelectionPolicy struct {
@@ -58,7 +59,7 @@ func (s *hunterSelectionStore) Selected(callID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	_, ok := s.selected[callID]
-	return ok
+	return ok && (s.current == nil || s.current(callID))
 }
 
 func (s *hunterSelectionStore) MarkSelected(callID string) {
@@ -73,7 +74,10 @@ func (s *hunterSelectionStore) Forget(callID string) {
 	s.mu.Unlock()
 }
 
-type hunterForwardSink struct{ forwarder PacketForwarder }
+type hunterForwardSink struct {
+	forwarder     PacketForwarder
+	capturePolicy *hunterCapturePolicy
+}
 
 // hunterDialogCompletionPolicy retains sticky selection after a BYE/CANCEL
 // request so the corresponding final response is still forwarded. The generic
@@ -86,6 +90,9 @@ func (hunterDialogCompletionPolicy) Completes(event sharedsip.Event) bool {
 }
 
 func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInput) pipeline.Result {
+	if s.capturePolicy != nil && s.capturePolicy.policies.Signalling == SignallingNone {
+		return pipeline.Result{Outcome: pipeline.OutcomeFiltered}
+	}
 	if err := ctx.Err(); err != nil {
 		return pipeline.Result{Outcome: pipeline.OutcomeShutdown, DropReason: pipeline.DropShutdown, Err: err}
 	}
@@ -97,6 +104,20 @@ func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInpu
 	if packet == nil {
 		return pipeline.Result{Outcome: pipeline.OutcomePermanentFailure, Err: errMissingSIPPacket}
 	}
+	if receipt, ok := input.Attachment.(remoteSignallingReceipt); ok {
+		var association RemoteCallAssociation
+		current := false
+		if s.capturePolicy != nil && s.capturePolicy.remote != nil {
+			association, current = s.capturePolicy.remote.ResolveSignalling(receipt.event, packet, env.Source.InterfaceName)
+		}
+		if !current || association.CallID != input.Result.CallID || !receipt.proof.SameSelection(association) {
+			if receipt.required {
+				return pipeline.Result{Outcome: pipeline.OutcomeFiltered}
+			}
+			association.InheritedFilterIDs = nil
+		}
+		setHunterFilterProvenance(env, env.DirectMatchedFilterIDs, association.InheritedFilterIDs)
+	}
 	metadata := &data.PacketMetadata{Sip: &data.SIPMetadata{
 		CallId: input.Result.CallID, FromUser: input.Result.FromUser, ToUser: input.Result.ToUser,
 		FromTag: input.Result.FromTag, ToTag: input.Result.ToTag, FromUri: input.Result.FromURI,
@@ -105,13 +126,27 @@ func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInpu
 		MediaPorts:   sharedsip.MediaPorts(input.Result.SDP),
 		ResponseCode: uint32(input.Result.ResponseCode), PAssertedIdentity: input.Result.PAssertedIdentity,
 	}}
-	if err := forwardPacketWithFilterProvenance(s.forwarder, packet, metadata, env.Source.InterfaceName, env.LinkType, env.DirectMatchedFilterIDs, env.InheritedMatchedFilterIDs); err != nil {
+	var selectionCurrent func() bool
+	if receipt, ok := input.Attachment.(remoteSignallingReceipt); ok && receipt.required {
+		selectionCurrent = func() bool {
+			if s.capturePolicy == nil || s.capturePolicy.remote == nil {
+				return false
+			}
+			current, valid := s.capturePolicy.remote.ResolveSignalling(receipt.event, packet, env.Source.InterfaceName)
+			return valid && receipt.proof.SameSelection(current)
+		}
+	}
+	if err := forwardPacketWithSelectionCheck(s.forwarder, packet, metadata, env.Source.InterfaceName, env.LinkType, env.DirectMatchedFilterIDs, env.InheritedMatchedFilterIDs, selectionCurrent); err != nil {
 		return pipeline.Result{Outcome: pipeline.OutcomeRetryableFailure, Err: err}
 	}
 	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
 }
 
 func newHunterSIPOrchestrator(forwarder PacketForwarder, policy callregistry.SelectionPolicy, stores ...*hunterSelectionStore) *sipflow.Orchestrator {
+	return newHunterPolicySIPOrchestrator(forwarder, policy, nil, stores...)
+}
+
+func newHunterPolicySIPOrchestrator(forwarder PacketForwarder, policy callregistry.SelectionPolicy, capturePolicy *hunterCapturePolicy, stores ...*hunterSelectionStore) *sipflow.Orchestrator {
 	store := newHunterSelectionStore()
 	if len(stores) > 0 {
 		store = stores[0]
@@ -124,7 +159,7 @@ func newHunterSIPOrchestrator(forwarder PacketForwarder, policy callregistry.Sel
 	if err != nil {
 		panic(err) // the static hunter composition is programmer-owned
 	}
-	if err := orchestrator.RegisterSink(hunterSIPSinkName, hunterForwardSink{forwarder: forwarder}, 256); err != nil {
+	if err := orchestrator.RegisterSink(hunterSIPSinkName, hunterForwardSink{forwarder: forwarder, capturePolicy: capturePolicy}, 256); err != nil {
 		panic(err)
 	}
 	if err := orchestrator.Start(context.Background()); err != nil {

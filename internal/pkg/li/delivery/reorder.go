@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/li"
+	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/google/uuid"
 )
 
@@ -48,6 +49,13 @@ type bufferedPDU struct {
 // Metadata carries the call incarnation by value; reorder neither creates nor
 // infers one from Call-ID, SSRC, or the local generation.
 type ReorderEntry struct {
+	// DeferredCopies share one ordered sequence allocation. Each permit still
+	// owns an independent destination product and its existing one-use gates.
+	DeferredCopies   []*AcceptedX3
+	DeferredSequence *x2x3.DeferredSequence
+	// ReserveCall is used only for persistent capture drain frontiers. Ordinary
+	// delivery relies on the current call admission instead of durable closure.
+	ReserveCall  bool
 	budgetCharge int64
 	// Accepted owns one prepared persistent destination copy. Reorder releases
 	// it on rejection/discard; delivery consumes it exactly once on handoff.
@@ -137,13 +145,13 @@ func (rb *ReorderBuffer) AcceptEntryX3AfterCommit(entry ReorderEntry, ssrc uint3
 			afterCommit()
 		}
 		if rb.onDiscard != nil {
-			rb.onDiscard(1)
+			rb.onDiscard(entry.deliveryCopies())
 		}
 		entry.releaseAccepted()
 		return false
 	}
 	newCall := false
-	if entry.Accepted != nil && entry.CallID != "" {
+	if (entry.Accepted != nil || (len(entry.DeferredCopies) != 0 && entry.ReserveCall)) && entry.CallID != "" {
 		newCall = rb.calls[callKey] == nil
 		if !callKey.valid() || rb.reserveCallLocked(callKey) == nil {
 			rb.mu.Unlock()
@@ -152,7 +160,7 @@ func (rb *ReorderBuffer) AcceptEntryX3AfterCommit(entry ReorderEntry, ssrc uint3
 			}
 			entry.releaseAccepted()
 			if rb.onDiscard != nil {
-				rb.onDiscard(1)
+				rb.onDiscard(entry.deliveryCopies())
 			}
 			return false
 		}
@@ -161,7 +169,7 @@ func (rb *ReorderBuffer) AcceptEntryX3AfterCommit(entry ReorderEntry, ssrc uint3
 	entry.Metadata.CallID = entry.CallID
 	entry.Metadata.CallGeneration = entry.Generation
 	key.callID = entry.CallID
-	charge := int64(len(pdu)) + reorderPacketCharge
+	charge := int64(len(pdu)) + reorderPacketCharge + int64(len(entry.DeferredCopies))*16
 	if !rb.budget.reserve(charge) {
 		if newCall {
 			delete(rb.calls, callKey)
@@ -172,7 +180,7 @@ func (rb *ReorderBuffer) AcceptEntryX3AfterCommit(entry ReorderEntry, ssrc uint3
 			afterCommit()
 		}
 		if rb.onDiscard != nil {
-			rb.onDiscard(1)
+			rb.onDiscard(entry.deliveryCopies())
 		}
 		entry.releaseAccepted()
 		return false
@@ -193,7 +201,7 @@ func (rb *ReorderBuffer) AcceptEntryX3AfterCommit(entry ReorderEntry, ssrc uint3
 				afterCommit()
 			}
 			if rb.onDiscard != nil {
-				rb.onDiscard(1)
+				rb.onDiscard(entry.deliveryCopies())
 			}
 			entry.releaseAccepted()
 			return false
@@ -206,6 +214,7 @@ func (rb *ReorderBuffer) AcceptEntryX3AfterCommit(entry ReorderEntry, ssrc uint3
 	// after afterCommit releases producer ownership. Own its bytes before that
 	// boundary just as we do for entries retained across a sequence gap.
 	entry.PDU = append([]byte(nil), entry.PDU...)
+	entry.DeferredCopies = append([]*AcceptedX3(nil), entry.DeferredCopies...)
 	var out []ReorderEntry
 	accepted := true
 	if !s.hasBase {
@@ -246,8 +255,8 @@ func (rb *ReorderBuffer) AcceptEntryX3AfterCommit(entry ReorderEntry, ssrc uint3
 	}
 	if !accepted {
 		entry.releaseAccepted()
-		if entry.Accepted != nil && rb.onDiscard != nil {
-			rb.onDiscard(1)
+		if (entry.Accepted != nil || len(entry.DeferredCopies) != 0) && rb.onDiscard != nil {
+			rb.onDiscard(entry.deliveryCopies())
 		}
 	}
 	rb.deliver(out, previous, done)
@@ -449,11 +458,12 @@ func (rb *ReorderBuffer) DiscardCall(callID string, generation uint64) int {
 			continue
 		}
 		rb.disarmLocked(stream)
-		discarded += len(stream.buffer)
 		for _, item := range stream.buffer {
+			discarded += item.entry.deliveryCopies()
 			item.entry.releaseAccepted()
+			rb.budget.release(item.entry.budgetCharge)
 		}
-		rb.budget.release(reorderStreamCharge + int64(stream.bytes) + int64(len(stream.buffer))*reorderPacketCharge)
+		rb.budget.release(reorderStreamCharge)
 		delete(rb.streams, key)
 	}
 	return discarded
@@ -477,11 +487,12 @@ func (rb *ReorderBuffer) DiscardCount() int {
 	discarded := 0
 	for _, s := range rb.streams {
 		rb.disarmLocked(s)
-		discarded += len(s.buffer)
 		for _, item := range s.buffer {
+			discarded += item.entry.deliveryCopies()
 			item.entry.releaseAccepted()
+			rb.budget.release(item.entry.budgetCharge)
 		}
-		rb.budget.release(reorderStreamCharge + int64(s.bytes) + int64(len(s.buffer))*reorderPacketCharge)
+		rb.budget.release(reorderStreamCharge)
 		clear(s.buffer)
 		s.bytes = 0
 	}

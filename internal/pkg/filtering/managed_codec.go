@@ -64,7 +64,7 @@ func managedSchema(encrypted bool) *managedShape {
 		"criteria": {kind: 'a', item: criterion, limit: maxManagedCriteria, count: 'c'},
 	}}
 	filter := &managedShape{kind: 'o', required: []string{"id", "type"}, fields: map[string]*managedShape{
-		"id": str, "type": str, "pattern": str, "revision": number, "enabled": boolean, "description": str, "radius": radius,
+		"id": str, "type": str, "pattern": str, "revision": number, "distribution_scope": str, "enabled": boolean, "description": str, "radius": radius,
 		"target_hunters": {kind: 'a', item: str, limit: maxManagedHunters, count: 'h'},
 	}}
 	root := &managedShape{kind: 'o', required: []string{"filters"}, fields: map[string]*managedShape{

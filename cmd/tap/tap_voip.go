@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
@@ -16,6 +17,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/admissionintegration"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor"
@@ -132,6 +134,10 @@ Example:
 func init() {
 	TapCmd.AddCommand(voipTapCmd)
 	cmdutil.RegisterMediaAdmissionFlags(voipTapCmd, viper.GetViper(), "tap.voip.rtp_ebpf")
+	voipTapCmd.Flags().String("signalling-policy", "matched", "SIP source policy: matched, all or none")
+	voipTapCmd.Flags().String("media-policy", "local", "Media selection authority: local or processor")
+	_ = viper.BindPFlag("tap.voip.signalling_policy", voipTapCmd.Flags().Lookup("signalling-policy"))
+	_ = viper.BindPFlag("tap.voip.media_policy", voipTapCmd.Flags().Lookup("media-policy"))
 
 	// VoIP-specific flags
 	// --sip-user is the new flag, --sipuser is deprecated
@@ -192,6 +198,14 @@ func init() {
 }
 
 func runVoIPTap(cmd *cobra.Command, args []string) error {
+	policies, err := tapCapturePolicies()
+	if err != nil {
+		return err
+	}
+	var interfaceDomains map[string]mediaadmission.DomainID
+	if err := viper.UnmarshalKey("tap.voip.interface_domains", &interfaceDomains); err != nil {
+		return fmt.Errorf("decode tap VoIP interface domains: %w", err)
+	}
 	admissionConfig, err := cmdutil.ReadMediaAdmissionConfig(viper.GetViper(), "tap.voip.rtp_ebpf")
 	if err != nil {
 		return err
@@ -257,6 +271,9 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid --rtp-port-range value: %w", err)
 		}
 
+		if policies.Media == voip.MediaProcessor && len(parsedRTPRanges) == 0 {
+			parsedRTPRanges = []voip.PortRange{{Start: 1, End: 65535}}
+		}
 		builder := voip.NewVoIPFilterBuilder()
 		filterConfig := voip.VoIPFilterConfig{
 			SIPPorts:      parsedSIPPorts,
@@ -510,6 +527,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	runtime, err := newTapRuntime(config, effectiveBPFFilter, protocolcatalog.MustLookup("voip"), tapRuntimeHooks{
 		ApplicationIPSelectors: admissionSession != nil,
+		ProcessorMedia:         policies.Media == voip.MediaProcessor,
 		ConfigureSourceConfig: func(cfg *source.LocalSourceConfig) {
 			if admissionSession != nil {
 				cfg.FilterInstaller = admissionSession.Installer()
@@ -525,14 +543,50 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	runtimeStarted := false
+	defer func() {
+		if !runtimeStarted {
+			if err := runtime.processor.Shutdown(); err != nil {
+				logger.Error("Close unstarted tap runtime", "error", err)
+			}
+		}
+	}()
 	localSource := runtime.localSource
 	appFilter := runtime.appFilter
-	if admissionSession != nil {
+	if admissionSession != nil && policies.Media != voip.MediaProcessor {
 		if err := appFilter.SetAdmissionObserver(func(prefixes []netip.Prefix, noFilters bool) error {
 			return admissionSession.UpdateSelectors(context.Background(), prefixes, noFilters)
 		}); err != nil {
 			return fmt.Errorf("initialize tap RTP selectors: %w", err)
 		}
+	}
+
+	var remoteRules *tapMediaRules
+	if policies.Media == voip.MediaProcessor {
+		ruleConfig := runtime.processor.MediaRuleConfiguration()
+		interfaceDomains, err = tapMediaDomains(ruleConfig, runtime.sourceConfig.Interfaces, interfaceDomains)
+		if err != nil {
+			return err
+		}
+		var controller *mediaadmission.Controller
+		if admissionSession != nil {
+			controller = admissionSession.Controller
+		}
+		remoteRules, err = newTapMediaRules(runtime.processor, ruleConfig, interfaceDomains, controller)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := remoteRules.Close(); err != nil {
+				logger.Error("Close tap media rules", "error", err)
+			}
+		}()
+	}
+	if len(interfaceDomains) > 0 {
+		localSource.SetObservationDomains(interfaceDomains)
+	}
+	if err := localSource.SetCapturePolicies(policies, remoteRules); err != nil {
+		return err
 	}
 
 	// Create VoIPProcessor for SIP/RTP metadata extraction
@@ -551,7 +605,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// calls are tracked, so the default suits a normal target set — make it
 	// tunable for deployments with many simultaneous targets.
 	voipProcConfig.MaxCalls = cmdutil.GetIntConfig("voip.max_calls", voipProcConfig.MaxCalls)
-	routing, err := newTapVoIPRouting(voipProcConfig, streamConfig, cmdutil.GetIntConfig("tap.voip.tcp_reassembly_shards", tcpReassemblyShards), admissionSession, callCompletionMonitorConfig.GracePeriod, runtime.sourceConfig.Interfaces)
+	routing, err := newTapVoIPRouting(voipProcConfig, streamConfig, cmdutil.GetIntConfig("tap.voip.tcp_reassembly_shards", tcpReassemblyShards), admissionSession, callCompletionMonitorConfig.GracePeriod, runtime.sourceConfig.Interfaces, tapVoIPSourcePolicy{Policies: policies, Resolver: remoteRules, InterfaceDomains: interfaceDomains})
 	if err != nil {
 		return err
 	}
@@ -591,7 +645,21 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		"tcp_performance_mode", tcpPerformanceMode,
 		"pattern_algorithm", patternAlgorithm)
 
-	runtime.startHook = routing.Start
+	var mediaLoop sync.WaitGroup
+	defer mediaLoop.Wait()
+	runtime.startHook = func(ctx context.Context) {
+		routing.Start(ctx)
+		if remoteRules != nil {
+			mediaLoop.Add(1)
+			go func() {
+				defer mediaLoop.Done()
+				if err := remoteRules.Run(ctx); err != nil && ctx.Err() == nil {
+					logger.Error("Tap media control stopped", "error", err)
+				}
+			}()
+		}
+	}
+	runtimeStarted = true
 	return runtime.run("VoIP Tap node", config)
 }
 
@@ -617,4 +685,34 @@ func tapSIPStreamConfig(cmd *cobra.Command) (voip.Config, error) {
 	}
 	config.MaxStreams = limit
 	return config, nil
+}
+
+func tapCapturePolicies() (voip.CapturePolicies, error) {
+	return (voip.CapturePolicies{Signalling: voip.SignallingPolicy(viper.GetString("tap.voip.signalling_policy")), Media: voip.MediaPolicy(viper.GetString("tap.voip.media_policy"))}).Normalize()
+}
+
+// Publication mappings are explicit source-domain authority. Source routing and
+// the in-process subscriber must use the same local numbering.
+func tapMediaDomains(config processor.MediaRulesConfig, interfaces []string, configured map[string]mediaadmission.DomainID) (map[string]mediaadmission.DomainID, error) {
+	result := make(map[string]mediaadmission.DomainID)
+	for _, id := range []string{"*", config.ProcessorID + "-local"} {
+		for _, mapping := range config.Sources {
+			if mapping.HunterID == id {
+				result[mapping.Interface] = mapping.HunterDomain
+			}
+		}
+	}
+	for _, list := range interfaces {
+		for _, iface := range strings.Split(list, ",") {
+			iface = strings.TrimSpace(iface)
+			domain, mapped := result[iface]
+			if !mapped {
+				return nil, fmt.Errorf("processor media requires an explicit local source mapping for interface %s", iface)
+			}
+			if supplied, ok := configured[iface]; ok && supplied != domain {
+				return nil, fmt.Errorf("tap local source mapping conflicts with interface domain for %s", iface)
+			}
+		}
+	}
+	return result, nil
 }

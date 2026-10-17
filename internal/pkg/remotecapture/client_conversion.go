@@ -248,22 +248,24 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 	}
 
 	return types.PacketDisplay{
-		Timestamp:  ts,
-		SrcIP:      srcIP,
-		SrcPort:    srcPort,
-		DstIP:      dstIP,
-		DstPort:    dstPort,
-		Protocol:   protocol,
-		Transport:  fields.Transport,
-		Length:     int(pkt.CaptureLength),
-		Info:       info,
-		RawData:    pkt.Data,
-		NodeID:     hunterID,  // Set node ID from batch
-		Interface:  ifaceName, // Interface where packet was captured
-		VoIPData:   voipData,  // VoIP metadata if applicable
-		DNSData:    dnsData,   // DNS metadata if applicable
-		LinkType:   linkType,  // Link layer type
-		RADIUSData: radiusData,
+		ObservationDomain:      pkt.ObservationDomain,
+		ObservationDomainKnown: pkt.ObservationDomainKnown,
+		Timestamp:              ts,
+		SrcIP:                  srcIP,
+		SrcPort:                srcPort,
+		DstIP:                  dstIP,
+		DstPort:                dstPort,
+		Protocol:               protocol,
+		Transport:              fields.Transport,
+		Length:                 int(pkt.CaptureLength),
+		Info:                   info,
+		RawData:                pkt.Data,
+		NodeID:                 hunterID,  // Set node ID from batch
+		Interface:              ifaceName, // Interface where packet was captured
+		VoIPData:               voipData,  // VoIP metadata if applicable
+		DNSData:                dnsData,   // DNS metadata if applicable
+		LinkType:               linkType,  // Link layer type
+		RADIUSData:             radiusData,
 	}
 }
 

@@ -3,6 +3,7 @@
 package filtering
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/endorses/lippycat/api/gen/management"
@@ -299,4 +300,32 @@ func TestSnapshotPolicyUsesCoordinator(t *testing.T) {
 	require.Empty(t, manager.GetFilters())
 	require.Equal(t, 1, coordinator.calls)
 	require.Equal(t, 1, restarter.calls)
+}
+
+func TestSourceFilterConstraintRejectsInitialAndHotUpdates(t *testing.T) {
+	restarter := &recordingRestarter{}
+	updater := &recordingApplicationUpdater{}
+	manager := New("hunter", restarter, noopDisconnectMarker{})
+	manager.SetApplicationFilterUpdater(updater)
+	manager.SetFilterValidator(func(filters []*management.Filter) error {
+		for _, filter := range filters {
+			if filter.Type == management.FilterType_FILTER_IP_ADDRESS {
+				return errors.New("independent selector conflicts with source policy")
+			}
+		}
+		return nil
+	})
+	selected := &management.Filter{Id: "target", Type: management.FilterType_FILTER_SIP_USER, Enabled: true, Pattern: "alice"}
+	broad := &management.Filter{Id: "broad", Type: management.FilterType_FILTER_IP_ADDRESS, Enabled: true, Pattern: "192.0.2.0/24"}
+	require.Error(t, manager.SetInitialFilters([]*management.Filter{broad}))
+	require.Empty(t, manager.GetFilters())
+	require.Zero(t, updater.calls)
+	require.NoError(t, manager.SetInitialFilters([]*management.Filter{selected}))
+	require.Len(t, manager.GetFilters(), 1)
+	manager.handleUpdate(&management.FilterUpdate{UpdateType: management.FilterUpdateType_UPDATE_ADD, Filter: broad})
+	require.Equal(t, []*management.Filter{selected}, manager.GetFilters())
+	require.Equal(t, 1, updater.calls)
+	manager.handleUpdate(&management.FilterUpdate{Snapshot: true, Filters: []*management.Filter{broad}})
+	require.Equal(t, []*management.Filter{selected}, manager.GetFilters())
+	require.Equal(t, 1, updater.calls)
 }

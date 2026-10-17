@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLIProducerCarriesCallIncarnationToEveryReorderDestination(t *testing.T) {
+func TestLIProducerCarriesCallIncarnationToSharedReorderFanout(t *testing.T) {
 	for _, shared := range []bool{false, true} {
 		t.Run(fmt.Sprintf("shared-admission-%t", shared), func(t *testing.T) {
 			p, xid, filterID := newLIProcessor(t, li.DeliveryX3Only)
@@ -37,10 +37,13 @@ func TestLIProducerCarriesCallIncarnationToEveryReorderDestination(t *testing.T)
 			require.NoError(t, client.Err())
 			previousManager, previousClient := liDeliveryMgr, liDeliveryClient
 			liDeliveryMgr, liDeliveryClient = manager, client
+			task, err = p.liManager.GetTaskDetails(xid)
+			require.NoError(t, err)
+			key := liOrderedBufferKey(xid, task.ActivationGeneration)
 			var buffers []*delivery.ReorderBuffer
 			t.Cleanup(func() {
-				for n, buffer := range buffers {
-					liReorderBuffers.Delete(fmt.Sprintf("%s-%s", xid, destinations[n]))
+				for _, buffer := range buffers {
+					liReorderBuffers.Delete(key)
 					buffer.Stop()
 					buffer.Wait()
 				}
@@ -53,10 +56,10 @@ func TestLIProducerCarriesCallIncarnationToEveryReorderDestination(t *testing.T)
 				dest, err := p.liManager.GetDestination(did)
 				require.NoError(t, err)
 				require.NoError(t, manager.AddDestination(dest))
-				buffer := delivery.NewCallAwareReorderBuffer(func(entry delivery.ReorderEntry) { output <- entry }, time.Hour)
-				buffers = append(buffers, buffer)
-				liReorderBuffers.Store(fmt.Sprintf("%s-%s", xid, did), buffer)
 			}
+			buffer := delivery.NewCallAwareReorderBuffer(func(entry delivery.ReorderEntry) { output <- entry }, time.Hour)
+			buffers = append(buffers, buffer)
+			liReorderBuffers.Store(key, buffer)
 			admission, err := p.callLifecycle.Admit(dirCallID)
 			require.NoError(t, err)
 			defer admission.Release()
@@ -68,9 +71,10 @@ func TestLIProducerCarriesCallIncarnationToEveryReorderDestination(t *testing.T)
 			}
 			packet := dirRTPPacket(9, dirCoreAddr, dirCorePort, dirGWAddr, dirGWPort)
 			p.processLIPacketWithAdmission(packet, nil, []string{filterID}, borrowed)
-			for range destinations {
+			for range 1 {
 				select {
 				case entry := <-output:
+					require.Len(t, entry.DeferredCopies, len(destinations), "all destinations share the same ordered call identity")
 					require.Equal(t, admission.Incarnation(), entry.Metadata.CallIncarnation)
 					require.NotEqual(t, uuid.Nil, entry.Metadata.CallIncarnation)
 					require.Equal(t, admission.Generation(), entry.Metadata.CallGeneration)

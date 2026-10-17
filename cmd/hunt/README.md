@@ -832,3 +832,19 @@ arbitrary old captures with identical unbound wire identities.
 See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
 semantics, platform/privilege requirements, observation domains, configuration,
 failure states and verification status.
+
+## Independent SIP forwarding and processor-selected media
+
+`hunt voip` accepts `--signalling-policy matched|all|none` and
+`--media-policy local|processor`. Defaults remain `matched` and `local`.
+Use `all` explicitly when eligible candidate SIP must reach a processor that
+keeps identity filters local; existing capture restrictions still apply.
+Processor-selected media requires current temporary rules, explicit source/domain
+mapping and verified mutual TLS with the configured processor identity.
+
+Configure policies under `hunter.voip`, the independent interface map under
+`hunter.voip.interface_domains`, and subscription limits under
+`hunter.voip.media_rules`. Existing eBPF domain maps must agree. Reconnection does
+not extend expired rules, and unsupported peers do not authorize remote media.
+See [distributed media selection](../../docs/DISTRIBUTED_MEDIA.md) for complete
+processor/hunter configurations, expiry, buffering and duplicate coverage.

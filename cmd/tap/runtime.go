@@ -27,6 +27,7 @@ import (
 // tapRuntimeHooks binds flag-derived setup hooks to a catalog protocol. It is
 // topology wiring, not a second protocol specification.
 type tapRuntimeHooks struct {
+	ProcessorMedia         bool
 	ApplicationIPSelectors bool
 	ConfigureGPU           func(GPUConfig) GPUConfig
 	ConfigureSource        func(*source.LocalSource)
@@ -69,6 +70,15 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 	}
 	if err := viper.UnmarshalKey("tap.packets.receiver", &config.PacketCustody); err != nil {
 		return nil, fmt.Errorf("decode raw packet custody: %w", err)
+	}
+	if err := viper.UnmarshalKey("tap.voip.media_rules", &config.MediaRules); err != nil {
+		return nil, fmt.Errorf("decode media rule publication: %w", err)
+	}
+	if hooks.ProcessorMedia {
+		config.MediaRules.Enabled = true
+	}
+	if err := viper.UnmarshalKey("tap.packet_dedup", &config.PacketDedup); err != nil {
+		return nil, fmt.Errorf("decode packet duplicate suppression: %w", err)
 	}
 	if err := viper.UnmarshalKey("li.handover", &config.LIHandover); err != nil {
 		return nil, fmt.Errorf("decode LI handover policy: %w", err)
@@ -139,7 +149,7 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 
 	sourceConfig.BPFFilter = effectiveBPF
 	localSource := source.NewLocalSource(sourceConfig)
-	localTarget = filtering.NewLocalTarget(filtering.LocalTargetConfig{BaseBPF: effectiveBPF, ApplicationIPSelectors: hooks.ApplicationIPSelectors})
+	localTarget = filtering.NewLocalTarget(filtering.LocalTargetConfig{BaseBPF: effectiveBPF, ApplicationIPSelectors: hooks.ApplicationIPSelectors, CentralOnlyFilters: config.MediaRules.Enabled, ProcessorMedia: hooks.ProcessorMedia})
 	localTarget.SetBPFUpdater(localSource)
 	if err := localTarget.SetTransportExclusion(exclusions.Filter()); err != nil {
 		return nil, errors.Join(err, p.Shutdown())

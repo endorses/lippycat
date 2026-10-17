@@ -17,12 +17,13 @@ func (c *FilterClient) List(opts ListOptions) ([]*management.Filter, error) {
 	ctx, cancel := c.context()
 	defer cancel()
 
-	// Use GetFilters RPC - works for both direct and targeted queries
-	req := &management.FilterRequest{
+	// Empty ProcessorId selects the connected processor. Administrative queries
+	// retain local-only filters; GetFilters is reserved for hunter distribution.
+	req := &management.ProcessorFilterQuery{
 		HunterId: opts.HunterID,
 	}
 
-	resp, err := c.client.GetFilters(ctx, req)
+	resp, err := c.client.GetFiltersFromProcessor(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list filters: %w", err)
 	}

@@ -4,7 +4,7 @@
 PROTOC = protoc
 
 # Protobuf files
-PROTO_FILES = data.proto management.proto events/v1/events.proto
+PROTO_FILES = data.proto management.proto media.proto events/v1/events.proto
 
 # Output directory for generated Go files
 OUT_DIR = ../gen
@@ -24,6 +24,9 @@ all: check-deps $(OUT_DIR)/data $(OUT_DIR)/management $(OUT_DIR)/events/v1
 	$(PROTOC) --go_out=$(OUT_DIR)/management --go_opt=paths=source_relative \
 		--go-grpc_out=$(OUT_DIR)/management --go-grpc_opt=paths=source_relative \
 		management.proto
+	$(PROTOC) --go_out=$(OUT_DIR)/management --go_opt=paths=source_relative \
+		--go-grpc_out=$(OUT_DIR)/management --go-grpc_opt=paths=source_relative \
+		media.proto
 	$(PROTOC) --go_out=$(OUT_DIR) --go_opt=paths=source_relative \
 		--go-grpc_out=$(OUT_DIR) --go-grpc_opt=paths=source_relative \
 		events/v1/events.proto

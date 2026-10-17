@@ -37,6 +37,7 @@ func ResetFromPacketInfo(e *pipeline.PacketEnvelope, info capture.PacketInfo, ki
 	e.ResetDecodedPacket(info.Packet, linkType)
 	e.RADIUS = info.RADIUS.Clone()
 	e.Source = pipeline.SourceProvenance{Kind: sourceKind, InterfaceName: info.Interface, InputFile: info.SourcePath, InterfaceIndex: info.SourceInterfaceID, ArgumentIndex: info.SourceIndex, LogicalSequence: info.SourceSequence, PacketProvenance: info.Provenance}
+	e.Source.CapturePolicyGeneration = capture.CapturePolicyGeneration(info.Packet)
 }
 
 // ToPacketInfo converts an envelope back to the existing local capture record.

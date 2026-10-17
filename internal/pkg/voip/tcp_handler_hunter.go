@@ -13,6 +13,7 @@ import (
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	mediaadaptor "github.com/endorses/lippycat/internal/pkg/voip/admission"
+	"github.com/endorses/lippycat/internal/pkg/voip/capturepolicy"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -23,10 +24,32 @@ type PacketForwarder interface {
 	ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType) error
 }
 
+// PacketForwarderWithObservedCaptureBoundary serializes asynchronous state mutation
+// with capture-policy replacement and rejects stale source observations.
+type PacketForwarderWithObservedCaptureBoundary interface {
+	WithObservedCaptureBoundary(uint64, func() bool) bool
+}
+
 // PacketForwarderWithFilterProvenance is implemented by forwarders that can
 // preserve direct versus call-inherited filter evidence across gRPC.
 type PacketForwarderWithFilterProvenance interface {
 	ForwardPacketWithFilterProvenance(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) error
+}
+
+// PacketForwarderWithSelectionCheck preserves a current temporary selection
+// check until the forwarding producer seals a batch or durable spool record.
+type PacketForwarderWithSelectionCheck interface {
+	ForwardPacketWithSelectionCheck(gopacket.Packet, *data.PacketMetadata, string, layers.LinkType, []string, []string, func() bool) error
+}
+
+func forwardPacketWithSelectionCheck(forwarder PacketForwarder, packet gopacket.Packet, metadata *data.PacketMetadata, iface string, link layers.LinkType, direct, inherited []string, current func() bool) error {
+	if checked, ok := forwarder.(PacketForwarderWithSelectionCheck); ok {
+		return checked.ForwardPacketWithSelectionCheck(packet, metadata, iface, link, direct, inherited, current)
+	}
+	if current != nil && !current() {
+		return nil
+	}
+	return forwardPacketWithFilterProvenance(forwarder, packet, metadata, iface, link, direct, inherited)
 }
 
 type packetFilterWithIDs interface {
@@ -63,6 +86,7 @@ func forwardPacketWithFilterProvenance(forwarder PacketForwarder, packet gopacke
 // HunterForwardHandler handles SIP messages for hunter mode (lc hunt voip)
 // It checks filters, extracts metadata, and forwards matched calls to processor
 type HunterForwardHandler struct {
+	capturePolicy    *hunterCapturePolicy
 	admission        *mediaadaptor.Bridge
 	captureInterface string
 	tracker          *CallTracker
@@ -80,12 +104,17 @@ func NewHunterForwardHandler(tracker *CallTracker, forwarder PacketForwarder, bu
 		tracker.sdpReporter.Disable()
 	}
 	h := &HunterForwardHandler{
+		capturePolicy:   defaultHunterCapturePolicy(),
 		tracker:         tracker,
 		forwarder:       forwarder,
 		bufferMgr:       bufferMgr,
 		selectionPolicy: newHunterSelectionPolicy(),
 	}
-	h.orchestrator = newHunterSIPOrchestrator(forwarder, h.selectionPolicy)
+	store := newHunterSelectionStore()
+	if bufferMgr != nil {
+		store.current = bufferMgr.SelectionProofCurrent
+	}
+	h.orchestrator = newHunterPolicySIPOrchestrator(forwarder, h.selectionPolicy, h.capturePolicy, store)
 	return h
 }
 
@@ -94,6 +123,9 @@ func NewHunterForwardHandler(tracker *CallTracker, forwarder PacketForwarder, bu
 // This supports all filter types including phone_number, sip_user, sipuri, ip_address, etc.
 func (h *HunterForwardHandler) SetApplicationFilter(filter ApplicationFilter) {
 	h.appFilter = filter
+	if h.bufferMgr != nil {
+		h.bufferMgr.SetSelectionProofMatcher(filter)
+	}
 }
 
 func (h *HunterForwardHandler) SetSelectionPolicy(policy callregistry.SelectionPolicy) {
@@ -124,14 +156,29 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 }
 
 func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
-	return h.handleSIPMessage(sipMessage, nil, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, capturedAt)
+	return h.handleSIPMessage(sipMessage, nil, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, capturedAt, pipeline.SourceProvenance{})
 }
 
 func (h *HunterForwardHandler) HandleParsedSIPMessage(sipMessage []byte, event sharedsip.Event, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
-	return h.handleSIPMessage(sipMessage, &event, event.CallID, srcEndpoint, dstEndpoint, netFlow, transportFlow, event.Timestamp)
+	return h.HandleParsedSIPMessageFromSource(sipMessage, event, srcEndpoint, dstEndpoint, netFlow, transportFlow, pipeline.SourceProvenance{})
 }
 
-func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *sharedsip.Event, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
+// HandleParsedSIPMessageFromSource preserves the completing segment source even
+// when several interfaces share one observation-domain reassembly context.
+func (h *HunterForwardHandler) HandleParsedSIPMessageFromSource(message []byte, event sharedsip.Event, src, dst string, nf, tf gopacket.Flow, source pipeline.SourceProvenance) bool {
+	return h.handleSIPMessage(message, &event, event.CallID, src, dst, nf, tf, event.Timestamp, source)
+}
+
+func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *sharedsip.Event, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time, source pipeline.SourceProvenance) bool {
+	if guarded, ok := h.forwarder.(PacketForwarderWithObservedCaptureBoundary); ok {
+		return guarded.WithObservedCaptureBoundary(source.CapturePolicyGeneration, func() bool {
+			return h.handleObservedSIPMessage(sipMessage, event, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, capturedAt, source)
+		})
+	}
+	return h.handleObservedSIPMessage(sipMessage, event, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, capturedAt, source)
+}
+
+func (h *HunterForwardHandler) handleObservedSIPMessage(sipMessage []byte, event *sharedsip.Event, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time, source pipeline.SourceProvenance) bool {
 	if callID == "" {
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
@@ -149,10 +196,20 @@ func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *shared
 		return false
 	}
 
-	if h.admission != nil {
+	pkt.Interface = source.InterfaceName
+	if pkt.Interface == "" {
 		pkt.Interface = h.captureInterface
 	}
-	directMatch, directFilterIDs := matchPacketWithIDs(h.appFilter, pkt.Packet)
+	pkt.SourceInterfaceID = source.InterfaceIndex
+	pkt.SourcePath = source.InputFile
+	pkt.SourceIndex = source.ArgumentIndex
+	pkt.SourceSequence = source.LogicalSequence
+	capture.StampCapturePolicy(pkt.Packet, source.CapturePolicyGeneration)
+	if handled, forwarded := h.capturePolicy.policySIP(pkt, event, sipMessage, callID, sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint), h.appFilter, h.orchestrator, h.tracker, h.bufferMgr, h.admission); handled {
+		discardTCPBufferedPackets(netFlow, transportFlow)
+		return forwarded
+	}
+	directMatch, directFilterIDs, selectionProof := matchPacketWithSelectionProof(h.appFilter, pkt.Packet)
 	var inheritedFilterIDs []string
 	if h.bufferMgr != nil {
 		inheritedFilterIDs = h.bufferMgr.MatchedFilterIDs(callID)
@@ -175,7 +232,7 @@ func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *shared
 		return false
 	}
 	if directMatch && h.bufferMgr != nil {
-		h.bufferMgr.StoreMatchedFilterIDs(callID, directFilterIDs)
+		h.bufferMgr.StoreMatchedSelection(callID, directFilterIDs, selectionProof)
 	}
 	result, method := analysis.SIP, analysis.SIP.Method
 	// Every selected TCP dialog needs an immutable registry lifetime, including
@@ -237,4 +294,17 @@ func (h *HunterForwardHandler) matchesMessage(pkt capture.PacketInfo, headers ma
 	}
 	// Legacy fallback: use sipusers.IsSurveiled() via containsUserInHeaders()
 	return containsUserInHeaders(headers)
+}
+
+// SetCapturePolicies configures independent source policies before capture starts.
+func (h *HunterForwardHandler) SetCapturePolicies(p CapturePolicies, resolver RemoteMediaResolver) error {
+	return h.capturePolicy.set(p, resolver)
+}
+
+func matchPacketWithSelectionProof(filter ApplicationFilter, packet gopacket.Packet) (bool, []string, capturepolicy.FilterSelectionProof) {
+	if matcher, ok := filter.(capturepolicy.SelectionProofMatcher); ok {
+		return matcher.MatchPacketWithSelectionProof(packet)
+	}
+	matched, ids := matchPacketWithIDs(filter, packet)
+	return matched, ids, nil
 }

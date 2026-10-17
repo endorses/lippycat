@@ -24,6 +24,7 @@
 - [Central Aggregation with `lc process`](part3-distributed/process.md)
 - [Standalone Mode with `lc tap`](part3-distributed/tap.md)
 - [Failover and Reliable Delivery](part3-distributed/processor-failover.md)
+- [Distributed Media Selection](part3-distributed/media-selection.md)
 
 ---
 

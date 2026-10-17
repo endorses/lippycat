@@ -31,10 +31,13 @@ func (h *Hunter) configureReliablePackets() error {
 		return err
 	}
 	h.config.Packets = config
-	if h.config.FilterPolicy.Owner == "li" && (config.DeliveryProfile != "reliable" || config.Spool.Protection != "encrypted" || h.config.ForwardMode != "packets" || h.config.VoIPMode) {
-		return errors.New("LI-owned capture currently requires reliable encrypted raw packets with synchronous packet filtering")
+	if h.config.FilterPolicy.Owner == "li" && (config.DeliveryProfile != "reliable" || config.Spool.Protection != "encrypted" || h.config.ForwardMode != "packets") {
+		return errors.New("LI-owned capture requires reliable encrypted raw packets")
 	}
 	if h.config.FilterPolicy.Owner == "li" {
+		if h.config.VoIPSignallingPolicy == "all" {
+			return errors.New("LI-owned capture requires task-selected signalling; signalling-policy all is unsupported")
+		}
 		if h.config.NoFilterPolicy != "" && h.config.NoFilterPolicy != "deny" {
 			return errors.New("LI-owned capture requires no-filter-policy deny")
 		}
@@ -178,7 +181,7 @@ func (h *Hunter) Close() error {
 }
 
 func (h *Hunter) packetForwardingConfig() forwarding.Config {
-	return forwarding.Config{RADIUSPorts: h.config.RADIUSPorts, RADIUSScope: h.config.RADIUSScope, RADIUSOnly: h.config.RADIUSOnly, RADIUSCorrelation: h.config.RADIUSCorrelation, RADIUSMatcher: h.config.RADIUSMatcher, HunterID: h.config.HunterID, BatchSize: h.config.BatchSize, BatchTimeout: h.config.BatchTimeout, BufferSize: h.config.BufferSize, DiskBufferEnabled: h.config.DiskBufferEnabled, DiskBufferDir: h.config.DiskBufferDir, DiskBufferMaxSize: h.config.DiskBufferMaxSize, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers"), CaptureAllowed: h.filterManager.CaptureAllowed, InitialCapturePolicy: h.filterManager.EffectiveCapturePolicy()}
+	return forwarding.Config{ObservationDomain: h.captureObservationDomain, ValidateCaptureSelection: h.captureSelectionAllowed, RequireCaptureProvenance: h.config.FilterPolicy.Owner == "li", RADIUSPorts: h.config.RADIUSPorts, RADIUSScope: h.config.RADIUSScope, RADIUSOnly: h.config.RADIUSOnly, RADIUSCorrelation: h.config.RADIUSCorrelation, RADIUSMatcher: h.config.RADIUSMatcher, HunterID: h.config.HunterID, BatchSize: h.config.BatchSize, BatchTimeout: h.config.BatchTimeout, BufferSize: h.config.BufferSize, DiskBufferEnabled: h.config.DiskBufferEnabled, DiskBufferDir: h.config.DiskBufferDir, DiskBufferMaxSize: h.config.DiskBufferMaxSize, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers"), CaptureAllowed: h.filterManager.CaptureAllowed, InitialCapturePolicy: h.filterManager.EffectiveCapturePolicy()}
 }
 
 // ApplyCaptureSnapshot keeps signed authority changes on the same boundary as

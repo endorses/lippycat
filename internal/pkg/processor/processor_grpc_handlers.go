@@ -48,6 +48,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
@@ -107,6 +108,7 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 			return status.Errorf(codes.InvalidArgument, "invalid packet batch: %v", err)
 		}
 		internalBatch.RADIUSSourceTrusted = radiusStreamSourceTrusted(stream.Context(), batch.HunterId)
+		internalBatch.MediaSourceTrusted = internalBatch.RADIUSSourceTrusted
 		p.processBatch(internalBatch)
 		if p.filterProcessingBlocked() {
 			return status.Error(codes.Unavailable, "filter policy is faulted; packet processing blocked")
@@ -376,14 +378,20 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 }
 
 // GetFilters retrieves filters for a hunter (Management Service)
-// If hunter_id is empty, returns all filters (for CLI/administrative use).
+// If hunter_id is empty, returns all distributable filters. Administrative
+// clients use GetFiltersFromProcessor to include processor-local filters.
 // If hunter_id is specified, returns only filters applicable to that hunter
 // after filtering by target hunters and capability compatibility.
 func (p *Processor) GetFilters(ctx context.Context, req *management.FilterRequest) (*management.FilterResponse, error) {
 	var filters []*management.Filter
 	if req.HunterId == "" {
-		// Return all filters for CLI/administrative queries
-		filters = p.filterManager.GetAll()
+		// This RPC permits hunter credentials, including older peers with an
+		// empty request. An omitted hunter ID must never expose local selectors.
+		for _, filter := range p.filterManager.GetAll() {
+			if sharedfilter.IsDistributedFilter(filter) {
+				filters = append(filters, filter)
+			}
+		}
 	} else {
 		// Return filters filtered by hunter capabilities and targeting
 		filters = p.filterManager.GetForHunter(req.HunterId)
@@ -477,6 +485,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			ConnectedDurationSec: durationSec,
 			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
+				MediaRules:                    p.remoteMediaRuleStatus(h.ID),
 				RtpEbpf:                       p.hunterManager.AdmissionStatus(h.ID),
 				PacketsCaptured:               h.PacketsCaptured, // From hunter's heartbeat stats
 				PacketsMatched:                h.PacketsMatched,
@@ -752,6 +761,7 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 			ConnectedDurationSec: durationSec,
 			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
+				MediaRules:                    p.remoteMediaRuleStatus(h.ID),
 				RtpEbpf:                       p.hunterManager.AdmissionStatus(h.ID),
 				PacketsCaptured:               h.PacketsCaptured,
 				PacketsMatched:                h.PacketsMatched,
@@ -1349,6 +1359,11 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 		logger.Info("New packet subscriber (all hunters - no filter)", "client_id", clientID)
 	}
 
+	// Register eligibility before queue acceptance for optional per-subscriber
+	// duplicate suppression. Stream filtering remains the final verification.
+	if bpfFilter != nil {
+		p.subscriberManager.SetPacketEligibility(clientID, bpfFilter.Match)
+	}
 	// Create channel for this subscriber
 	subChan := p.subscriberManager.Add(clientID)
 

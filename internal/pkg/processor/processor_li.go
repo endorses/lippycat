@@ -22,6 +22,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/li/delivery"
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/packetdedup"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/voip"
@@ -38,7 +39,7 @@ var (
 	liDeliveryClient *delivery.Client
 	liReorderBudget  *delivery.ReorderBudget
 	liReorderWorkers *sync.WaitGroup
-	liReorderBuffers sync.Map // map[string]*delivery.ReorderBuffer keyed by "xid-destID"
+	liReorderBuffers sync.Map // one shared RTP ordering stage per task activation
 	// liMediaDirection derives the Payload Direction of RTP media for
 	// identity-based targets from the call's observed SIP signalling.
 	liMediaDirection *li.MediaDirectionResolver
@@ -147,6 +148,7 @@ type liStoragePreparation struct {
 	captureEpoch        uuid.UUID
 	observationSequence atomic.Uint64
 	packetProvenance    sync.Map // active non-call packet only; removed before producer returns
+	packetDedup         sync.Map // trusted synchronous observation; cloned at async correlation boundary
 }
 
 // initLIManager constructs only this processor's administrative coordinator.
@@ -322,6 +324,13 @@ func (p *Processor) initLIRuntime() {
 		if li.IsRADIUSTask(task) {
 			return
 		}
+		claim, suppress := p.beginLITaskDedup(task, pkt)
+		if suppress {
+			return
+		}
+		if claim != nil {
+			defer claim.Abort()
+		}
 		metadata := li.DeliveryMetadata{StateIncarnation: p.liManager.StateIncarnation(), AdmittedAt: time.Now(), CapturedAt: pkt.Timestamp, TaskGeneration: task.ActivationGeneration, TaskEndAt: li.TaskAuthorizationCutoff(task)}
 		if shared, ok := p.liPacketAdmissions.Load(pkt); ok {
 			admission := shared.(*CallAdmission)
@@ -390,7 +399,12 @@ func (p *Processor) initLIRuntime() {
 				if err != nil {
 					logger.Warn("X2 PDU marshal error", "xid", task.XID, "error", err)
 				} else if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
-					if err := liDeliveryClient.SendX2WithMetadataAndPublication(task.XID, task.DestinationIDs, data, metadata, func() { p.publishLICorrelation(decision) }); err != nil {
+					if err := liDeliveryClient.SendX2WithMetadataAndPublication(task.XID, task.DestinationIDs, data, metadata, func() {
+						p.publishLICorrelation(decision)
+						if claim != nil {
+							claim.Commit()
+						}
+					}); err != nil {
 						logger.Debug("X2 delivery queued failed", "xid", task.XID, "error", err)
 					} else {
 						logger.Debug("X2 IRI queued",
@@ -441,165 +455,43 @@ func (p *Processor) initLIRuntime() {
 				callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
 				callsAny.(*sync.Map).LoadOrStore(callID, struct{}{})
 			}
-			var pdu *x2x3.PDU
-			var err error
+			var correlationID *uint64
 			if decision != nil && decision.CallID != "" {
-				pdu, err = liX3Encoder.EncodeCCWithCorrelationID(pkt, task.XID, decision.CorrelationID)
-			} else {
-				pdu, err = liX3Encoder.EncodeCC(pkt, task.XID)
+				correlationID = &decision.CorrelationID
 			}
+			pdu, sequence, err := liX3Encoder.EncodeCCDeferred(pkt, task.XID, correlationID)
 			if err != nil {
 				liX3Errors.Add(1)
-				logger.Debug("X3 encode error",
-					"xid", task.XID,
-					"error", err,
-				)
-			} else if pdu != nil {
-				liX3Encoded.Add(1)
-				attrBuilder := x2x3.NewAttributeBuilder()
-				// Matched target identifier (ETSI attr 17) and Payload Direction.
-				// Only set when the task has a single target, so the identity is
-				// unambiguous; with multiple targets the MDF falls back to the XID
-				// and the direction stays Unknown. RTP carries no SIP identity, so
-				// for an identity target the direction comes from the media
-				// endpoints learned from the call's signalling, resolved once per
-				// SSRC; it stays Unknown when that signalling was not observed.
-				if len(task.Targets) == 1 {
-					pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(task.Targets[0].Value))
-					pdu.Header.PayloadDirection = liMediaDirection.PayloadDirection(task.XID, task.Targets[0], pkt)
-				}
-				data, err := pdu.MarshalBinary()
-				if err != nil {
-					logger.Warn("X3 PDU marshal error", "xid", task.XID, "error", err)
-				} else if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
-					// Route through reorder buffer per destination
-					if p.config.LIDeliveryX3SpoolDir != "" {
-						p.deliverPersistentX3WithPublication(task, pkt, data, metadata, admission, func() { p.publishLICorrelation(decision) })
-						return
-					}
-					ssrc := pkt.VoIPData.SSRC
-					rtpSeq := pkt.VoIPData.SequenceNum
-					generation := uint64(0)
-					if admission != nil {
-						generation = admission.Generation()
-						metadata.CallIncarnation = admission.Incarnation()
-					}
-					for destinationIndex, destID := range task.DestinationIDs {
-						did := destID // capture for closure
-						insertionTaskAdmission := taskAdmission
-						insertionCallAdmission := admission
-						insertionOwnsCallAdmission := ownsAdmission
-						if destinationIndex > 0 {
-							var taskStillActive bool
-							insertionTaskAdmission, taskStillActive = p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
-							if !taskStillActive {
-								return
-							}
-							if ownsAdmission && callID != "" && p.callLifecycle != nil {
-								var insertionErr error
-								insertionCallAdmission, insertionErr = p.callLifecycle.AdmitGeneration(callID, generation)
-								if insertionErr != nil {
-									insertionTaskAdmission.Release()
-									recordLateX3Suppression(callID, generation, "destination_admission")
-									return
-								}
-								insertionOwnsCallAdmission = true
-							}
-						}
-						destination, destinationErr := liDeliveryMgr.GetDestination(did)
-						if destinationErr != nil || !delivery.DestinationAcceptsPDU(destination, delivery.PDUTypeX3) {
-							insertionTaskAdmission.Release()
-							if insertionOwnsCallAdmission && insertionCallAdmission != nil {
-								insertionCallAdmission.Release()
-							}
-							if destinationErr != nil {
-								recordBufferedX3Discard(1)
-							}
-							continue
-						}
-						bufKey := fmt.Sprintf("%s-%s", task.XID, did)
-						buf, loaded := liReorderBuffers.Load(bufKey)
-						if !loaded {
-							candidate := delivery.NewBudgetedCallAwareReorderBuffer(
-								func(entry delivery.ReorderEntry) {
-									deliveryTaskAdmission, taskStillActive := p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
-									if !taskStillActive {
-										// The reorder buffer may have drained this entry just
-										// before task finalization acquired its barrier. In that
-										// case DiscardCount cannot see it, so this callback owns
-										// the entry's single terminal accounting event.
-										recordBufferedX3Discard(1)
-										return
-									}
-									defer deliveryTaskAdmission.Release()
-
-									var sendAdmission *CallAdmission
-									if entry.CallID != "" && p.callLifecycle != nil {
-										var sendErr error
-										sendAdmission, sendErr = p.callLifecycle.AdmitGeneration(entry.CallID, entry.Generation)
-										if sendErr != nil {
-											recordLateX3Suppression(entry.CallID, entry.Generation, "delayed_send_admission")
-											return
-										}
-										defer sendAdmission.Release()
-									}
-									dids := []uuid.UUID{did}
-									if sendErr := liDeliveryClient.SendX3WithMetadata(task.XID, dids, entry.PDU, entry.Metadata); sendErr != nil {
-										logger.Debug("X3 delivery failed", "xid", task.XID, "error", sendErr)
-									}
-								},
-								60*time.Millisecond, liReorderBudget, recordBufferedX3Discard,
-							)
-							if candidate == nil {
-								insertionTaskAdmission.Release()
-								if insertionOwnsCallAdmission && insertionCallAdmission != nil {
-									insertionCallAdmission.Release()
-								}
-								recordBufferedX3Discard(1)
-								continue
-							}
-							candidate.SetWorkerGroup(liReorderWorkers)
-							var alreadyLoaded bool
-							buf, alreadyLoaded = liReorderBuffers.LoadOrStore(bufKey, candidate)
-							if alreadyLoaded {
-								candidate.Discard()
-							}
-						}
-						entryMetadata := metadata
-						entryMetadata.DestinationGeneration = li.DestinationDeliveryGeneration(destination)
-						entryMetadata.CallID = callID
-						entryMetadata.CallGeneration = generation
-						accepted := buf.(*delivery.ReorderBuffer).AcceptEntryX3AfterCommit(delivery.ReorderEntry{CallID: callID, Generation: generation, PDU: data, Metadata: entryMetadata}, ssrc, rtpSeq, func() {
-							// DeliverCallX3 may synchronously invoke its delivery
-							// callback. Release the outer admissions after insertion
-							// so that callback can safely re-admit even when a task
-							// deactivation writer is already waiting.
-							insertionTaskAdmission.Release()
-							if insertionOwnsCallAdmission && insertionCallAdmission != nil {
-								insertionCallAdmission.Release()
-							}
-						})
-						if accepted {
-							p.publishLICorrelation(decision)
-						}
-					}
-					logger.Debug("X3 CC queued via reorder buffer",
-						"xid", task.XID,
-						"correlation_id", pdu.Header.CorrelationID,
-						"ssrc", pkt.VoIPData.SSRC,
-						"rtp_seq", pkt.VoIPData.SequenceNum,
-						"size", len(data),
-						"destinations", len(task.DestinationIDs),
-					)
-				} else {
-					logger.Debug("X3 CC encoded (no delivery client or destinations)",
-						"xid", task.XID,
-						"correlation_id", pdu.Header.CorrelationID,
-						"payload_size", len(pdu.Payload),
-					)
-				}
-			} else {
+				logger.Debug("X3 encode error", "xid", task.XID, "error", err)
+				return
+			}
+			if pdu == nil {
 				liX3Skipped.Add(1)
+				return
+			}
+			if len(task.Targets) == 1 {
+				pdu.AddAttribute(x2x3.NewAttributeBuilder().MatchedTargetIdentifier(task.Targets[0].Value))
+				pdu.Header.PayloadDirection = liMediaDirection.PayloadDirection(task.XID, task.Targets[0], pkt)
+			}
+			data, err := pdu.MarshalBinary()
+			if err != nil {
+				liX3Errors.Add(1)
+				logger.Warn("X3 PDU marshal error", "xid", task.XID, "error", err)
+				return
+			}
+			if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
+				p.queueOrderedX3(task, pkt, data, sequence, metadata, admission, taskAdmission, ownsAdmission, func() {
+					p.publishLICorrelation(decision)
+					if claim != nil {
+						claim.Commit()
+					}
+				})
+			} else {
+				if _, err := sequence.Allocate(); err != nil {
+					liX3Errors.Add(1)
+					return
+				}
+				liX3Encoded.Add(1)
 			}
 		}
 
@@ -1090,11 +982,19 @@ func (p *Processor) processLIPacketWithProvenance(pkt *types.PacketDisplay, dire
 }
 
 func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string, admission *CallAdmission, capturePolicy ...[]byte) {
+	p.processLIPacketWithAdmissionAndDedup(pkt, directFilterIDs, inheritedFilterIDs, admission, nil, capturePolicy...)
+}
+
+func (p *Processor) processLIPacketWithAdmissionAndDedup(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string, admission *CallAdmission, observation *packetdedup.Observation, capturePolicy ...[]byte) {
 	if p.filterProcessingBlocked() {
 		return
 	}
 	if p.liManager == nil || !p.liManager.IsEnabled() {
 		return
+	}
+	if observation != nil && p.packetDuplicates != nil {
+		p.liStorage.packetDedup.Store(pkt, *observation)
+		defer p.liStorage.packetDedup.Delete(pkt)
 	}
 	if p.config.LIDeliveryX3SpoolDir != "" && pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP {
 		if p.callLifecycle != nil && p.callLifecycle.Err() != nil {

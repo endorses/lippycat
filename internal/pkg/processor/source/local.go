@@ -37,6 +37,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
+	"github.com/endorses/lippycat/internal/pkg/voip/capturepolicy"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -83,6 +84,7 @@ type TCPAssembler interface {
 
 // cachedFilterIDs stores filter IDs with a timestamp for TTL-based cleanup.
 type cachedFilterIDs struct {
+	proof      capturepolicy.FilterSelectionProof
 	filterIDs  []string
 	storedAt   time.Time
 	generation uint64
@@ -174,6 +176,10 @@ func (s *LocalSource) cachedFilterIDsForCall(callID string) []string {
 	cached, ok := s.callFilterCache.Load(callID)
 	if !ok {
 		return nil
+	}
+	if matcher, ok := s.appFilter.(capturepolicy.SelectionProofMatcher); ok {
+		_, ids := matcher.CurrentSelection(cached.proof)
+		return ids
 	}
 	return composeFilterIDs(cached.filterIDs, nil)
 }
@@ -284,7 +290,8 @@ func credibleSIPMethod(method []byte) bool {
 // LocalSource captures packets from local network interfaces.
 // It implements the PacketSource interface for standalone capture mode.
 type LocalSource struct {
-	radiusProcessor *radius.CaptureProcessor
+	observationDomains atomic.Pointer[map[string]mediaadmission.DomainID]
+	radiusProcessor    *radius.CaptureProcessor
 	// Configuration
 	config LocalSourceConfig
 
@@ -311,6 +318,7 @@ type LocalSource struct {
 	// currentBatchAfterProcess is protected by batchMu and moves atomically
 	// with currentBatch into the emitted PacketBatch.
 	currentBatchAfterProcess []func()
+	currentBatchPolicyChecks map[*pipeline.PacketEnvelope]func(*pipeline.PacketEnvelope) bool
 	batchSeq                 uint64
 
 	// Packet batch channel for processing
@@ -324,7 +332,9 @@ type LocalSource struct {
 	packetDemand func() bool
 
 	// Optional VoIP processing for SIP/RTP metadata extraction
-	voipProcessor VoIPProcessor
+	voipProcessor       VoIPProcessor
+	voipPolicies        capturepolicy.CapturePolicies
+	remoteMediaResolver capturepolicy.RemoteMediaResolver
 
 	// Optional DNS processing for DNS parsing and tunneling detection
 	dnsProcessor DNSProcessor
@@ -956,6 +966,11 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				continue
 			}
 
+			if handled, packet := s.policyPacket(injectedPkt.PacketInfo, &injectedPkt); handled {
+				s.appendPolicyPacket(packet, injectedPkt.AfterProcess)
+				continue
+			}
+
 			// Convert to protobuf format
 			pbPkt := convertPacketInfo(injectedPkt.PacketInfo)
 
@@ -996,10 +1011,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 							cacheKey := s.filterCacheKey(callID, injectedPkt.PacketInfo.Interface, injectedPkt.CallLifetime)
 							if cacheKey != "" {
 								cachedCallIDs := s.cachedFilterIDsForCall(cacheKey)
-								s.callFilterCache.Store(cacheKey, cachedFilterIDs{
-									filterIDs: composeFilterIDs(cachedCallIDs, directIDs),
-									storedAt:  time.Now(),
-								})
+								s.storeCallSelection(cacheKey, composeFilterIDs(cachedCallIDs, directIDs), injectedPkt.PacketInfo.Packet)
 							}
 						}
 					}
@@ -1062,6 +1074,11 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 						continue
 					}
 				}
+			}
+
+			if handled, packet := s.policyPacket(pktInfo, nil); handled {
+				s.appendPolicyPacket(packet, nil)
+				continue
 			}
 
 			s.mu.Lock()
@@ -1200,10 +1217,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 							cacheKey := s.filterCacheKey(callID, pktInfo.Interface, voipLifetime)
 							if cacheKey != "" {
 								cachedCallIDs := s.cachedFilterIDsForCall(cacheKey)
-								s.callFilterCache.Store(cacheKey, cachedFilterIDs{
-									filterIDs: composeFilterIDs(cachedCallIDs, directFilterIDs),
-									storedAt:  time.Now(),
-								})
+								s.storeCallSelection(cacheKey, composeFilterIDs(cachedCallIDs, directFilterIDs), pktInfo.Packet)
 							}
 						}
 					}
@@ -1278,6 +1292,7 @@ func (s *LocalSource) sendBatch() {
 	s.batchSeq++
 	batchTime := time.Now()
 	for _, envelope := range s.currentBatch {
+		s.stampObservationDomain(envelope)
 		envelope.Source.BatchSequence = s.batchSeq
 		envelope.Source.BatchTimestamp = batchTime
 	}
@@ -1287,6 +1302,7 @@ func (s *LocalSource) sendBatch() {
 	batchDrops := s.stats.packetsDropped.Load()
 	batch := &PacketBatch{
 		RADIUSSourceTrusted: true,
+		MediaSourceTrusted:  true,
 		SourceID:            s.SourceID(),
 		Envelopes:           s.currentBatch,
 		Sequence:            s.batchSeq,
@@ -1309,11 +1325,28 @@ func (s *LocalSource) sendBatch() {
 		AfterProcess: s.currentBatchAfterProcess,
 	}
 
+	policyChecks := s.currentBatchPolicyChecks
+	s.currentBatchPolicyChecks = nil
 	// Reset batch
 	s.currentBatch = make([]*pipeline.PacketEnvelope, 0, s.config.BatchSize)
 	s.currentBatchAfterProcess = nil
 	s.batchMu.Unlock()
 	s.stats.AddBatch()
+	if len(policyChecks) > 0 {
+		retained := batch.Envelopes[:0]
+		for _, envelope := range batch.Envelopes {
+			if check := policyChecks[envelope]; check != nil && !check(envelope) {
+				s.stats.AddDropped(1)
+				continue
+			}
+			retained = append(retained, envelope)
+		}
+		batch.Envelopes = retained
+		if len(retained) == 0 {
+			batch.RunAfterProcess()
+			return
+		}
+	}
 
 	// Non-blocking send
 	select {

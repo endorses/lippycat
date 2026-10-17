@@ -86,7 +86,7 @@ func (f *FilterYAML) UnmarshalYAML(n *yaml.Node) error {
 	}
 	ft, err := ParseFilterType(f.Type)
 	if err == nil && IsRADIUSFilter(ft) {
-		return radiusKnownKeys(n, "id", "type", "pattern", "target_hunters", "enabled", "description", "radius", "revision")
+		return radiusKnownKeys(n, "id", "type", "pattern", "target_hunters", "enabled", "description", "radius", "revision", "distribution_scope")
 	}
 	return nil
 }

@@ -18,7 +18,9 @@ import (
 type mockManagementServer struct {
 	management.UnimplementedManagementServiceServer
 
-	filters []*management.Filter
+	filters       []*management.Filter
+	adminQueries  chan *management.ProcessorFilterQuery
+	hunterQueries chan *management.FilterRequest
 
 	// Control behavior
 	getFiltersErr    error
@@ -30,7 +32,9 @@ type mockManagementServer struct {
 
 func newMockServer() *mockManagementServer {
 	return &mockManagementServer{
-		filters: make([]*management.Filter, 0),
+		filters:       make([]*management.Filter, 0),
+		adminQueries:  make(chan *management.ProcessorFilterQuery, 16),
+		hunterQueries: make(chan *management.FilterRequest, 16),
 		updateFilterResp: &management.FilterUpdateResult{
 			Success:        true,
 			HuntersUpdated: 1,
@@ -42,7 +46,16 @@ func newMockServer() *mockManagementServer {
 	}
 }
 
-func (m *mockManagementServer) GetFilters(_ context.Context, _ *management.FilterRequest) (*management.FilterResponse, error) {
+func (m *mockManagementServer) GetFilters(_ context.Context, req *management.FilterRequest) (*management.FilterResponse, error) {
+	m.hunterQueries <- req
+	if m.getFiltersErr != nil {
+		return nil, m.getFiltersErr
+	}
+	return &management.FilterResponse{Filters: m.filters}, nil
+}
+
+func (m *mockManagementServer) GetFiltersFromProcessor(_ context.Context, req *management.ProcessorFilterQuery) (*management.FilterResponse, error) {
+	m.adminQueries <- req
 	if m.getFiltersErr != nil {
 		return nil, m.getFiltersErr
 	}

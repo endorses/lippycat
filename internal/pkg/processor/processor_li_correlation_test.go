@@ -271,7 +271,9 @@ func TestProcessorCallCorrelationRejectsIneligibleX3Publication(t *testing.T) {
 	}, time.Millisecond)
 	rejecting.Stop()
 	rejecting.Wait()
-	liReorderBuffers.Store(fmt.Sprintf("%s-%s", xid, x3did), rejecting)
+	task, err := p.liManager.GetTaskDetails(xid)
+	require.NoError(t, err)
+	liReorderBuffers.Store(liOrderedBufferKey(xid, task.ActivationGeneration), rejecting)
 	filters := []string{"li-" + xid.String() + "-0"}
 	timestamp := time.Now().UTC()
 	p.processLIPacketWithProvenance(correlationIntegrationSIP("ineligible-x3-leg", dirTargetURI, timestamp), filters, nil)

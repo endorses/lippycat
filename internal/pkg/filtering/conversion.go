@@ -21,8 +21,13 @@ func YAMLToProto(yaml *FilterYAML) (*management.Filter, error) {
 		return nil, err
 	}
 
+	scope, err := ParseDistributionScope(yaml.DistributionScope)
+	if err != nil {
+		return nil, err
+	}
 	result := &management.Filter{
-		Radius: radiusYAMLToProto(yaml.Radius), Revision: yaml.Revision,
+		DistributionScope: scope,
+		Radius:            radiusYAMLToProto(yaml.Radius), Revision: yaml.Revision,
 		Id:            yaml.ID,
 		Type:          filterType,
 		Pattern:       yaml.Pattern,
@@ -38,8 +43,13 @@ func YAMLToProto(yaml *FilterYAML) (*management.Filter, error) {
 
 // ProtoToYAML converts a protobuf Filter to FilterYAML
 func ProtoToYAML(proto *management.Filter) *FilterYAML {
+	scope := "" // Preserve legacy encoding and managed snapshot capacity for default scope.
+	if !IsDistributedFilter(proto) {
+		scope = DistributionScopeToString(proto.DistributionScope)
+	}
 	return &FilterYAML{
-		Radius: radiusProtoToYAML(proto.Radius), Revision: proto.Revision,
+		DistributionScope: scope,
+		Radius:            radiusProtoToYAML(proto.Radius), Revision: proto.Revision,
 		ID:            proto.Id,
 		Type:          FilterTypeToString(proto.Type),
 		Pattern:       proto.Pattern,
@@ -53,6 +63,7 @@ func ProtoToYAML(proto *management.Filter) *FilterYAML {
 // When pretty is true, output is indented; when false, output is compact.
 func ProtoToJSON(proto *management.Filter, pretty bool) ([]byte, error) {
 	yaml := ProtoToYAML(proto)
+	yaml.DistributionScope = DistributionScopeToString(proto.DistributionScope)
 	return output.MarshalJSONPretty(yaml, pretty)
 }
 
@@ -62,6 +73,7 @@ func ProtoSliceToJSON(filters []*management.Filter, pretty bool) ([]byte, error)
 	yamlFilters := make([]*FilterYAML, len(filters))
 	for i, f := range filters {
 		yamlFilters[i] = ProtoToYAML(f)
+		yamlFilters[i].DistributionScope = DistributionScopeToString(f.DistributionScope)
 	}
 	return output.MarshalJSONPretty(yamlFilters, pretty)
 }

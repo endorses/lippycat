@@ -76,8 +76,10 @@ func (t *LocalTarget) ApplyApplicationPolicy(policy LocalFilterPolicy) {
 // It applies BPF filters at the kernel level and routes VoIP filters
 // to an ApplicationFilter for userspace matching.
 type LocalTarget struct {
-	mu         sync.RWMutex
-	mutationMu sync.Mutex
+	centralOnlyFilters bool
+	processorMedia     bool
+	mu                 sync.RWMutex
+	mutationMu         sync.Mutex
 
 	// Active filters indexed by ID
 	filters map[string]*management.Filter
@@ -108,6 +110,10 @@ func (t *LocalTarget) SetCoordinator(coordinator LocalFilterCoordinator) {
 
 // LocalTargetConfig contains configuration for LocalTarget.
 type LocalTargetConfig struct {
+	ProcessorMedia bool
+	// CentralOnlyFilters keeps local-only selectors out of capture configuration.
+	// The processor's parsed SIP matcher owns their selection instead.
+	CentralOnlyFilters bool
 	// BaseBPF is the initial BPF filter expression from CLI/config.
 	// This filter is always applied in addition to any dynamic filters.
 	BaseBPF string
@@ -119,6 +125,8 @@ type LocalTargetConfig struct {
 // NewLocalTarget creates a new LocalTarget for local filtering.
 func NewLocalTarget(cfg LocalTargetConfig) *LocalTarget {
 	return &LocalTarget{
+		centralOnlyFilters:     cfg.CentralOnlyFilters,
+		processorMedia:         cfg.ProcessorMedia,
 		filters:                make(map[string]*management.Filter),
 		baseBPF:                cfg.BaseBPF,
 		applicationIPSelectors: cfg.ApplicationIPSelectors,
@@ -155,6 +163,21 @@ var ErrLocalFilterCapability = errors.New("local filter capability is unavailabl
 func (t *LocalTarget) validateFilterCapability(filter *management.Filter) error {
 	if filter == nil {
 		return ErrFilterInvalid
+	}
+	if t.centralOnlyFilters && filter.DistributionScope == management.FilterDistributionScope_FILTER_DISTRIBUTION_SCOPE_LOCAL_ONLY {
+		_, err := sharedfilter.CompileSIPFilters([]*management.Filter{filter})
+		if err != nil {
+			return ErrFilterInvalid
+		}
+		switch filter.Type {
+		case management.FilterType_FILTER_SIP_USER, management.FilterType_FILTER_SIP_URI, management.FilterType_FILTER_PHONE_NUMBER, management.FilterType_FILTER_CALL_ID, management.FilterType_FILTER_IP_ADDRESS:
+			return nil
+		default:
+			return ErrLocalFilterCapability
+		}
+	}
+	if t.processorMedia && filter.Enabled && filter.Type == management.FilterType_FILTER_IP_ADDRESS {
+		return ErrLocalFilterCapability
 	}
 	if (filter.Enabled || sharedfilter.IsRADIUSFilter(filter.Type)) && !t.SupportsFilterType(filter.Type) {
 		return ErrLocalFilterCapability
@@ -475,6 +498,9 @@ func (t *LocalTarget) buildPolicy(baseBPF string, filters map[string]*management
 	for _, filter := range filters {
 		f := cloneFilter(filter)
 		all = append(all, f)
+		if t.centralOnlyFilters && f.DistributionScope == management.FilterDistributionScope_FILTER_DISTRIBUTION_SCOPE_LOCAL_ONLY {
+			continue
+		}
 		if !f.Enabled {
 			continue
 		}

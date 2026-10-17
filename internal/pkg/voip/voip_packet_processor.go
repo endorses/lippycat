@@ -8,6 +8,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	mediaadaptor "github.com/endorses/lippycat/internal/pkg/voip/admission"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
@@ -100,7 +101,10 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 			// Handlers match and forward synthesized per-message packets using
 			// reassembly timestamps; no raw tuple-keyed buffer is needed.
 			// Feed the packet to the TCP assembler for stream reconstruction
-			if err := p.assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)); err != nil {
+			env := captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)
+			info := pktInfo.Packet.Metadata().CaptureInfo
+			info.AncillaryData = append(append([]any(nil), info.AncillaryData...), env.Source)
+			if err := p.assembler.AssembleWithContext(env, hunterAssemblyContext{info}); err != nil {
 				logger.Error("Failed to assemble TCP packet", "error", err)
 			}
 		} else {
@@ -137,15 +141,33 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 // within one observation domain, while domain routers use independent processors.
 func (p *VoIPPacketProcessor) SetMediaAdmission(bridge *mediaadaptor.Bridge, domainInterface string) {
 	store := newHunterSelectionStore()
+	if p.udpHandler.bufferMgr != nil {
+		store.current = p.udpHandler.bufferMgr.SelectionProofCurrent
+	}
 	p.udpHandler.orchestrator.Close()
-	p.udpHandler.orchestrator = newHunterSIPOrchestrator(p.udpHandler.forwarder, p.udpHandler.selectionPolicy, store)
+	p.udpHandler.orchestrator = newHunterPolicySIPOrchestrator(p.udpHandler.forwarder, p.udpHandler.selectionPolicy, p.udpHandler.capturePolicy, store)
 	p.udpHandler.admission = bridge
 	p.udpHandler.orchestrator.SetMetadataObserver(bridge)
 	if p.tcpHandler != nil {
 		p.tcpHandler.orchestrator.Close()
-		p.tcpHandler.orchestrator = newHunterSIPOrchestrator(p.tcpHandler.forwarder, p.tcpHandler.selectionPolicy, store)
+		p.tcpHandler.orchestrator = newHunterPolicySIPOrchestrator(p.tcpHandler.forwarder, p.tcpHandler.selectionPolicy, p.tcpHandler.capturePolicy, store)
 		p.tcpHandler.admission = bridge
 		p.tcpHandler.captureInterface = domainInterface
 		p.tcpHandler.orchestrator.SetMetadataObserver(bridge)
 	}
 }
+
+// SetCapturePolicies configures both transports before capture starts.
+func (p *VoIPPacketProcessor) SetCapturePolicies(policies CapturePolicies, resolver RemoteMediaResolver) error {
+	if err := p.udpHandler.SetCapturePolicies(policies, resolver); err != nil {
+		return err
+	}
+	if p.tcpHandler != nil {
+		return p.tcpHandler.SetCapturePolicies(policies, resolver)
+	}
+	return nil
+}
+
+type hunterAssemblyContext struct{ info gopacket.CaptureInfo }
+
+func (c hunterAssemblyContext) GetCaptureInfo() gopacket.CaptureInfo { return c.info }

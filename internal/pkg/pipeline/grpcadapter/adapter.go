@@ -16,6 +16,7 @@ func FromCapturedPacket(p *data.CapturedPacket, source pipeline.SourceProvenance
 		return nil, fmt.Errorf("convert captured packet: nil packet")
 	}
 	source.InterfaceName, source.InterfaceIndex = p.InterfaceName, p.InterfaceIndex
+	source.ObservationDomain, source.ObservationDomainKnown = p.ObservationDomain, p.ObservationDomainKnown
 	e := &pipeline.PacketEnvelope{Data: append([]byte(nil), p.Data...), LinkType: layers.LinkType(p.LinkType), CaptureTime: time.Unix(0, p.TimestampNs), CaptureLength: int(p.CaptureLength), OriginalLength: int(p.OriginalLength), Source: source, MatchedFilterIDs: append([]string(nil), p.MatchedFilterIds...), DirectMatchedFilterIDs: append([]string(nil), p.DirectMatchedFilterIds...), InheritedMatchedFilterIDs: append([]string(nil), p.InheritedMatchedFilterIds...), TLSKeys: fromTLSKeys(p.TlsKeys)}
 	e.RADIUS, e.RADIUSValidationError = RADIUSFromProto(p)
 	if p.Radius != nil {
@@ -101,6 +102,7 @@ func ToCapturedPacket(e *pipeline.PacketEnvelope) (*data.CapturedPacket, error) 
 		return nil, fmt.Errorf("convert packet envelope: nil envelope")
 	}
 	p := &data.CapturedPacket{Data: append([]byte(nil), e.Data...), TimestampNs: unixNano(e.CaptureTime), CaptureLength: uint32(e.CaptureLength), OriginalLength: uint32(e.OriginalLength), InterfaceIndex: e.Source.InterfaceIndex, LinkType: uint32(e.LinkType), InterfaceName: e.Source.InterfaceName, MatchedFilterIds: append([]string(nil), e.MatchedFilterIDs...), DirectMatchedFilterIds: append([]string(nil), e.DirectMatchedFilterIDs...), InheritedMatchedFilterIds: append([]string(nil), e.InheritedMatchedFilterIDs...), TlsKeys: toTLSKeys(e.TLSKeys)} // #nosec G115 -- pcap lengths and link type are wire fields
+	p.ObservationDomain, p.ObservationDomainKnown = e.Source.ObservationDomain, e.Source.ObservationDomainKnown
 	if e.RADIUS != nil {
 		if !e.RADIUS.Capture.Timestamp.Equal(e.CaptureTime) || e.RADIUS.Capture.LinkType != e.LinkType || e.RADIUS.Capture.CapturedLength != e.CaptureLength || e.RADIUS.Capture.OriginalLength != e.OriginalLength {
 			return nil, fmt.Errorf("RADIUS capture metadata differs from packet envelope")

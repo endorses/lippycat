@@ -161,7 +161,7 @@ func compactQueryColumns(expression *Expression, related bool) []bool {
 			required[name] = true
 		}
 	} else if expression == nil {
-		for _, name := range []string{"SrcPort", "DstPort", "Info", "Node", "NodeRef", "Device", "DeviceRef", "Transport", "LinkType", "Projection"} {
+		for _, name := range []string{"SrcPort", "DstPort", "Info", "Node", "NodeRef", "Device", "DeviceRef", "Transport", "LinkType", "Projection", "ObservationDomain", "ObservationDomainKnown"} {
 			required[name] = true
 		}
 	} else {

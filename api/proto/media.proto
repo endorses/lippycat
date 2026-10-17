@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package lippycat.management;
+
+option go_package = "github.com/endorses/lippycat/api/gen/management";
+
+// MediaControlService distributes temporary call associations independently of
+// durable managed filters. Version 1 requires authenticated source identities.
+service MediaControlService {
+    rpc SubscribeMediaRules(MediaRuleRequest) returns (stream MediaRuleUpdate);
+    rpc ReportMediaRuleStatus(MediaRuleApplication) returns (MediaRuleReceipt);
+}
+
+message MediaRuleRequest {
+    uint32 protocol_version = 1;
+    string hunter_id = 2;
+    string processor_id = 3;
+}
+
+message MediaRuleSession {
+    string processor_id = 1;
+    uint64 generation = 2;
+}
+
+message MediaRuleScope {
+    string hunter_id = 1;
+    uint32 domain = 2;
+}
+
+message MediaRuleEndpoint {
+    uint32 domain = 1;
+    string address = 2;
+    uint32 port = 3;
+    MediaRuleEndpointKind kind = 4;
+}
+
+enum MediaRuleEndpointKind {
+    MEDIA_RULE_ENDPOINT_RTP = 0;
+    MEDIA_RULE_ENDPOINT_RTCP = 1;
+    MEDIA_RULE_ENDPOINT_MUX = 2;
+}
+
+message MediaRuleCall {
+    uint64 registry_session = 1;
+    uint64 registry_generation = 2;
+    string call_id = 3;
+    string from_tag = 4;
+    string to_tag = 5;
+    uint64 selection_revision = 6;
+    repeated string filter_ids = 7;
+    // Optional shared signed capture-policy revision; zero for ordinary policy.
+    uint64 capture_policy_revision = 8;
+}
+
+message MediaRule {
+    string id = 1;
+    MediaRuleSession session = 2;
+    uint64 revision = 3;
+    MediaRuleCall call = 4;
+    repeated MediaRuleScope scopes = 5;
+    repeated MediaRuleEndpoint endpoints = 6;
+    int64 not_before_ns = 7;
+    int64 expires_at_ns = 8;
+}
+
+// Snapshot chunks share one session and revision. The receiver stages all chunks
+// within configured bounds and publishes only at snapshot_end. A broken stream
+// never publishes a partial snapshot. Deltas cannot interleave a snapshot.
+message MediaRuleUpdate {
+    uint32 protocol_version = 1;
+    MediaRuleSession session = 2;
+    uint64 revision = 3;
+    bool snapshot_begin = 4;
+    bool snapshot_end = 5;
+    repeated MediaRule rules = 6;
+    repeated string removed_ids = 7;
+    bool resync_required = 8;
+}
+
+message MediaRuleApplication {
+    string hunter_id = 1;
+    MediaRuleSession session = 2;
+    uint64 applied_revision = 3;
+    bool synchronized = 4;
+    uint32 active_rules = 5;
+    uint32 active_endpoints = 6;
+    string error = 7;
+}
+
+message MediaRuleReceipt {
+    bool accepted = 1;
+}

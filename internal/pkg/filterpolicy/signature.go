@@ -98,7 +98,9 @@ func validateSnapshot(s *management.PolicySnapshot, c Config) error {
 	prefix := c.Namespace()
 	previous := ""
 	for _, f := range s.Filters {
-		if f == nil || !strings.HasPrefix(f.Id, prefix) || len(f.Id) == len(prefix) || len(f.Id) > 1024 || f.Id <= previous || len(f.ProtoReflect().GetUnknown()) != 0 {
+		// Signed snapshots are exported intact to hunters, including older peers.
+		// Keep processor-local filters outside this shared capture namespace.
+		if !filtercodec.IsDistributedFilter(f) || !strings.HasPrefix(f.Id, prefix) || len(f.Id) == len(prefix) || len(f.Id) > 1024 || f.Id <= previous || len(f.ProtoReflect().GetUnknown()) != 0 {
 			return ErrInvalid
 		}
 		if err := filtercodec.ValidateManagedFilter(f); err != nil {

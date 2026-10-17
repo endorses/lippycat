@@ -664,3 +664,22 @@ func createTestUDPPacket(t *testing.T, srcPort, dstPort uint16, payload []byte) 
 
 	return gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
+
+func TestBufferCallbackCanReadAndRetireSelection(t *testing.T) {
+	bm := NewBufferManager(time.Minute, 16)
+	defer bm.Close()
+	bm.AddSIPPacket("callback", nil, &CallMetadata{CallID: "callback"}, "capture", layers.LinkTypeEthernet)
+	done := make(chan struct{})
+	go func() {
+		bm.CheckFilterWithCallback("callback", func(*CallMetadata) bool { return true }, func(id string, _ []gopacket.Packet, _ *CallMetadata, _ string, _ layers.LinkType) {
+			bm.MatchedFilterIDs(id)
+			bm.MarkCallMatched(id, nil, "capture", layers.LinkTypeEthernet)
+		})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("buffer callback deadlocked while consulting current selection")
+	}
+}

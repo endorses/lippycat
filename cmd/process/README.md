@@ -1017,3 +1017,22 @@ incomplete pull definitions as non-enforcing candidates until completed.
 Use `processor.li.admf_complete_task_contract: true` in YAML. See the
 [LI definition convergence and rollout guidance](../../docs/LI_INTEGRATION.md#complete-task-contract-and-definition-convergence)
 for lifecycle completeness, replay, and the lack of authoritative pull freshness.
+
+## Central call selection and overlap suppression
+
+Enable `processor.voip.media_rules.enabled` with explicit hunter/interface/domain
+mappings to select calls centrally and publish temporary RTP/RTCP rules. A new
+hunter can capture an existing selected call without observing its INVITE or
+waiting for another SDP offer. Candidate SIP must reach the processor; use the
+hunter's explicit `--signalling-policy all` when selection patterns remain local.
+
+Create a managed selector with `lc set filter --distribution-scope local_only`.
+The default remains `distributed`; local-only filters are stored and matched
+centrally and omitted from hunter snapshots/updates. Existing distributed copies
+are withdrawn when scope changes.
+
+`processor.packet_dedup.enabled` optionally suppresses bounded cross-hunter
+observations independently for each output/analysis owner after source validation.
+It defaults to disabled and preserves raw ingress/receipt accounting. See
+[distributed media selection](../../docs/DISTRIBUTED_MEDIA.md) for configuration,
+resource defaults, exact consumer boundaries and LI integration/migration.

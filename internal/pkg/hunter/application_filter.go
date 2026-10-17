@@ -89,11 +89,12 @@ type ApplicationFilter struct {
 	cidrTreeV6     *generics_tree.TreeV6[string] // Radix tree for IPv6 CIDR matching (tag = filter ID)
 	hasCIDRFilters bool                          // Whether any CIDR filters are present
 
-	mu               sync.RWMutex
-	enabled          bool
-	gpuACBuilt       bool           // Whether GPU has default (SIPUser+PhoneNumber) AC automaton built
-	gpuSIPURIACBuilt bool           // Whether GPU has SIPURI AC automaton built
-	noFilterPolicy   NoFilterPolicy // Policy when no filters are configured (allow/deny)
+	mu                    sync.RWMutex
+	enabled               bool
+	gpuACBuilt            bool // Whether GPU has default (SIPUser+PhoneNumber) AC automaton built
+	gpuSIPURIACBuilt      bool // Whether GPU has SIPURI AC automaton built
+	selectionFingerprints map[string][32]byte
+	noFilterPolicy        NoFilterPolicy // Policy when no filters are configured (allow/deny)
 }
 
 // NewApplicationFilter creates a new application-layer filter with optional GPU acceleration
@@ -211,6 +212,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	af.mu.Lock()
 	defer af.publishAdmissionAndUnlock()
 
+	af.updateSelectionFingerprintsLocked(filters)
 	af.updateRADIUSFiltersLocked(filters)
 
 	// Clear existing

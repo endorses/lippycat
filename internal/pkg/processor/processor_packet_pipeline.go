@@ -35,6 +35,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/packetdedup"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
@@ -154,6 +155,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	}
 	p.packetsReceived.Add(packetCount)
 	p.observeSDPDiagnostics(batch)
+	p.processMediaControl(batch)
 
 	packetOutput := p.needsPacketOutput()
 	if !packetOutput && !p.wantsEventAnalysis() {
@@ -173,7 +175,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 
 	// Queue packets for async PCAP write if configured
 	if p.pcapWriter != nil {
-		p.pcapWriter.QueuePackets(packets)
+		p.queueUnifiedPCAPPackets(batch, packets)
 	}
 
 	// Process TLS session keys from packets (for decryption support)
@@ -193,7 +195,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	p.normalizeRADIUS(sourceID, packets)
 
 	// Normalize protocol metadata after enrichment and before forwarding/broadcasting.
-	p.emitProtocolEventsWithScope(sourceID, batch.CaptureEpoch, packets)
+	p.emitConsumerProtocolEvents(batch, packets)
 	if !packetOutput {
 		// Event forwarding and structured logs consume the analysis above. With
 		// no packet output, avoid packet-only aggregation and serialization.
@@ -203,11 +205,23 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Aggregate VoIP call state from packet metadata
 	voipAllowed := make([]bool, len(packets))
 	for index := range voipAllowed {
-		voipAllowed[index] = true
+		voipAllowed[index] = !batch.Envelopes[index].CallLifecycleRejected
 	}
 	if p.callAggregator != nil {
 		for index, packet := range packets {
+			if !voipAllowed[index] {
+				continue
+			}
 			if packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil) {
+				var claim *packetdedup.Claim
+				if packet.Metadata.Sip != nil && packet.Metadata.Sip.CallId != "" {
+					var include bool
+					claim, include = p.beginPacketConsumer(batch, index, "analysis/calls/"+packet.Metadata.Sip.CallId)
+					if !include {
+						voipAllowed[index] = p.duplicateCallPacketAllowed(packet)
+						continue
+					}
+				}
 				if p.sessionOutputManager != nil {
 					if monitor, ok := p.sessionOutputManager.monitor.(*CallCompletionMonitor); ok {
 						voipAllowed[index] = monitor.ProcessPacket(packet, sourceID)
@@ -217,6 +231,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				} else {
 					p.callAggregator.ProcessPacket(packet, sourceID)
 				}
+				finishPacketConsumer(claim, voipAllowed[index])
 			}
 		}
 	}
@@ -227,8 +242,13 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			if !voipAllowed[index] {
 				continue
 			}
-			if packet.Metadata != nil && packet.Metadata.Sip != nil {
+			if packet.Metadata != nil && packet.Metadata.Sip != nil && packet.Metadata.Sip.CallId != "" && packet.Metadata.Sip.FromTag != "" && packet.Metadata.Sip.ToTag != "" {
+				claim, include := p.beginPacketConsumer(batch, index, "analysis/correlation")
+				if !include {
+					continue
+				}
 				p.callCorrelator.ProcessPacket(packet, sourceID)
+				finishPacketConsumer(claim, true)
 			}
 		}
 	}
@@ -236,8 +256,12 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Aggregate DNS tunneling statistics from hunter-provided metadata
 	// This builds a cross-hunter view of suspicious domains
 	if p.dnsTunneling != nil {
-		for _, packet := range packets {
+		for index, packet := range packets {
 			if packet.Metadata != nil && packet.Metadata.Dns != nil {
+				claim, include := p.beginPacketConsumer(batch, index, "analysis/dns")
+				if !include {
+					continue
+				}
 				dnsProto := packet.Metadata.Dns
 				// Convert proto DNS metadata to types.DNSMetadata for analysis
 				dnsMeta := &types.DNSMetadata{
@@ -254,6 +278,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				}
 				// AnalyzeWithContext updates aggregated domain statistics with hunter/source tracking
 				p.dnsTunneling.AnalyzeWithContext(dnsMeta, sourceID, srcIP)
+				finishPacketConsumer(claim, true)
 			}
 		}
 	}
@@ -297,10 +322,13 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 
 			// Convert to PacketDisplay for LI processing
 			display := types.PacketDisplay{
-				Timestamp: time.Unix(0, pkt.TimestampNs),
-				RawData:   pkt.Data,
-				LinkType:  layers.LinkType(pkt.LinkType),
-				NodeID:    batch.SourceID,
+				Interface:              pkt.InterfaceName,
+				ObservationDomain:      pkt.ObservationDomain,
+				ObservationDomainKnown: pkt.ObservationDomainKnown,
+				Timestamp:              time.Unix(0, pkt.TimestampNs),
+				RawData:                pkt.Data,
+				LinkType:               layers.LinkType(pkt.LinkType),
+				NodeID:                 batch.SourceID,
 			}
 			if pkt.Metadata != nil {
 				display.SrcIP = pkt.Metadata.SrcIp
@@ -346,7 +374,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			if pkt.Radius != nil {
 				p.processLIRADIUSPacket(&display, pkt, batch)
 			} else {
-				p.processLIPacketWithCapturePolicy(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index], batch.SignedCapturePolicy)
+				p.processLIPacketWithAdmissionAndDedup(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index], p.packetDuplicateObservation(batch, index, "li"), batch.SignedCapturePolicy)
 			}
 			if p.afterLIPacket != nil {
 				p.afterLIPacket()
@@ -364,23 +392,9 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			// Check if packet has SIP metadata with call-id
 			if packet.Metadata != nil && packet.Metadata.Sip != nil && packet.Metadata.Sip.CallId != "" {
 				callID := packet.Metadata.Sip.CallId
-				from := packet.Metadata.Sip.FromUser
-				to := packet.Metadata.Sip.ToUser
-
-				// Write packet to appropriate file (SIP or RTP) using raw packet data
+				// Admission and output ownership are independent of LI and other sinks.
 				if len(packet.Data) > 0 {
-					timestamp := time.Unix(0, packet.TimestampNs)
-					linkType := layers.LinkType(packet.LinkType)
-					var writeErr error
-					if admission := packetAdmissions[index]; admission != nil {
-						writeErr = p.sessionOutputManager.writePacketWithAdmission(
-							admission, callID, from, to, timestamp, packet.Data, linkType, packet.Metadata.Rtp != nil,
-						)
-					} else {
-						writeErr = p.sessionOutputManager.WritePacket(
-							callID, from, to, timestamp, packet.Data, linkType, packet.Metadata.Rtp != nil,
-						)
-					}
+					writeErr := p.writeConsumerSessionPacket(batch, index, packet, packetAdmissions[index])
 					if writeErr != nil && !errors.Is(writeErr, errSessionOutputClosed) && !IsCallFinalized(writeErr) {
 						logger.Warn("Failed to write packet to call PCAP",
 							"call_id", callID,
@@ -398,7 +412,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Write non-VoIP packets to auto-rotating PCAP files if configured
 	// Auto-rotates based on idle time, file size, and duration
 	if p.autoRotatePcapWriter != nil {
-		for _, packet := range packets {
+		for index, packet := range packets {
 			// Skip VoIP packets (they're handled by per-call writer)
 			isVoIP := packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil)
 			if isVoIP {
@@ -407,10 +421,16 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 
 			// Write non-VoIP packet to auto-rotating PCAP
 			if len(packet.Data) > 0 {
+				claim, include := p.beginPacketConsumer(batch, index, "pcap/rotate")
+				if !include {
+					continue
+				}
 				timestamp := time.Unix(0, packet.TimestampNs)
 				linkType := layers.LinkType(packet.LinkType)
-				if err := p.autoRotatePcapWriter.WritePacket(timestamp, packet.Data, linkType); err != nil {
-					logger.Warn("Failed to write packet to auto-rotate PCAP", "error", err)
+				writeErr := p.autoRotatePcapWriter.WritePacket(timestamp, packet.Data, linkType)
+				finishPacketConsumer(claim, writeErr == nil)
+				if writeErr != nil {
+					logger.Warn("Failed to write packet to auto-rotate PCAP", "error", writeErr)
 				}
 			}
 		}
@@ -433,10 +453,16 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			if p.wantsEventAnalysis() {
 				protoBatch.MonitorEventAnalysis = data.MonitorEventAnalysis_MONITOR_EVENT_ANALYSIS_SERVER_PROVIDED
 			}
-			p.subscriberManager.Broadcast(protoBatch)
+			if p.packetDuplicates == nil {
+				p.subscriberManager.Broadcast(protoBatch)
+			} else {
+				p.subscriberManager.BroadcastFiltered(protoBatch, func(clientID string, eligible *data.PacketBatch) (*data.PacketBatch, func(bool)) {
+					return p.monitorConsumerPackets(batch, protoBatch.Packets, clientID, eligible)
+				})
+			}
 		}
 		if forwardPackets {
-			p.upstreamManager.Forward(protoBatch)
+			p.forwardConsumerPackets(batch, protoBatch.Packets, protoBatch)
 		}
 	}
 
@@ -445,11 +471,14 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		// Convert packet batch to PacketDisplay for injection
 		// We need to convert the protobuf packets to types.PacketDisplay format
 		displayPackets := make([]types.PacketDisplay, 0, len(packets))
-		for _, pkt := range packets {
+		for index, pkt := range packets {
 			display := types.PacketDisplay{
-				Timestamp: time.Unix(0, pkt.TimestampNs),
-				RawData:   pkt.Data,                      // Raw packet bytes (includes Ethernet header if LinkType is Ethernet)
-				LinkType:  layers.LinkType(pkt.LinkType), // Link layer type (Ethernet, Raw IP, etc.)
+				Interface:              pkt.InterfaceName,
+				ObservationDomain:      pkt.ObservationDomain,
+				ObservationDomainKnown: pkt.ObservationDomainKnown,
+				Timestamp:              time.Unix(0, pkt.TimestampNs),
+				RawData:                pkt.Data,                      // Raw packet bytes (includes Ethernet header if LinkType is Ethernet)
+				LinkType:               layers.LinkType(pkt.LinkType), // Link layer type (Ethernet, Raw IP, etc.)
 			}
 
 			// Copy metadata if available
@@ -459,13 +488,22 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				display.Protocol = pkt.Metadata.Protocol
 			}
 
+			if p.packetDuplicates != nil {
+				if err := p.injectConsumerPacket(batch, index, display); err != nil {
+					p.vifInjectionErrors.Add(1)
+					logger.Warn("Failed to inject packet to virtual interface", "error", err)
+				}
+				continue
+			}
 			displayPackets = append(displayPackets, display)
 		}
 
 		// Inject batch (non-blocking)
-		if err := p.vifManager.InjectPacketBatch(displayPackets); err != nil {
-			p.vifInjectionErrors.Add(1)
-			logger.Warn("Failed to inject packet batch to virtual interface", "error", err)
+		if p.packetDuplicates == nil {
+			if err := p.vifManager.InjectPacketBatch(displayPackets); err != nil {
+				p.vifInjectionErrors.Add(1)
+				logger.Warn("Failed to inject packet batch to virtual interface", "error", err)
+			}
 		}
 	}
 
@@ -474,7 +512,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 // needsPacketProcessing is also used by local capture before protocol parsing.
 // Explicit local outputs remain useful without an upstream connection.
 func (p *Processor) needsPacketProcessing() bool {
-	return p.wantsEventAnalysis() || p.needsPacketOutput()
+	return p.mediaControl != nil || p.wantsEventAnalysis() || p.needsPacketOutput()
 }
 
 func (p *Processor) hasPacketSubscribers() bool {

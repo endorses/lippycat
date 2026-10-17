@@ -21,6 +21,7 @@ func NewSummary(id PacketID, p types.PacketDisplay) Summary {
 		SrcPort: p.SrcPort, DstPort: p.DstPort, Protocol: p.Protocol,
 		Transport: p.Transport, Length: p.Length, Info: p.Info,
 		NodeID: p.NodeID, Interface: p.Interface, LinkType: p.LinkType,
+		ObservationDomain: p.ObservationDomain, ObservationDomainKnown: p.ObservationDomainKnown,
 	}}
 	if v := p.VoIPData; v != nil {
 		s.packet.VoIPData = &types.VoIPMetadata{

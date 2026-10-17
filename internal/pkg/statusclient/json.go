@@ -7,6 +7,8 @@ import (
 
 // StatusJSON represents processor status in JSON-friendly format
 type StatusJSON struct {
+	MediaRules        *management.MediaRuleStatus        `json:"media_rules,omitempty"`
+	PacketDuplicates  *management.PacketDuplicateStatus  `json:"packet_duplicates,omitempty"`
 	RawPackets        *management.RawPacketStatus        `json:"raw_packets,omitempty"`
 	UpstreamRoute     *management.RouteStatus            `json:"upstream_route,omitempty"`
 	LICallCorrelation *management.LICallCorrelationStats `json:"li_call_correlation,omitempty"`
@@ -43,6 +45,7 @@ type HunterJSON struct {
 
 // HunterStatsJSON represents hunter statistics in JSON-friendly format
 type HunterStatsJSON struct {
+	MediaRules                    *management.MediaRuleStatus          `json:"media_rules,omitempty"`
 	RawPackets                    *management.RawPacketStatus          `json:"raw_packets,omitempty"`
 	ProcessorSelection            *management.ProcessorSelectionStatus `json:"processor_selection,omitempty"`
 	RTPEBPF                       *management.MediaAdmissionStatus     `json:"rtp_ebpf,omitempty"`
@@ -107,6 +110,8 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 	status := &StatusJSON{}
 
 	if resp.ProcessorStats != nil {
+		status.MediaRules = resp.ProcessorStats.MediaRules
+		status.PacketDuplicates = resp.ProcessorStats.PacketDuplicates
 		status.RawPackets = resp.ProcessorStats.RawPackets
 		status.UpstreamRoute = resp.ProcessorStats.UpstreamRoute
 		status.ProcessorID = resp.ProcessorStats.ProcessorId
@@ -170,6 +175,7 @@ func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {
 
 	if h.Stats != nil {
 		hunter.Stats = &HunterStatsJSON{
+			MediaRules:                    h.Stats.MediaRules,
 			RawPackets:                    h.Stats.RawPackets,
 			ProcessorSelection:            h.Stats.ProcessorSelection,
 			RTPEBPF:                       h.Stats.RtpEbpf,

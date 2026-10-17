@@ -1055,3 +1055,18 @@ not protect against arbitrary old captures with identical unbound wire identitie
 See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
 semantics, platform/privilege requirements, observation domains, configuration,
 failure states and verification status.
+
+## Processor-selected local media
+
+`tap voip` accepts `--signalling-policy matched|all|none` and
+`--media-policy local|processor`, retaining defaults `matched` and `local`.
+Processor-selected media runs the same central publisher and bounded local
+subscription inside the tap, without loopback gRPC. Configure
+`tap.voip.media_rules.sources` using the actual local source ID `<tap-id>-local`,
+concrete interface names and corresponding `tap.voip.interface_domains`.
+
+Managed `local_only` selectors, exact current media association and rule expiry
+apply locally. Existing BPF/port restrictions and eBPF failure policy remain in
+force. Optional `tap.packet_dedup.enabled` uses independent consumer decisions;
+its default is disabled. See [distributed media selection](../../docs/DISTRIBUTED_MEDIA.md)
+for a complete tap configuration, policy combinations, bounds and LI integration.

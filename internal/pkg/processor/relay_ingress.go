@@ -101,6 +101,7 @@ func (p *Processor) StreamRelayPackets(stream data.RelayDataService_StreamRelayP
 		// Verified relay-to-origin delegation establishes transport origin trust;
 		// the normal RADIUS decoder and LI admission still validate each claim.
 		internal.RADIUSSourceTrusted = true
+		internal.MediaSourceTrusted = true
 		p.processBatch(internal)
 		if p.filterProcessingBlocked() {
 			return status.Error(codes.Unavailable, "filter policy is faulted")

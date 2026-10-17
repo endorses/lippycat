@@ -147,10 +147,11 @@ type RecordHeader struct {
 	ID           PacketID
 }
 
-// RecordSchemaVersion identifies the declaration-order oracle format. Version 4
-// adds SIP CSeqNumber and ViaBranch metadata; major 2 identifies the separate
-// compact format. Persistent reuse of completed datasets is not supported.
-const RecordSchemaVersion uint16 = 4
+// RecordSchemaVersion identifies the declaration-order oracle format. Version 5
+// adds observation-domain identity and its known flag to packet metadata. Readers
+// reject other versions; major 2 identifies the separate compact format.
+// Persistent reuse or migration of completed datasets is not supported.
+const RecordSchemaVersion uint16 = 5
 
 // ResourceLimits are explicit validated budgets, shared across the current and
 // replacement session. Zero is invalid; defaults are selected after baselines.

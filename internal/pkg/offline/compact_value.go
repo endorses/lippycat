@@ -12,15 +12,15 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
-// Schema-v2 field order remains the prefix of schema-v2.3, independent of Go
-// declaration order. New SIP transaction fields are appended to VoIP metadata.
+// Schema-v2 field order remains the prefix of schema-v2.4, independent of Go
+// declaration order. Packet observation-domain fields are appended to rows.
 // Field additions require an explicit schema-version decision. Integer
 // widths follow the declared fixed-width types; Go int is always signed 64-bit.
 // Strings and containers have uint32 lengths; containers, pointers and bools
 // use one-byte presence/value markers. Timestamps use int64 seconds + uint32 ns.
 var compactFieldNames = map[reflect.Type][]string{
 	reflect.TypeOf(types.RADIUSMetadata{}):    {"Code", "CodeName", "Identifier", "MessageLength", "Association", "ObservationID", "RequestID", "Attributes"},
-	reflect.TypeOf(compactRow{}):              {"Argument", "Interface", "Sequence", "Locator", "Context", "PhysicalOrdinal", "OriginalCaptured", "OriginalWire", "OriginalLink", "Derived", "Captured", "Original", "Timestamp", "SrcIP", "DstIP", "SrcPort", "DstPort", "Protocol", "Info", "Node", "Device", "Transport", "Length", "LinkType", "Projection", "NodeRef", "DeviceRef", "ContextRef"},
+	reflect.TypeOf(compactRow{}):              {"Argument", "Interface", "Sequence", "Locator", "Context", "PhysicalOrdinal", "OriginalCaptured", "OriginalWire", "OriginalLink", "Derived", "Captured", "Original", "Timestamp", "SrcIP", "DstIP", "SrcPort", "DstPort", "Protocol", "Info", "Node", "Device", "Transport", "Length", "LinkType", "Projection", "NodeRef", "DeviceRef", "ContextRef", "ObservationDomain", "ObservationDomainKnown"},
 	reflect.TypeOf(compactProjection{}):       {"Presence", "User", "From", "To", "CallID", "Method", "Codec", "FromTag", "ToTag", "IMSI", "IMEI", "Status", "IsRTP", "SequenceNum", "SSRC", "QueryName", "QueryType", "QueryResponseTimeMs", "AnswerPresent", "TTL", "SNI", "JA3", "Host", "Path", "HTTPMethod", "StatusCode", "ContentLength"},
 	reflect.TypeOf(compactMetadata{}):         {"VoIP", "DNS", "Email", "TLS", "HTTP", "RADIUS"},
 	reflect.TypeOf(compactOverrides{}):        {"Mask", "Metadata"},

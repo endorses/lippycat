@@ -145,4 +145,14 @@ func (entry ReorderEntry) releaseAccepted() {
 	if entry.Accepted != nil {
 		entry.Accepted.Release()
 	}
+	for _, accepted := range entry.DeferredCopies {
+		accepted.Release()
+	}
+}
+
+func (entry ReorderEntry) deliveryCopies() int {
+	if len(entry.DeferredCopies) != 0 {
+		return len(entry.DeferredCopies)
+	}
+	return 1
 }

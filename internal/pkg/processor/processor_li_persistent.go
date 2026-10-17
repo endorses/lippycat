@@ -5,7 +5,6 @@ package processor
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/netip"
 	"strconv"
 	"time"
@@ -56,13 +55,9 @@ func (p *Processor) newRTPProvenance(pkt *types.PacketDisplay) (li.DeliveryProve
 		SourceAddress: src.Unmap().String(), DestinationAddress: dst.Unmap().String(), SourcePort: uint16(srcPort), DestinationPort: uint16(dstPort), SSRC: pkt.VoIPData.SSRC}, nil
 }
 
-// The caller holds the original task/call capture grants across the entire
-// bounded fan-out. Delayed callbacks use only their one-use accepted permit.
-func (p *Processor) deliverPersistentX3(task *li.InterceptTask, pkt *types.PacketDisplay, data []byte, metadata li.DeliveryMetadata, admission *CallAdmission) {
-	p.deliverPersistentX3WithPublication(task, pkt, data, metadata, admission, nil)
-}
-
-func (p *Processor) deliverPersistentX3WithPublication(task *li.InterceptTask, pkt *types.PacketDisplay, data []byte, metadata li.DeliveryMetadata, admission *CallAdmission, published func()) {
+// persistentX3Metadata binds delayed ordered product to the original capture
+// grant. Reordering never renews its admission deadline or source provenance.
+func (p *Processor) persistentX3Metadata(task *li.InterceptTask, pkt *types.PacketDisplay, metadata li.DeliveryMetadata, admission *CallAdmission) (li.DeliveryMetadata, bool) {
 	metadata.StateIncarnation = p.liManager.StateIncarnation()
 	metadata.TaskEndAt = li.TaskAuthorizationCutoff(task)
 	metadata.Deadline = metadata.AdmittedAt.Add(p.config.LIDeliveryX3MaxAge)
@@ -73,52 +68,11 @@ func (p *Processor) deliverPersistentX3WithPublication(task *li.InterceptTask, p
 	} else {
 		value, ok := p.liStorage.packetProvenance.Load(pkt)
 		if !ok || metadata.CallID != "" {
-			recordBufferedX3Discard(len(task.DestinationIDs))
-			return
+			return metadata, false
 		}
 		metadata.Provenance = value.(li.DeliveryProvenance)
 	}
-	for _, did := range task.DestinationIDs {
-		destination, err := liDeliveryMgr.GetDestination(did)
-		if err != nil {
-			recordBufferedX3Discard(1)
-			continue
-		}
-		copyMetadata := metadata
-		copyMetadata.DestinationGeneration = li.DestinationDeliveryGeneration(destination)
-		permit, err := liDeliveryClient.PrepareX3(task.XID, did, data, copyMetadata)
-		if err != nil {
-			recordBufferedX3Discard(1)
-			continue
-		}
-		key := fmt.Sprintf("%s-%s", task.XID, did)
-		buffer, loaded := liReorderBuffers.Load(key)
-		if !loaded {
-			candidate := delivery.NewBudgetedCallAwareReorderBuffer(func(entry delivery.ReorderEntry) {
-				// This path never enters Manager/adminMu or ordinary CallAdmission.
-				// Client owns exact monotonic revocation/expiry eligibility.
-				if err := liDeliveryClient.SendAcceptedX3(entry.Accepted); err != nil {
-					recordBufferedX3Discard(1)
-				}
-			}, 60*time.Millisecond, liReorderBudget, recordBufferedX3Discard)
-			if candidate == nil {
-				permit.Release()
-				recordBufferedX3Discard(1)
-				continue
-			}
-			candidate.SetWorkerGroup(liReorderWorkers)
-			var exists bool
-			buffer, exists = liReorderBuffers.LoadOrStore(key, candidate)
-			if exists {
-				candidate.Discard()
-			}
-		}
-		accepted := buffer.(*delivery.ReorderBuffer).AcceptEntryX3AfterCommit(delivery.ReorderEntry{Accepted: permit, PDU: data, Metadata: copyMetadata,
-			CallID: metadata.CallID, Generation: metadata.CallGeneration}, pkt.VoIPData.SSRC, pkt.VoIPData.SequenceNum, nil)
-		if accepted && published != nil {
-			published()
-		}
-	}
+	return metadata, true
 }
 
 func (p *Processor) closePersistentLICall(event CallFinalizationEvent) error {

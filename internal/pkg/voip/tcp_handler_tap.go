@@ -16,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
+	"github.com/endorses/lippycat/internal/pkg/voip/capturepolicy"
 	"github.com/google/gopacket"
 )
 
@@ -25,18 +26,28 @@ type tapCallRegistry interface {
 }
 
 type tapSelections struct {
-	mu sync.RWMutex
-	m  map[string]struct{}
+	mu      sync.RWMutex
+	m       map[string]struct{}
+	proofs  map[string]capturepolicy.FilterSelectionProof
+	matcher capturepolicy.SelectionProofMatcher
 }
 
 func (s *tapSelections) Selected(id string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	_, ok := s.m[id]
+	if ok && s.matcher != nil {
+		ok, _ = s.matcher.CurrentSelection(s.proofs[id])
+	}
 	return ok
 }
 func (s *tapSelections) MarkSelected(id string) { s.mu.Lock(); s.m[id] = struct{}{}; s.mu.Unlock() }
-func (s *tapSelections) Forget(id string)       { s.mu.Lock(); delete(s.m, id); s.mu.Unlock() }
+func (s *tapSelections) Forget(id string) {
+	s.mu.Lock()
+	delete(s.m, id)
+	delete(s.proofs, id)
+	s.mu.Unlock()
+}
 
 type tapTerminalResponses struct{}
 
@@ -66,9 +77,13 @@ func (a tapRegistryAdapter) Complete(id string, _ time.Time) ([]pipeline.CallLif
 	return nil, nil
 }
 
-type tapInjectionSink struct{ ch chan<- source.InjectedPacket }
+type tapInjectionSink struct {
+	ch            chan<- source.InjectedPacket
+	capturePolicy *tapCapturePolicy
+}
 
 type tapAttachment struct {
+	remote   *tapRemoteReceipt
 	lifetime callregistry.Lifetime
 	metadata *data.PacketMetadata
 	terminal bool
@@ -78,6 +93,35 @@ type tapAttachment struct {
 
 func (s tapInjectionSink) HandleSIP(ctx context.Context, in sipflow.SinkInput) pipeline.Result {
 	attachment, _ := in.Attachment.(tapAttachment)
+	finishMuted := func() {
+		if attachment.complete != nil {
+			attachment.complete()
+		}
+		if attachment.accepted != nil {
+			close(attachment.accepted)
+		}
+	}
+	if s.capturePolicy != nil && s.capturePolicy.policies.Signalling == SignallingNone {
+		finishMuted()
+		return pipeline.Result{Outcome: pipeline.OutcomeFiltered}
+	}
+	if receipt := attachment.remote; receipt != nil {
+		var association RemoteCallAssociation
+		current := false
+		if s.capturePolicy != nil && s.capturePolicy.remote != nil && in.Result.Packet != nil {
+			association, current = s.capturePolicy.remote.ResolveSignalling(receipt.event, captureadapter.ToPacketInfo(in.Result.Packet).Packet, in.Result.Packet.Source.InterfaceName)
+		}
+		if !current || association.CallID != in.Result.CallID || !receipt.proof.SameSelection(association) {
+			if receipt.required {
+				finishMuted()
+				return pipeline.Result{Outcome: pipeline.OutcomeFiltered}
+			}
+			association.InheritedFilterIDs = nil
+		}
+		if in.Result.Packet != nil {
+			tapFilterProvenance(in.Result.Packet, in.Result.Packet.DirectMatchedFilterIDs, association.InheritedFilterIDs)
+		}
+	}
 	metadata := attachment.metadata
 	if metadata == nil {
 		metadata, _ = in.Attachment.(*data.PacketMetadata)
@@ -145,16 +189,18 @@ func metadataFromSIPResult(r pipeline.SIPResult) *data.PacketMetadata {
 
 // TapTCPHandler adapts reassembled TCP messages to shared SIP orchestration.
 type TapTCPHandler struct {
+	capturePolicy    *tapCapturePolicy
 	packetChan       chan<- source.InjectedPacket
 	appFilter        ApplicationFilter
 	registry         tapCallRegistry
 	mu               sync.Mutex
 	flow             *sipflow.Orchestrator
+	selections       *tapSelections
 	metadataObserver sipflow.MetadataObserver
 }
 
 func NewTapTCPHandler(ch chan<- source.InjectedPacket) *TapTCPHandler {
-	return &TapTCPHandler{packetChan: ch}
+	return &TapTCPHandler{packetChan: ch, capturePolicy: &tapCapturePolicy{policies: CapturePolicies{Signalling: SignallingMatched, Media: MediaLocal}}}
 }
 
 func (h *TapTCPHandler) SetApplicationFilter(f ApplicationFilter) { h.appFilter = f }
@@ -171,7 +217,15 @@ func (h *TapTCPHandler) ensureFlow() *sipflow.Orchestrator {
 	if h.flow != nil {
 		return h.flow
 	}
-	o, err := sipflow.New(sipflow.Config{MetadataObserver: h.metadataObserver, SelectionPolicy: callregistry.StickySelectionPolicy{}, SelectionStore: &tapSelections{m: make(map[string]struct{})}, Registry: tapRegistryAdapter{h.registry}, Completion: tapTerminalResponses{}})
+	var registry sipflow.Registry = tapRegistryAdapter{h.registry}
+	observer := h.metadataObserver
+	if h.capturePolicy.policies.Media == MediaProcessor {
+		registry = nil
+		observer = nil
+	}
+	h.selections = &tapSelections{m: make(map[string]struct{}), proofs: make(map[string]capturepolicy.FilterSelectionProof)}
+	h.selections.matcher, _ = h.appFilter.(capturepolicy.SelectionProofMatcher)
+	o, err := sipflow.New(sipflow.Config{MetadataObserver: observer, SelectionPolicy: callregistry.StickySelectionPolicy{}, SelectionStore: h.selections, Registry: registry, Completion: tapTerminalResponses{}})
 	if err != nil {
 		logger.Error("Failed to create tap SIP orchestration", "error", err)
 		return nil
@@ -180,7 +234,7 @@ func (h *TapTCPHandler) ensureFlow() *sipflow.Orchestrator {
 	if queueSize < 1 {
 		queueSize = 1
 	}
-	if err = o.RegisterSink("tap_processor", tapInjectionSink{h.packetChan}, queueSize); err == nil {
+	if err = o.RegisterSink("tap_processor", tapInjectionSink{ch: h.packetChan, capturePolicy: h.capturePolicy}, queueSize); err == nil {
 		err = o.Start(context.Background())
 	}
 	if err != nil {
@@ -234,6 +288,9 @@ func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id,
 	pkt.SourcePath = provenance.InputFile
 	pkt.SourceIndex = provenance.ArgumentIndex
 	pkt.SourceSequence = provenance.LogicalSequence
+	if h.capturePolicy.policies != (CapturePolicies{Signalling: SignallingMatched, Media: MediaLocal}) {
+		return h.handlePolicySIP(pkt, event, msg, id, sharedsip.OptionsForEndpoints(at, src, dst))
+	}
 	o := h.ensureFlow()
 	if o == nil {
 		return false
@@ -243,7 +300,8 @@ func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id,
 		ParseOptions: sharedsip.OptionsForEndpoints(at, src, dst), FilterConfigured: true,
 		Match: func(event sharedsip.Event) bool {
 			if h.appFilter != nil {
-				return h.appFilter.MatchPacket(pkt.Packet)
+				matched, _ := h.matchWithProof(id, pkt.Packet)
+				return matched
 			}
 			return containsUserInHeaders(event.Headers)
 		},
@@ -254,6 +312,10 @@ func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id,
 			return ValidateCallIDForSecurity(event.CallID)
 		},
 	})
+	return h.dispatchSIP(o, r)
+}
+
+func (h *TapTCPHandler) dispatchSIP(o *sipflow.Orchestrator, r sipflow.ProcessResult) bool {
 	if r.Stage.Outcome == pipeline.OutcomeAccepted {
 		attachment, _ := r.Attachment.(tapAttachment)
 		metadata := attachment.metadata
@@ -274,7 +336,7 @@ func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id,
 				}
 			}
 		}
-		r.Attachment = tapAttachment{lifetime: attachment.lifetime, metadata: metadata, terminal: r.Terminal, complete: complete, accepted: accepted}
+		r.Attachment = tapAttachment{lifetime: attachment.lifetime, metadata: metadata, terminal: r.Terminal, complete: complete, accepted: accepted, remote: attachment.remote}
 		r = o.Dispatch(r)
 		if sinkResult, ok := r.Sinks["tap_processor"]; ok && sinkResult.Outcome == pipeline.OutcomeAccepted {
 			<-accepted
@@ -282,5 +344,23 @@ func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id,
 			complete()
 		}
 	}
-	return r.Stage.Outcome == pipeline.OutcomeAccepted
+	return h.capturePolicy.policies.Signalling != SignallingNone && r.Stage.Outcome == pipeline.OutcomeAccepted
+}
+
+func (h *TapTCPHandler) matchWithProof(id string, packet gopacket.Packet) (bool, []string) {
+	if matcher, ok := h.appFilter.(capturepolicy.SelectionProofMatcher); ok {
+		matched, ids, proof := matcher.MatchPacketWithSelectionProof(packet)
+		if matched && h.selections != nil {
+			h.selections.mu.Lock()
+			h.selections.proofs[id] = capturepolicy.MergeCurrentProofs(matcher, h.selections.proofs[id], proof)
+			h.selections.mu.Unlock()
+		}
+		return matched, ids
+	}
+	if withIDs, ok := h.appFilter.(interface {
+		MatchPacketWithIDs(gopacket.Packet) (bool, []string)
+	}); ok {
+		return withIDs.MatchPacketWithIDs(packet)
+	}
+	return h.appFilter != nil && h.appFilter.MatchPacket(packet), nil
 }

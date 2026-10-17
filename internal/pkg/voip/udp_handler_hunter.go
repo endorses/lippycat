@@ -29,6 +29,7 @@ import (
 
 // UDPPacketHandler processes UDP SIP/RTP packets for hunter mode with buffering
 type UDPPacketHandler struct {
+	capturePolicy          *hunterCapturePolicy
 	admission              *mediaadaptor.Bridge
 	tracker                *CallTracker
 	forwarder              PacketForwarder
@@ -99,13 +100,18 @@ func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, buffer
 		tracker.sdpReporter.Disable()
 	}
 	h := &UDPPacketHandler{
+		capturePolicy:   defaultHunterCapturePolicy(),
 		tracker:         tracker,
 		forwarder:       forwarder,
 		bufferMgr:       bufferMgr,
 		selectionPolicy: newHunterSelectionPolicy(),
 		bufferedSIP:     make(map[string][]bufferedSIPAnalysis),
 	}
-	h.orchestrator = newHunterSIPOrchestrator(forwarder, h.selectionPolicy)
+	store := newHunterSelectionStore()
+	if bufferMgr != nil {
+		store.current = bufferMgr.SelectionProofCurrent
+	}
+	h.orchestrator = newHunterPolicySIPOrchestrator(forwarder, h.selectionPolicy, h.capturePolicy, store)
 	return h
 }
 
@@ -174,6 +180,9 @@ func (h *UDPPacketHandler) discardAnalyses(callID string) {
 // This supports all filter types including phone_number, sip_user, sipuri, ip_address, etc.
 func (h *UDPPacketHandler) SetApplicationFilter(filter ApplicationFilter) {
 	h.appFilter = filter
+	if h.bufferMgr != nil {
+		h.bufferMgr.SetSelectionProofMatcher(filter)
+	}
 }
 
 func (h *UDPPacketHandler) SetSelectionPolicy(policy callregistry.SelectionPolicy) {
@@ -213,6 +222,15 @@ func (h *UDPPacketHandler) matchesFilterWithMetadata(packet gopacket.Packet, m *
 
 // HandleUDPPacket processes a UDP packet (SIP or RTP) with buffering
 func (h *UDPPacketHandler) HandleUDPPacket(pkt capture.PacketInfo, layer *layers.UDP) bool {
+	// Processor rules can authorize RTP/RTCP on ports conventionally used by SIP.
+	if h.capturePolicy.policies.Media == MediaProcessor && validRemoteMediaPayload(layer.Payload) {
+		return h.handleRTPPacket(pkt, layer)
+	}
+	// Explicit source policies use content detection for non-standard SIP ports;
+	// the capture backend has already applied the operator capture predicates.
+	if h.capturePolicy.policies != (CapturePolicies{Signalling: SignallingMatched, Media: MediaLocal}) && isSIPPacket(h.tracker, pkt.Packet) {
+		return h.handleSIPPacket(pkt, layer)
+	}
 	// Handle SIP packets (port 5060 or 5061)
 	if layer.SrcPort == SIPPort || layer.DstPort == SIPPort ||
 		layer.SrcPort == SIPPortTLS || layer.DstPort == SIPPortTLS {
@@ -239,7 +257,10 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	if network := packet.NetworkLayer(); network != nil {
 		opts.SourceIP, opts.DestinationIP = network.NetworkFlow().Src().String(), network.NetworkFlow().Dst().String()
 	}
-	directMatch, directFilterIDs := matchPacketWithIDs(h.appFilter, packet)
+	if handled, forwarded := h.capturePolicy.policySIP(pkt, nil, payload, "", opts, h.appFilter, h.orchestrator, h.tracker, h.bufferMgr, h.admission); handled {
+		return forwarded
+	}
+	directMatch, directFilterIDs, selectionProof := matchPacketWithSelectionProof(h.appFilter, packet)
 	envelope := envelopeForHunterPacket(pkt)
 	setHunterFilterProvenance(envelope, directFilterIDs, nil)
 	analysis := h.orchestrator.Analyze(sipflow.Message{
@@ -259,7 +280,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	inheritedFilterIDs := h.bufferMgr.MatchedFilterIDs(callID)
 	setHunterFilterProvenance(envelope, directFilterIDs, inheritedFilterIDs)
 	if directMatch {
-		h.bufferMgr.StoreMatchedFilterIDs(callID, directFilterIDs)
+		h.bufferMgr.StoreMatchedSelection(callID, directFilterIDs, selectionProof)
 	}
 
 	// Create call locally for TUI display (before filter check)
@@ -395,6 +416,20 @@ func sipPacketMetadata(callID string, metadata *CallMetadata) *data.PacketMetada
 func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers.UDP) bool {
 	packet := pkt.Packet
 	interfaceName := pkt.Interface
+	if h.capturePolicy.policies.Media == MediaProcessor {
+		if h.capturePolicy.remote == nil || !validRemoteMediaPayload(layer.Payload) {
+			return false
+		}
+		association, ok := h.capturePolicy.remote.ResolveMedia(packet, interfaceName)
+		if !ok || association.CallID == "" {
+			return false
+		}
+		h.forwardRTPPacket(association.CallID, packet, layer, interfaceName, pkt.LinkType, nil, association.InheritedFilterIDs, func() bool {
+			current, valid := h.capturePolicy.remote.ResolveMedia(packet, interfaceName)
+			return valid && association.SameSelection(current)
+		})
+		return true
+	}
 	dstPort := strconv.Itoa(int(layer.DstPort))
 	srcPort := strconv.Itoa(int(layer.SrcPort))
 
@@ -457,7 +492,7 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 
 	if shouldForward {
 		// Call already matched, forward immediately with RTP metadata
-		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName, pkt.LinkType, directFilterIDs, inheritedFilterIDs)
+		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName, pkt.LinkType, directFilterIDs, inheritedFilterIDs, h.bufferMgr.MediaSelectionCheck(resolution, sourceEndpoint, destinationEndpoint))
 		return true
 	}
 
@@ -525,7 +560,19 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 			}
 		}
 
-		if err := forwardPacketWithFilterProvenance(h.forwarder, pkt, packetMetadata, interfaceName, linkType, nil, h.bufferMgr.MatchedFilterIDs(callID)); err != nil {
+		resolution := h.tracker.ResolveMediaPacket(pkt)
+		if resolution.Status != callregistry.MediaResolved || resolution.CallID != callID {
+			continue
+		}
+		network := pkt.NetworkLayer().NetworkFlow()
+		udp := pkt.TransportLayer().(*layers.UDP)
+		source := net.JoinHostPort(network.Src().String(), strconv.Itoa(int(udp.SrcPort)))
+		destination := net.JoinHostPort(network.Dst().String(), strconv.Itoa(int(udp.DstPort)))
+		current := h.bufferMgr.MediaSelectionCheck(resolution, source, destination)
+		if !current() {
+			continue
+		}
+		if err := forwardPacketWithSelectionCheck(h.forwarder, pkt, packetMetadata, interfaceName, linkType, nil, h.bufferMgr.MatchedFilterIDsForResolution(resolution, source, destination), current); err != nil {
 			logger.Error("Failed to forward buffered UDP packet",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
@@ -554,12 +601,15 @@ func (h *UDPPacketHandler) RTPAttributionStats() RTPAttributionStats {
 }
 
 // forwardRTPPacket forwards a single RTP packet immediately (call already matched)
-func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) {
+func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string, selectionChecks ...func() bool) {
 	// Try to extract RTP header for metadata
 	var pbMetadata *data.PacketMetadata
+	if callID != "" {
+		pbMetadata = &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: callID}}
+	}
 
 	payload := layer.Payload
-	if len(payload) >= 12 { // Minimum RTP header size
+	if len(payload) >= 12 && !(payload[1] >= 192 && payload[1] <= 223) { // Minimum RTP header size; RTCP has a different layout.
 		// Extract RTP header fields (basic validation)
 		version := (payload[0] >> 6) & 0x03
 		if version == 2 { // RTP version 2
@@ -584,7 +634,11 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 	}
 
 	// Forward with RTP metadata if available
-	if err := forwardPacketWithFilterProvenance(h.forwarder, packet, pbMetadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs); err != nil {
+	var selectionCurrent func() bool
+	if len(selectionChecks) > 0 {
+		selectionCurrent = selectionChecks[0]
+	}
+	if err := forwardPacketWithSelectionCheck(h.forwarder, packet, pbMetadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs, selectionCurrent); err != nil {
 		logger.Error("Failed to forward RTP packet",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"error", err)
@@ -598,4 +652,19 @@ func completeCorrelationPacket(packet gopacket.Packet) bool {
 	}
 	info := packet.Metadata().CaptureInfo
 	return info.Length == len(packet.Data()) && info.CaptureLength == info.Length
+}
+
+// SetCapturePolicies configures independent source policies before capture starts.
+func (h *UDPPacketHandler) SetCapturePolicies(p CapturePolicies, resolver RemoteMediaResolver) error {
+	return h.capturePolicy.set(p, resolver)
+}
+
+func validRemoteMediaPayload(payload []byte) bool {
+	if len(payload) < 8 || payload[0]>>6 != 2 {
+		return false
+	}
+	if payload[1] >= 192 && payload[1] <= 223 {
+		return true
+	}
+	return len(payload) >= 12
 }

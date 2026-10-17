@@ -33,6 +33,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/packetforwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
+	"github.com/endorses/lippycat/internal/pkg/mediarules"
 	"github.com/endorses/lippycat/internal/pkg/packetreceipt"
 	"github.com/endorses/lippycat/internal/pkg/packetspool"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
@@ -64,34 +66,38 @@ func stableFilterIDUnion(direct, inherited []string) []string {
 
 // Config contains hunter configuration
 type Config struct {
-	Packets           packetforwarding.Config
-	FilterPolicy      filterpolicy.Config
-	EventAnalysis     *eventconfig.Config
-	MediaAdmission    *admissionintegration.Session
-	RADIUSPorts       []uint16
-	RADIUSScope       radius.CaptureScope
-	RADIUSOnly        bool
-	RADIUSCorrelation radius.CorrelatorConfig
-	RADIUSMatcher     radius.ObservationMatcher
-	ProcessorAddr     string
-	Processors        []failover.Endpoint
-	Failover          failover.Config
-	HunterID          string
-	Interfaces        []string
-	BPFFilter         string
-	BufferSize        int
-	SIPBufferSize     int
-	BatchSize         int
-	BatchTimeout      time.Duration
-	BatchQueueSize    int // Number of batches to buffer for async sending (0 = default: 1000)
+	Packets              packetforwarding.Config
+	FilterPolicy         filterpolicy.Config
+	EventAnalysis        *eventconfig.Config
+	MediaAdmission       *admissionintegration.Session
+	MediaRules           mediarules.Settings
+	VoIPInterfaceDomains map[string]mediaadmission.DomainID
+	RADIUSPorts          []uint16
+	RADIUSScope          radius.CaptureScope
+	RADIUSOnly           bool
+	RADIUSCorrelation    radius.CorrelatorConfig
+	RADIUSMatcher        radius.ObservationMatcher
+	ProcessorAddr        string
+	Processors           []failover.Endpoint
+	Failover             failover.Config
+	HunterID             string
+	Interfaces           []string
+	BPFFilter            string
+	BufferSize           int
+	SIPBufferSize        int
+	BatchSize            int
+	BatchTimeout         time.Duration
+	BatchQueueSize       int // Number of batches to buffer for async sending (0 = default: 1000)
 	// Flow control settings
 	MaxBufferedBatches int           // Max batches to buffer before blocking (0 = unlimited)
 	SendTimeout        time.Duration // Timeout for sending batches (0 = no timeout)
 	// VoIP filtering
-	VoIPMode         bool   // True for 'lc hunt voip' (with call buffering), false for generic hunt
-	EnableVoIPFilter bool   // Enable VoIP filtering with GPU acceleration
-	GPUBackend       string // GPU backend: "auto", "cuda", "opencl", "cpu-simd"
-	GPUBatchSize     int    // Batch size for GPU processing
+	VoIPSignallingPolicy string // matched (default), all or none
+	VoIPMediaPolicy      string // local (default) or processor
+	VoIPMode             bool   // True for 'lc hunt voip' (with call buffering), false for generic hunt
+	EnableVoIPFilter     bool   // Enable VoIP filtering with GPU acceleration
+	GPUBackend           string // GPU backend: "auto", "cuda", "opencl", "cpu-simd"
+	GPUBatchSize         int    // Batch size for GPU processing
 	// Filter capabilities advertised to processor
 	SupportedFilterTypes []string // Filter types this hunter supports (overrides VoIPMode defaults)
 	// TLS settings
@@ -119,6 +125,7 @@ type Config struct {
 
 // Hunter represents a hunter node
 type Hunter struct {
+	mediaRules            *hunterMediaRules
 	packetReplay          atomic.Uint64
 	packetSpool           *packetspool.Spool
 	packetReceiptVerifier *packetreceipt.Verifier
@@ -261,9 +268,15 @@ func New(config Config) (*Hunter, error) {
 	if config.MediaAdmission != nil {
 		h.statsCollector.SetMediaAdmissionProvider(config.MediaAdmission)
 	}
+	if err := h.configureMediaRules(); err != nil {
+		return nil, fmt.Errorf("configure hunter media rules: %w", err)
+	}
 
 	// Create filter manager with capture restarter interface
 	h.filterManager = filtering.New(config.HunterID, captureManager, h)
+	if h.mediaRules != nil {
+		h.filterManager.SetFilterValidator(validateProcessorMediaFilters)
+	}
 	if err := h.filterManager.InitializeSharedPolicy(config.FilterPolicy, config.SupportedFilterTypes); err != nil {
 		return nil, fmt.Errorf("initialize hunter shared policy: %w", err)
 	}
@@ -292,6 +305,14 @@ func (h *Hunter) Start(ctx context.Context) error {
 	h.ctx, h.cancel = context.WithCancel(ctx)
 	defer h.cancel()
 	defer h.closeReliablePackets()
+	if h.mediaRules != nil {
+		defer func() {
+			if err := h.mediaRules.store.Close(); err != nil {
+				logger.Error("Close temporary hunter media rules", "error", err)
+			}
+		}()
+		h.maintainMediaRules()
+	}
 	defer func() {
 		if err := h.filterManager.CloseSharedPolicy(); err != nil {
 			logger.Error("Failed to close hunter shared policy", "error", err)
@@ -390,7 +411,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 			"batch_size", h.config.GPUBatchSize,
 			"no_filter_policy", h.config.NoFilterPolicy)
 
-		if h.config.MediaAdmission != nil {
+		if h.config.MediaAdmission != nil && h.mediaRules == nil {
 			if err := appFilter.SetAdmissionObserver(func(prefixes []netip.Prefix, noFilters bool) error {
 				return h.config.MediaAdmission.UpdateSelectors(h.ctx, prefixes, noFilters)
 			}); err != nil {
@@ -451,11 +472,17 @@ func (h *Hunter) Start(ctx context.Context) error {
 	h.connectionManager = connection.New(
 		connection.Config{
 			OpenPacketStream: h.reliablePacketStreamFactory(),
+			OpenMediaRules:   h.openMediaRules,
 			InventoryEnabled: h.config.EventAnalysis.Inventory.Enabled,
 			ProcessorAddr:    "", // Processors is the normalized source of truth.
 			Processors:       append([]failover.Endpoint(nil), h.config.Processors...),
 			Failover:         h.config.Failover,
 			OnEndpoint: func(ctx context.Context, endpoint failover.Endpoint) error {
+				if h.mediaRules != nil {
+					if err := h.mediaRules.invalidate(); err != nil {
+						return err
+					}
+				}
 				return h.captureManager.PrepareProcessor(ctx, endpoint, h.filterManager.GetFilters())
 			},
 			HunterID:              h.config.HunterID,
@@ -1049,6 +1076,12 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 // ForwardPacketWithFilterProvenance forwards a packet while retaining the
 // origin of each filter match for downstream LI authorization.
 func (h *Hunter) ForwardPacketWithFilterProvenance(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) error {
+	return h.ForwardPacketWithSelectionCheck(packet, metadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs, nil)
+}
+
+// ForwardPacketWithSelectionCheck keeps current source selection attached until
+// the lifetime producer accepts this packet into a sealed batch.
+func (h *Hunter) ForwardPacketWithSelectionCheck(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string, selectionCurrent func() bool) error {
 	if packet == nil {
 		return fmt.Errorf("cannot forward nil packet")
 	}
@@ -1100,15 +1133,17 @@ func (h *Hunter) ForwardPacketWithFilterProvenance(packet gopacket.Packet, metad
 
 	// Use the provided link type from the capture source (preserves Linux cooked, raw IP, etc.)
 	envelope := &pipeline.PacketEnvelope{
-		Data:           packetData,
-		CaptureTime:    timestamp,
-		CaptureLength:  captureLen,
-		OriginalLength: originalLen,
-		LinkType:       linkType,
+		CurrentCaptureSelection: selectionCurrent,
+		Data:                    packetData,
+		CaptureTime:             timestamp,
+		CaptureLength:           captureLen,
+		OriginalLength:          originalLen,
+		LinkType:                linkType,
 		Source: pipeline.SourceProvenance{
-			Kind:          pipeline.SourceLiveCapture,
-			NodeID:        h.config.HunterID,
-			InterfaceName: interfaceName,
+			Kind:                    pipeline.SourceLiveCapture,
+			NodeID:                  h.config.HunterID,
+			InterfaceName:           interfaceName,
+			CapturePolicyGeneration: capture.CapturePolicyGeneration(packet),
 		},
 		Stages:                    stages,
 		Metadata:                  encodedMetadata,
@@ -1116,9 +1151,14 @@ func (h *Hunter) ForwardPacketWithFilterProvenance(packet gopacket.Packet, metad
 		InheritedMatchedFilterIDs: append([]string(nil), inheritedFilterIDs...),
 		MatchedFilterIDs:          stableFilterIDUnion(directFilterIDs, inheritedFilterIDs),
 	}
+	envelope.Source.ObservationDomain, envelope.Source.ObservationDomainKnown = h.captureObservationDomain(interfaceName)
 
 	// Add to current batch and send if full
-	if forwardingManager.AddPacketToBatch(envelope) {
+	full, err := forwardingManager.AddObservedPacket(envelope)
+	if err != nil {
+		return err
+	}
+	if full {
 		forwardingManager.SendBatch()
 	}
 
@@ -1141,4 +1181,17 @@ func (h *Hunter) GetStatsCollector() *stats.Collector {
 // GetStatsValues returns current statistics as plain uint64 values
 func (h *Hunter) GetStatsValues() (captured, matched, forwarded, dropped, bufferBytes uint64) {
 	return h.statsCollector.GetAll()
+}
+
+// WithObservedCaptureBoundary retains the capture generation across asynchronous
+// protocol parsing before it can mutate sticky selection or media associations.
+func (h *Hunter) WithObservedCaptureBoundary(generation uint64, apply func() bool) bool {
+	producer := h.packetProducer
+	if producer == nil && h.connectionManager != nil {
+		producer = h.connectionManager.GetForwardingManager()
+	}
+	if producer == nil {
+		return false
+	}
+	return producer.WithObservedCaptureBoundary(generation, apply)
 }

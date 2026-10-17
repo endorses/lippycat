@@ -38,6 +38,7 @@ type Config struct {
 	Processors       []failover.Endpoint
 	Failover         failover.Config
 	OnEndpoint       func(context.Context, failover.Endpoint) error
+	OpenMediaRules   func(lifetimeCtx, setupCtx context.Context, conn grpc.ClientConnInterface) (func() error, error)
 	OpenPacketStream func(lifetimeCtx, setupCtx context.Context, conn grpc.ClientConnInterface) (data.DataService_StreamPacketsClient, error)
 	HunterID         string
 	Interfaces       []string
@@ -133,6 +134,7 @@ type Manager struct {
 
 	candidateKinds   []eventsv1.EventKind
 	eventSetupCommit func() error
+	mediaRulesRun    func() error
 
 	// Reconnection
 	reconnectAttempts int
@@ -420,6 +422,16 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 		m.statusMu.Unlock()
 
 		m.publishAcceptedMode()
+		if run := m.mediaRulesRun; run != nil {
+			m.connWg.Add(1)
+			go func(ctx context.Context, generation uint64) {
+				defer m.connWg.Done()
+				if err := run(); err != nil && ctx.Err() == nil {
+					logger.Error("Temporary media rule subscription failed", "error", err)
+					m.markGenerationDisconnected(generation)
+				}
+			}(m.connCtx, generation)
+		}
 		m.connWg.Add(2)
 		go m.subscribeToFilters()
 		go m.sendHeartbeats()
@@ -484,6 +496,13 @@ func (m *Manager) connectAndRegister() error {
 	}
 	if err := m.filterManager.SetInitialFilters(m.registration.GetFilters()); err != nil {
 		return fmt.Errorf("apply initial processor filters: %w", err)
+	}
+	if m.config.OpenMediaRules != nil {
+		run, err := m.config.OpenMediaRules(m.connCtx, m.registrationContext(), m.managementConn)
+		if err != nil {
+			return fmt.Errorf("initialize temporary media rules: %w", err)
+		}
+		m.mediaRulesRun = run
 	}
 	if m.eventSetupCommit != nil {
 		return m.eventSetupCommit()
@@ -1200,6 +1219,7 @@ func (m *Manager) cleanup() {
 	m.eventClient = nil
 	m.clientsMu.Unlock()
 	m.eventSetupCommit = nil
+	m.mediaRulesRun = nil
 	m.candidateKinds = nil
 	m.firstControl = nil
 	m.streamMu.Lock()

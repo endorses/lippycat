@@ -3,6 +3,7 @@ package voip
 import (
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/voip/capturepolicy"
 	"sync"
 	"time"
 
@@ -22,7 +23,9 @@ type BufferManager struct {
 	matchedLifetimes       map[string]callregistry.Lifetime
 	buffers                map[string]*CallBuffer // callID -> buffer (temporary until filter decision)
 	matchedCalls           map[string]time.Time   // callID -> matchTime (persists after buffer cleanup)
-	matchedIDs             map[string][]string    // callID -> direct filter IDs selecting the call
+	selectionMatcher       capturepolicy.SelectionProofMatcher
+	selectionProofs        map[string]capturepolicy.FilterSelectionProof
+	matchedIDs             map[string][]string // callID -> direct filter IDs selecting the call
 	mu                     sync.RWMutex
 	maxAge                 time.Duration // Max time to buffer before decision
 	maxSize                int           // Max packets per buffer
@@ -46,6 +49,7 @@ func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 		matchedLifetimes: make(map[string]callregistry.Lifetime),
 		matchedCalls:     make(map[string]time.Time),
 		matchedIDs:       make(map[string][]string),
+		selectionProofs:  make(map[string]capturepolicy.FilterSelectionProof),
 		maxAge:           maxAge,
 		maxSize:          maxSize,
 		matchedTTL:       DefaultMatchedTTL,
@@ -180,7 +184,7 @@ func (bm *BufferManager) AddRTPPacket(callID string, port string, packet gopacke
 	}
 
 	// If filter already checked and matched, don't buffer (forward directly)
-	if buffer.IsFilterChecked() && buffer.IsMatched() {
+	if buffer.IsFilterChecked() && buffer.IsMatched() && bm.IsCallMatched(callID) {
 		return true // Caller should forward immediately
 	}
 
@@ -205,7 +209,7 @@ func (bm *BufferManager) AddRTPPacketForEndpoints(callID, sourceEndpoint, destin
 	if !exists || (!buffer.IsRTPPort(sourceEndpoint) && !buffer.IsRTPPort(destinationEndpoint)) {
 		return false, false
 	}
-	if buffer.IsFilterChecked() && buffer.IsMatched() {
+	if buffer.IsFilterChecked() && buffer.IsMatched() && bm.IsCallMatched(callID) {
 		return true, true
 	}
 
@@ -274,46 +278,33 @@ func (bm *BufferManager) CheckFilter(callID string, filterFunc func(*CallMetadat
 func (bm *BufferManager) CheckFilterWithCallback(
 	callID string,
 	filterFunc func(*CallMetadata) bool,
-	onMatch func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType),
+	onMatch func(string, []gopacket.Packet, *CallMetadata, string, layers.LinkType),
 ) bool {
 	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
 	buffer, exists := bm.buffers[callID]
 	if !exists || buffer.GetMetadata() == nil {
+		bm.mu.Unlock()
 		return false
 	}
-
-	// Check filter
-	matched := filterFunc(buffer.GetMetadata())
+	metadata := *buffer.GetMetadata()
+	metadata.MediaPorts = append([]uint32(nil), metadata.MediaPorts...)
+	matched := filterFunc(&metadata)
 	buffer.SetFilterResult(matched)
-
-	if matched {
-		// Record in matchedCalls so BYE can be processed even after buffer cleanup
-		bm.recordMatchLocked(callID)
-
-		// Take all buffered packets and empty the buffer, so a later filter
-		// check for the same call cannot re-emit them.
-		packets := buffer.DrainPackets()
-		logger.Info("Call matched filter, invoking callback",
-			"call_id", SanitizeCallIDForLogging(callID),
-			"packet_count", len(packets),
-			"from", buffer.GetMetadata().From,
-			"to", buffer.GetMetadata().To)
-
-		// Call the handler callback
-		if onMatch != nil {
-			onMatch(callID, packets, buffer.GetMetadata(), buffer.GetInterfaceName(), buffer.GetLinkType())
-		}
-	} else {
-		// Discard buffer
+	if !matched {
 		delete(bm.buffers, callID)
-		logger.Debug("Call did not match filter, discarding buffer",
-			"call_id", SanitizeCallIDForLogging(callID),
-			"packet_count", buffer.GetPacketCount())
+		bm.mu.Unlock()
+		return false
 	}
-
-	return matched
+	bm.recordMatchLocked(callID)
+	packets := buffer.DrainPackets()
+	interfaceName, linkType := buffer.GetInterfaceName(), buffer.GetLinkType()
+	bm.mu.Unlock()
+	// Sinks can consult current call selection and invoke registry observers.
+	// Delivery callbacks run after releasing the buffer-manager lock.
+	if onMatch != nil {
+		onMatch(callID, packets, &metadata, interfaceName, linkType)
+	}
+	return true
 }
 
 // MarkCallMatched records a call as matched without buffering a packet.
@@ -381,7 +372,7 @@ func (bm *BufferManager) MatchedFilterIDs(callID string) []string {
 	if _, matched := bm.matchedCalls[callID]; matched && !bm.matchedValidLocked(callID) {
 		return nil
 	}
-	return append([]string(nil), bm.matchedIDs[callID]...)
+	return bm.currentFilterIDsLocked(callID)
 }
 
 func stableFilterIDs(filterIDs []string) []string {
@@ -407,6 +398,7 @@ func (bm *BufferManager) DiscardBuffer(callID string) {
 	delete(bm.buffers, callID)
 	if _, matched := bm.matchedCalls[callID]; !matched {
 		delete(bm.matchedIDs, callID)
+		delete(bm.selectionProofs, callID)
 	}
 }
 
@@ -456,6 +448,7 @@ func (bm *BufferManager) cleanupOldBuffers() {
 			delete(bm.buffers, callID)
 			if _, matched := bm.matchedCalls[callID]; !matched {
 				delete(bm.matchedIDs, callID)
+				delete(bm.selectionProofs, callID)
 			}
 			continue
 		}
@@ -469,6 +462,7 @@ func (bm *BufferManager) cleanupOldBuffers() {
 			delete(bm.buffers, callID)
 			if _, matched := bm.matchedCalls[callID]; !matched {
 				delete(bm.matchedIDs, callID)
+				delete(bm.selectionProofs, callID)
 			}
 		}
 	}
@@ -482,6 +476,7 @@ func (bm *BufferManager) cleanupOldBuffers() {
 			delete(bm.matchedCalls, callID)
 			delete(bm.matchedLifetimes, callID)
 			delete(bm.matchedIDs, callID)
+			delete(bm.selectionProofs, callID)
 			delete(bm.buffers, callID)
 		}
 	}
@@ -578,7 +573,7 @@ func (bm *BufferManager) bindMatchedLifetime(callID string) {
 }
 func (bm *BufferManager) matchedValidLocked(callID string) bool {
 	at, ok := bm.matchedCalls[callID]
-	if !ok || time.Since(at) > bm.matchedTTL {
+	if !ok || time.Since(at) > bm.matchedTTL || !bm.selectionCurrentLocked(callID) {
 		return false
 	}
 	if bm.registry == nil {
@@ -592,6 +587,7 @@ func (bm *BufferManager) discardStaleMatchLocked(callID string) {
 		delete(bm.matchedCalls, callID)
 		delete(bm.matchedLifetimes, callID)
 		delete(bm.matchedIDs, callID)
+		delete(bm.selectionProofs, callID)
 		delete(bm.buffers, callID)
 	}
 }
@@ -604,7 +600,7 @@ func (bm *BufferManager) MatchedFilterIDsForResolution(resolution callregistry.M
 	if !bm.currentResolutionLocked(resolution, source, destination) || !bm.matchedValidLocked(resolution.CallID) {
 		return nil
 	}
-	return append([]string(nil), bm.matchedIDs[resolution.CallID]...)
+	return bm.currentFilterIDsLocked(resolution.CallID)
 }
 func (bm *BufferManager) currentResolutionLocked(resolution callregistry.MediaResolution, source, destination string) bool {
 	if bm.registry == nil || resolution.Status != callregistry.MediaResolved {
@@ -624,7 +620,7 @@ func (bm *BufferManager) AddResolvedRTPPacket(resolution callregistry.MediaResol
 		return false, false, nil
 	}
 	if bm.matchedValidLocked(resolution.CallID) {
-		return true, true, append([]string(nil), bm.matchedIDs[resolution.CallID]...)
+		return true, true, bm.currentFilterIDsLocked(resolution.CallID)
 	}
 	// An expired or revoked match must not fall back to a stale matched buffer.
 	if _, matched := bm.matchedCalls[resolution.CallID]; matched {
@@ -636,4 +632,68 @@ func (bm *BufferManager) AddResolvedRTPPacket(resolution callregistry.MediaResol
 	}
 	buffer.AddRTPPacket(packet)
 	return false, true, nil
+}
+
+// SetSelectionProofMatcher installs startup-only semantic selection validation.
+func (bm *BufferManager) SetSelectionProofMatcher(filter any) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	bm.selectionMatcher, _ = filter.(capturepolicy.SelectionProofMatcher)
+}
+func (bm *BufferManager) StoreMatchedSelection(callID string, ids []string, proof capturepolicy.FilterSelectionProof) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	bm.discardStaleMatchLocked(callID)
+	if bm.selectionMatcher != nil {
+		merged := make(capturepolicy.FilterSelectionProof)
+		for id, fingerprint := range bm.selectionProofs[callID] {
+			if valid, _ := bm.selectionMatcher.CurrentSelection(capturepolicy.FilterSelectionProof{id: fingerprint}); valid {
+				merged[id] = fingerprint
+			}
+		}
+		for id, fingerprint := range proof {
+			merged[id] = fingerprint
+		}
+		bm.selectionProofs[callID] = merged
+	}
+	bm.matchedIDs[callID] = stableFilterIDs(append(append([]string(nil), bm.matchedIDs[callID]...), ids...))
+}
+func (bm *BufferManager) selectionCurrentLocked(callID string) bool {
+	if bm.selectionMatcher == nil {
+		return true
+	}
+	valid, _ := bm.selectionMatcher.CurrentSelection(bm.selectionProofs[callID])
+	return valid
+}
+func (bm *BufferManager) SelectionProofCurrent(callID string) bool {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	return bm.selectionCurrentLocked(callID)
+}
+func (bm *BufferManager) currentFilterIDsLocked(callID string) []string {
+	if bm.selectionMatcher != nil {
+		_, ids := bm.selectionMatcher.CurrentSelection(bm.selectionProofs[callID])
+		return ids
+	}
+	return append([]string(nil), bm.matchedIDs[callID]...)
+}
+
+// MediaSelectionCheck freezes the selected definitions and call lifetime for an
+// asynchronous media release. A subsequent re-selection cannot bless old bytes.
+func (bm *BufferManager) MediaSelectionCheck(resolution callregistry.MediaResolution, source, destination string) func() bool {
+	bm.mu.RLock()
+	proof := capturepolicy.MergeProofs(nil, bm.selectionProofs[resolution.CallID])
+	bm.mu.RUnlock()
+	return func() bool {
+		bm.mu.RLock()
+		defer bm.mu.RUnlock()
+		if !bm.currentResolutionLocked(resolution, source, destination) || !bm.matchedValidLocked(resolution.CallID) {
+			return false
+		}
+		if bm.selectionMatcher != nil {
+			valid, _ := bm.selectionMatcher.CurrentSelection(proof)
+			return valid
+		}
+		return true
+	}
 }

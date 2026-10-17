@@ -63,8 +63,9 @@ func (sc *safeChannel) Chan() chan *data.PacketBatch {
 
 // Manager manages TUI/monitoring client subscriptions
 type Manager struct {
-	subscribers sync.Map // map[string]*safeChannel
-	filters     sync.Map // map[string][]string (clientID -> hunterIDs subscription list)
+	subscribers   sync.Map // map[string]*safeChannel
+	filters       sync.Map // map[string][]string (clientID -> hunterIDs subscription list)
+	packetFilters sync.Map // map[string]func(*data.CapturedPacket) bool
 
 	nextSubID atomic.Uint64
 
@@ -97,6 +98,7 @@ func (m *Manager) Remove(clientID string) {
 		val.(*safeChannel).Close()
 	}
 	m.filters.Delete(clientID)
+	m.packetFilters.Delete(clientID)
 }
 
 // SetFilter sets the hunter filter for a subscriber
@@ -164,4 +166,73 @@ func (m *Manager) CheckLimit() bool {
 
 	count := m.Count()
 	return count >= m.maxSubscribers
+}
+
+// SetPacketEligibility registers the same read-only predicate used by the
+// subscriber's stream owner. Duplicate claims must follow eligibility, so a
+// filtered first observation cannot suppress another source's eligible copy.
+func (m *Manager) SetPacketEligibility(clientID string, predicate func(*data.CapturedPacket) bool) {
+	if predicate == nil {
+		m.packetFilters.Delete(clientID)
+	} else {
+		m.packetFilters.Store(clientID, predicate)
+	}
+}
+
+// BroadcastFiltered provides one independent acceptance boundary per subscriber.
+// It applies registered hunter/packet eligibility before selection and invokes
+// finish with the actual queue outcome. Queue acceptance does not promise that
+// an external monitor remains connected or ultimately receives the batch.
+func (m *Manager) BroadcastFiltered(batch *data.PacketBatch, selectPackets func(string, *data.PacketBatch) (*data.PacketBatch, func(bool))) {
+	if batch == nil {
+		return
+	}
+	m.subscribers.Range(func(key, value any) bool {
+		clientID := key.(string)
+		if configured, ok := m.filters.Load(clientID); ok {
+			targets := configured.([]string)
+			eligible := false
+			for _, target := range targets {
+				if target == batch.HunterId {
+					eligible = true
+					break
+				}
+			}
+			if !eligible {
+				return true
+			}
+		}
+		eligible := batch
+		if configured, ok := m.packetFilters.Load(clientID); ok {
+			predicate := configured.(func(*data.CapturedPacket) bool)
+			var packets []*data.CapturedPacket
+			for _, packet := range batch.Packets {
+				if predicate(packet) {
+					packets = append(packets, packet)
+				}
+			}
+			if len(packets) == 0 {
+				return true
+			}
+			eligible = proto.Clone(batch).(*data.PacketBatch)
+			eligible.Packets = packets
+		}
+		selected, finish := selectPackets(clientID, eligible)
+		if selected == nil || len(selected.Packets) == 0 {
+			if finish != nil {
+				finish(false)
+			}
+			return true
+		}
+		copy := proto.Clone(selected).(*data.PacketBatch)
+		m.broadcasts.Add(1)
+		accepted := value.(*safeChannel).TrySend(copy)
+		if !accepted {
+			m.drops.Add(1)
+		}
+		if finish != nil {
+			finish(accepted)
+		}
+		return true
+	})
 }

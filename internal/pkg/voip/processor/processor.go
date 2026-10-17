@@ -17,6 +17,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
+	"github.com/endorses/lippycat/internal/pkg/voip/capturepolicy"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -128,6 +129,9 @@ type ApplicationFilter interface {
 
 // Config contains configuration for the VoIPProcessor.
 type Config struct {
+	// DeferSDPAssociations leaves endpoint publication to the configured metadata
+	// observer's validated offer/answer path. The default preserves local behavior.
+	DeferSDPAssociations bool
 	// MaxCalls is the maximum number of calls to track concurrently.
 	// Older calls are evicted when this limit is reached.
 	MaxCalls int
@@ -207,9 +211,10 @@ type Processor struct {
 
 // callState holds internal state for a tracked call.
 type callState struct {
-	info        CallInfo
-	metadata    *CallMetadata
-	lastUpdated time.Time
+	selectionProof capturepolicy.FilterSelectionProof
+	info           CallInfo
+	metadata       *CallMetadata
+	lastUpdated    time.Time
 }
 
 // New creates a new VoIPProcessor with the given configuration.
@@ -321,6 +326,17 @@ func (p *Processor) ProcessReassembledSIPResult(result pipeline.SIPResult) (*dat
 	return metadata, err
 }
 func (p *Processor) ProcessReassembledSIPResultWithLifetime(result pipeline.SIPResult) (*data.PacketMetadata, callregistry.Lifetime, error) {
+	var proof capturepolicy.FilterSelectionProof
+	if matcher, ok := p.appFilter.(capturepolicy.SelectionProofMatcher); ok && result.Packet != nil {
+		direct, _, captured := matcher.MatchPacketWithSelectionProof(result.Packet.Packet())
+		if !direct && !(processorSelectionStore{processor: p}).Selected(result.CallID) {
+			return nil, callregistry.Lifetime{}, fmt.Errorf("reassembled SIP selection is no longer current")
+		}
+		if direct {
+			proof = captured
+		}
+	}
+
 	observation, err := (processorSIPRegistry{processor: p}).Observe(result)
 	if err != nil {
 		return nil, callregistry.Lifetime{}, fmt.Errorf("observe reassembled SIP result: %w", err)
@@ -328,6 +344,13 @@ func (p *Processor) ProcessReassembledSIPResultWithLifetime(result pipeline.SIPR
 	attachment, ok := observation.Attachment.(processorSIPAttachment)
 	if !ok {
 		return nil, callregistry.Lifetime{}, fmt.Errorf("observe reassembled SIP result: unexpected attachment type %T", observation.Attachment)
+	}
+	if proof != nil {
+		p.mu.Lock()
+		if state := p.calls[result.CallID]; state != nil {
+			state.selectionProof = capturepolicy.MergeCurrentProofs(p.appFilter.(capturepolicy.SelectionProofMatcher), state.selectionProof, proof)
+		}
+		p.mu.Unlock()
 	}
 	return attachment.pbMetadata, attachment.lifetime, nil
 }

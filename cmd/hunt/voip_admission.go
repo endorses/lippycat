@@ -138,24 +138,30 @@ type admissionHunterConfig struct {
 }
 
 func newAdmissionHunterRouter(ctx context.Context, h voip.PacketForwarder, session *admissionintegration.Session, interfaces []string, config voip.Config) (*admissionHunterRouter, error) {
-	configs, err := admissionHunterConfigs(session.Config, interfaces, config)
+	return newScopedHunterRouter(ctx, h, session.Config, interfaces, config, session)
+}
+
+func newScopedHunterRouter(ctx context.Context, h voip.PacketForwarder, domains mediaadmission.Config, interfaces []string, config voip.Config, session *admissionintegration.Session) (*admissionHunterRouter, error) {
+	configs, err := admissionHunterConfigs(domains, interfaces, config)
 	if err != nil {
 		return nil, err
 	}
-	router := &admissionHunterRouter{config: session.Config, domains: make(map[mediaadmission.DomainID]*admissionHunterDomain)}
+	router := &admissionHunterRouter{config: domains, domains: make(map[mediaadmission.DomainID]*admissionHunterDomain)}
 	for _, child := range configs {
 		domain := child.domain
 		scope := &admissionHunterDomain{tracker: voip.NewCallTrackerWithConfig(&child.config), buffer: voip.NewBufferManager(5*time.Second, 200)}
 		router.domains[domain] = scope
-		retirementGrace := child.config.PCAPGracePeriod
-		if retirementGrace <= 0 {
-			retirementGrace = voip.DefaultConfig().PCAPGracePeriod
+		if session != nil {
+			retirementGrace := child.config.PCAPGracePeriod
+			if retirementGrace <= 0 {
+				retirementGrace = voip.DefaultConfig().PCAPGracePeriod
+			}
+			bridge, err := sipadmission.New(sipadmission.Config{RetirementGrace: retirementGrace, Domain: domain, Limits: session.Config, Registry: scope.tracker.AdmissionRegistry(), Controller: session.Controller, Metadata: session.Metadata, Diagnostics: session, OnError: func(err error) { logger.Error("Hunter media admission is incomplete", "domain", domain, "error", err) }})
+			if err != nil {
+				return nil, errors.Join(err, router.Close())
+			}
+			scope.bridge = bridge
 		}
-		bridge, err := sipadmission.New(sipadmission.Config{RetirementGrace: retirementGrace, Domain: domain, Limits: session.Config, Registry: scope.tracker.AdmissionRegistry(), Controller: session.Controller, Metadata: session.Metadata, Diagnostics: session, OnError: func(err error) { logger.Error("Hunter media admission is incomplete", "domain", domain, "error", err) }})
-		if err != nil {
-			return nil, errors.Join(err, router.Close())
-		}
-		scope.bridge = bridge
 		tcp := voip.NewHunterForwardHandler(scope.tracker, h, scope.buffer)
 		scope.tcp = tcp
 		factory := voip.NewSipStreamFactoryWithConfig(ctx, tcp, child.config, scope.tracker.IsCallActive)
@@ -163,13 +169,19 @@ func newAdmissionHunterRouter(ctx context.Context, h voip.PacketForwarder, sessi
 		scope.processor = voip.NewVoIPPacketProcessor(scope.tracker, h, scope.buffer)
 		scope.processor.SetTCPHandler(tcp)
 		scope.processor.SetAssembler(scope.assembler)
-		scope.processor.SetMediaAdmission(bridge, child.representative)
+		if scope.bridge != nil {
+			scope.processor.SetMediaAdmission(scope.bridge, child.representative)
+		}
 	}
 	return router, nil
 }
 
-func runAdmissionVoIPHunter(ctx context.Context, h *hunter.Hunter, session *admissionintegration.Session, interfaces []string, config voip.Config) error {
-	router, err := newAdmissionHunterRouter(ctx, h, session, interfaces, config)
+func runAdmissionVoIPHunter(ctx context.Context, h *hunter.Hunter, session *admissionintegration.Session, interfaces []string, config voip.Config, policyOptions ...voip.CapturePolicies) error {
+	return runScopedVoIPHunter(ctx, h, session.Config, interfaces, config, session, policyOptions...)
+}
+
+func runScopedVoIPHunter(ctx context.Context, h *hunter.Hunter, domains mediaadmission.Config, interfaces []string, config voip.Config, session *admissionintegration.Session, policyOptions ...voip.CapturePolicies) error {
+	router, err := newScopedHunterRouter(ctx, h, domains, interfaces, config, session)
 	if err != nil {
 		return err
 	}
@@ -178,6 +190,13 @@ func runAdmissionVoIPHunter(ctx context.Context, h *hunter.Hunter, session *admi
 			logger.Error("Close hunter admission router", "error", err)
 		}
 	}()
+	policies := voip.CapturePolicies{}
+	if len(policyOptions) > 0 {
+		policies = policyOptions[0]
+	}
+	if err := router.SetCapturePolicies(policies, hunterMediaResolver(h)); err != nil {
+		return err
+	}
 	h.SetPacketProcessor(router)
 	for _, scope := range router.domains {
 		go func(scope *admissionHunterDomain) {
@@ -193,3 +212,16 @@ func runAdmissionVoIPHunter(ctx context.Context, h *hunter.Hunter, session *admi
 }
 
 var _ forwarding.ApplicationFilterReceiver = (*admissionHunterRouter)(nil)
+
+// SetCapturePolicies applies one authority and resolver to every observation domain.
+func (r *admissionHunterRouter) SetCapturePolicies(p voip.CapturePolicies, resolver voip.RemoteMediaResolver) error {
+	if _, err := p.Normalize(); err != nil {
+		return err
+	}
+	for _, scope := range r.domains {
+		if err := scope.processor.SetCapturePolicies(p, resolver); err != nil {
+			return err
+		}
+	}
+	return nil
+}

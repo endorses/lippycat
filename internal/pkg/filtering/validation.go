@@ -30,6 +30,9 @@ func (e *ValidationError) Error() string {
 
 // ValidateFilterYAML validates a FilterYAML structure
 func ValidateFilterYAML(filter *FilterYAML) error {
+	if _, err := ParseDistributionScope(filter.DistributionScope); err != nil {
+		return err
+	}
 	if filter.ID == "" {
 		return &ValidationError{Field: "id", Message: "filter ID is required"}
 	}
@@ -49,6 +52,9 @@ func ValidateFilterYAML(filter *FilterYAML) error {
 func ValidateFilter(filter *management.Filter) error {
 	if filter == nil {
 		return &ValidationError{Field: "filter", Message: "filter is required"}
+	}
+	if DistributionScopeToString(filter.DistributionScope) == "unknown" {
+		return &ValidationError{Field: "distribution_scope", Message: "unknown distribution scope"}
 	}
 	if IsRADIUSFilter(filter.Type) {
 		_, _, err := CompileRADIUSFilter(filter)

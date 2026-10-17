@@ -9,6 +9,7 @@ package processor
 import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/packetdedup"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/endorses/lippycat/internal/pkg/types"
@@ -36,6 +37,9 @@ func (p *Processor) processLIPacket(_ *types.PacketDisplay, _ []string) {}
 func (p *Processor) processLIPacketWithProvenance(_ *types.PacketDisplay, _, _ []string) {}
 
 func (p *Processor) processLIPacketWithAdmission(_ *types.PacketDisplay, _, _ []string, _ *CallAdmission, _ ...[]byte) {
+}
+
+func (p *Processor) processLIPacketWithAdmissionAndDedup(_ *types.PacketDisplay, _, _ []string, _ *CallAdmission, _ *packetdedup.Observation, _ ...[]byte) {
 }
 
 // isLIEnabled always returns false when LI is not compiled in.

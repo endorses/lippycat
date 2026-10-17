@@ -134,12 +134,16 @@ func (e *X2Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) erro
 	if e.nfID != "" {
 		pdu.AddAttribute(e.attrBuilder.NFID(e.nfID))
 	}
-	if pkt.NodeID != "" {
-		pdu.AddAttribute(e.attrBuilder.IPID(pkt.NodeID))
+	ipID := e.nfID
+	if ipID == "" {
+		ipID = pkt.NodeID
+	}
+	if ipID != "" {
+		pdu.AddAttribute(e.attrBuilder.IPID(ipID))
 	}
 	seq, err := e.sequencer.Next(SequenceContext{
 		PDUType: PDUTypeX2, XID: pdu.Header.XID, DomainID: e.domainID,
-		NFID: e.nfID, IPID: pkt.NodeID, CorrelationID: pdu.Header.CorrelationID,
+		NFID: e.nfID, IPID: ipID, CorrelationID: pdu.Header.CorrelationID,
 	})
 	if err != nil {
 		return err

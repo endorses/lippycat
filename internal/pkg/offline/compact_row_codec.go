@@ -110,6 +110,10 @@ func (e *compactRowEncoder) row(r *compactRow) {
 	e.endColumn()
 	e.uint(uint64(r.ContextRef), 4)
 	e.endColumn()
+	e.uint(uint64(r.ObservationDomain), 4)
+	e.endColumn()
+	e.boolean(r.ObservationDomainKnown)
+	e.endColumn()
 }
 func (e *compactRowEncoder) projection(p *compactProjection) {
 	if p.Presence & ^uint8(31) != 0 {

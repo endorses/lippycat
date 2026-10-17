@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
@@ -27,6 +28,7 @@ import (
 )
 
 type processorPolicy struct {
+	installedRevision atomic.Uint64
 	management.UnimplementedFilterPolicyServiceServer
 	processor     *Processor
 	config        filterpolicy.Config
@@ -190,7 +192,17 @@ func (runtime *processorPolicy) install(snapshot *management.SignedPolicySnapsho
 		return err
 	}
 	runtime.readyOnce.Do(func() { close(runtime.ready) })
-	return nil
+	runtime.installedRevision.Store(snapshot.GetSnapshot().GetRevision())
+	return p.reconcileMediaSelection()
+}
+
+// Read the effective installed revision without reentering State's acceptance
+// mutex from packet admission or a capture-policy boundary callback.
+func (p *Processor) currentCapturePolicyRevision() uint64 {
+	if p.sharedPolicy == nil {
+		return 0
+	}
+	return p.sharedPolicy.installedRevision.Load()
 }
 
 func verifiedPolicyPeer(ctx context.Context) (*tls.ConnectionState, error) {

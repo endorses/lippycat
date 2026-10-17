@@ -39,6 +39,10 @@ type Diagnostics interface {
 }
 
 type Config struct {
+	// AcceptSource is an explicit composition boundary for authenticated remote
+	// observations. The caller must validate transport identity and observation
+	// scope before invoking the bridge. Nil retains local-capture-only behavior.
+	AcceptSource func(pipeline.SourceProvenance) bool
 	// Now is an optional monotonic-clock source for deterministic lifecycle tests.
 	Now             func() time.Time
 	RetirementGrace time.Duration
@@ -142,6 +146,9 @@ func New(cfg Config) (*Bridge, error) {
 }
 
 func (b *Bridge) local(result pipeline.SIPResult) bool {
+	if result.Packet != nil && b.cfg.AcceptSource != nil {
+		return b.cfg.AcceptSource(result.Packet.Source)
+	}
 	return result.Packet != nil && result.Packet.Source.Kind == pipeline.SourceLiveCapture && b.cfg.Limits.DomainForInterface(result.Packet.Source.InterfaceName) == b.cfg.Domain
 }
 func (b *Bridge) report(err error) error {

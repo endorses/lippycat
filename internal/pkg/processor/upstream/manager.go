@@ -599,8 +599,14 @@ func (m *Manager) cleanup() {
 
 // Forward forwards packet batch to upstream processor
 func (m *Manager) Forward(batch *data.PacketBatch) {
+	m.TryForward(batch)
+}
+
+// TryForward reports acceptance by the current bounded outbound queue, not
+// remote delivery. Rejected observations remain eligible at other origins.
+func (m *Manager) TryForward(batch *data.PacketBatch) bool {
 	if batch == nil {
-		return
+		return false
 	}
 	m.mu.Lock()
 	generation := m.generation
@@ -609,7 +615,7 @@ func (m *Manager) Forward(batch *data.PacketBatch) {
 	if generation == nil {
 		m.recordDropped(batch, "stream unavailable")
 		logger.Debug("Upstream stream not available, dropping batch")
-		return
+		return false
 	}
 
 	// Serialize the accepting check with generation teardown. This prevents a
@@ -619,11 +625,12 @@ func (m *Manager) Forward(batch *data.PacketBatch) {
 	defer generation.enqueueMu.Unlock()
 	if !generation.accepting.Load() {
 		m.recordDropped(batch, "generation stopped")
-		return
+		return false
 	}
 
 	select {
 	case generation.queue <- batch:
+		return true
 	case <-generation.ctx.Done():
 		m.recordDropped(batch, "generation cancelled")
 	case <-m.ctx.Done():
@@ -634,6 +641,7 @@ func (m *Manager) Forward(batch *data.PacketBatch) {
 			"queue_capacity", cap(generation.queue), "dropped_batches", dropped,
 			"packets", len(batch.Packets))
 	}
+	return false
 }
 
 func (m *Manager) recordDropped(batch *data.PacketBatch, reason string) uint64 {

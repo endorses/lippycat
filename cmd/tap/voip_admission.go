@@ -31,7 +31,22 @@ type tapVoIPRouting struct {
 	shards    int
 }
 
-func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config, shards int, session *admissionintegration.Session, grace time.Duration, interfaces []string) (_ *tapVoIPRouting, err error) {
+type tapVoIPSourcePolicy struct {
+	Policies         voip.CapturePolicies
+	Resolver         voip.RemoteMediaResolver
+	InterfaceDomains map[string]mediaadmission.DomainID
+}
+
+func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config, shards int, session *admissionintegration.Session, grace time.Duration, interfaces []string, policyOptions ...tapVoIPSourcePolicy) (_ *tapVoIPRouting, err error) {
+	policies := tapVoIPSourcePolicy{}
+	if len(policyOptions) > 0 {
+		policies = policyOptions[0]
+	}
+	normalized, policyErr := policies.Policies.Normalize()
+	if policyErr != nil {
+		return nil, policyErr
+	}
+	policies.Policies = normalized
 	grace = effectiveTapVoIPGrace(grace)
 	cfg := mediaadmission.DefaultConfig()
 	if session != nil {
@@ -40,6 +55,17 @@ func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config
 		// Disabled admission preserves the processor's historical default
 		// substitution before partitioning its process budget.
 		procConfig.MaxCalls = voipprocessor.DefaultConfig().MaxCalls
+	}
+	if len(policies.InterfaceDomains) > 0 {
+		if session != nil {
+			for iface, domain := range policies.InterfaceDomains {
+				if cfg.DomainForInterface(iface) != domain {
+					return nil, fmt.Errorf("tap interface domain for %s conflicts with RTP admission", iface)
+				}
+			}
+		} else {
+			cfg.InterfaceDomains = policies.InterfaceDomains
+		}
 	}
 	domains := cfg.Domains()
 	// Limits are process budgets. Partition them deterministically instead of
@@ -66,7 +92,10 @@ func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config
 		r.handlers = append(r.handlers, handler)
 		handler.SetApplicationFilter(procConfig.ApplicationFilter)
 		handler.SetCallRegistry(proc)
-		if session != nil {
+		if err = handler.SetCapturePolicies(policies.Policies, policies.Resolver); err != nil {
+			return nil, err
+		}
+		if session != nil && policies.Policies.Media != voip.MediaProcessor {
 			bridge, bridgeErr := voipadmission.New(voipadmission.Config{RetirementGrace: grace, Domain: domain, Limits: cfg, Registry: proc.CallRegistry(), Controller: session.Controller, Metadata: session.Metadata, Diagnostics: session, OnError: func(err error) { logger.Error("Tap media admission update failed", "error", err) }})
 			if bridgeErr != nil {
 				return nil, bridgeErr
@@ -83,7 +112,7 @@ func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config
 		reassemblyConfig.ShardCount = shards
 		r.engines[domain] = pipeline.NewReassemblyEngine(factory, reassemblyConfig)
 	}
-	if session == nil {
+	if session == nil && len(domains) == 1 {
 		r.adapter = r.children[0]
 	} else {
 		r.adapter, err = voipprocessor.NewScopedSourceAdapter(cfg, r.children, grace)

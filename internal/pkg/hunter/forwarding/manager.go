@@ -4,6 +4,7 @@ package forwarding
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -83,26 +84,29 @@ type PacketBufferProvider interface {
 
 // Config contains forwarding configuration
 type Config struct {
+	ValidateCaptureSelection func(*pipeline.PacketEnvelope) bool
+	ObservationDomain        func(string) (uint32, bool)
 	// BatchSink makes this manager a lifetime producer. It uses the same packet
 	// processing/batching path without owning a connection or an overflow sender.
 	BatchSink func(*pipeline.PacketBatch) error
 	// ExternalProducer prevents connection generations consuming capture twice.
 	ExternalProducer bool
 	// DurableSendNext sends bounded retained work and waits for verified custody.
-	DurableSendNext      func(context.Context, data.DataService_StreamPacketsClient, func(context.Context) error) (uint64, error)
-	CaptureAllowed       func(time.Time) bool
-	InitialCapturePolicy []byte
-	RADIUSPorts          []uint16
-	RADIUSScope          radius.CaptureScope
-	RADIUSOnly           bool
-	RADIUSCorrelation    radius.CorrelatorConfig
-	RADIUSMatcher        radius.ObservationMatcher
-	HunterID             string
-	BatchSize            int
-	BatchTimeout         time.Duration
-	BufferSize           int
-	BatchQueueSize       int // Number of batches to buffer for async sending (0 = default)
-	IncludeHTTPHeaders   bool
+	DurableSendNext          func(context.Context, data.DataService_StreamPacketsClient, func(context.Context) error) (uint64, error)
+	CaptureAllowed           func(time.Time) bool
+	RequireCaptureProvenance bool
+	InitialCapturePolicy     []byte
+	RADIUSPorts              []uint16
+	RADIUSScope              radius.CaptureScope
+	RADIUSOnly               bool
+	RADIUSCorrelation        radius.CorrelatorConfig
+	RADIUSMatcher            radius.ObservationMatcher
+	HunterID                 string
+	BatchSize                int
+	BatchTimeout             time.Duration
+	BufferSize               int
+	BatchQueueSize           int // Number of batches to buffer for async sending (0 = default)
+	IncludeHTTPHeaders       bool
 
 	// Disk overflow buffer (optional)
 	DiskBufferEnabled bool   // Enable disk overflow buffer
@@ -140,8 +144,9 @@ func (t realTicker) Chan() <-chan time.Time        { return t.C }
 
 // Manager handles packet batching and forwarding to processor
 type Manager struct {
-	radiusProcessor *radius.CaptureProcessor
-	config          Config
+	captureGeneration uint64 // protected by batchMu; changes under processingMu
+	radiusProcessor   *radius.CaptureProcessor
+	config            Config
 
 	// Streaming
 	stream          data.DataService_StreamPacketsClient
@@ -206,17 +211,18 @@ func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBu
 		config.Clock = realClock{}
 	}
 	m := &Manager{
-		config:           config,
-		currentBatch:     make([]*pipeline.PacketEnvelope, 0, config.BatchSize),
-		statsCollector:   statsCollector,
-		packetBufferProv: packetBufferProv,
-		connCtx:          connCtx,
-		batchQueue:       batchQueue, // Use provided persistent queue
-		flowChanged:      make(chan struct{}, 1),
-		slowSendInterval: config.SlowSendInterval,
-		clock:            config.Clock,
-		streamReady:      make(chan struct{}),
-		capturePolicy:    append([]byte(nil), config.InitialCapturePolicy...),
+		config:            config,
+		currentBatch:      make([]*pipeline.PacketEnvelope, 0, config.BatchSize),
+		statsCollector:    statsCollector,
+		packetBufferProv:  packetBufferProv,
+		connCtx:           connCtx,
+		batchQueue:        batchQueue, // Use provided persistent queue
+		flowChanged:       make(chan struct{}, 1),
+		slowSendInterval:  config.SlowSendInterval,
+		clock:             config.Clock,
+		streamReady:       make(chan struct{}),
+		capturePolicy:     append([]byte(nil), config.InitialCapturePolicy...),
+		captureGeneration: captureGenerations.Add(1),
 	}
 
 	var radiusErr error
@@ -380,6 +386,10 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 				if m.config.CaptureAllowed != nil && !m.config.CaptureAllowed(time.Now()) {
 					return
 				}
+				m.batchMu.Lock()
+				generation := m.captureGeneration
+				m.batchMu.Unlock()
+				capture.StampCapturePolicy(pktInfo.Packet, generation)
 				// Increment captured counter
 				m.statsCollector.IncrementCaptured()
 
@@ -432,6 +442,9 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 				}
 
 				envelope := convertPacket(pktInfo, matchedFilterIDs)
+				if m.config.ObservationDomain != nil {
+					envelope.Source.ObservationDomain, envelope.Source.ObservationDomainKnown = m.config.ObservationDomain(pktInfo.Interface)
+				}
 				envelope.RADIUS = radiusObservation
 				metadata := protocolmeta.Enrich(pktInfo.Packet, nil, m.config.IncludeHTTPHeaders)
 
@@ -477,6 +490,24 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 // SendBatch queues the current batch for async sending
 func (m *Manager) SendBatch() {
 	m.batchMu.Lock()
+	kept := m.currentBatch[:0]
+	for _, envelope := range m.currentBatch {
+		if envelope.CurrentCaptureSelection != nil && !envelope.CurrentCaptureSelection() {
+			m.statsCollector.IncrementDropped(1)
+			continue
+		}
+		if m.config.RequireCaptureProvenance && (envelope.Source.CapturePolicyGeneration != m.captureGeneration || m.config.CaptureAllowed == nil || !m.config.CaptureAllowed(time.Now())) {
+			m.statsCollector.IncrementDropped(1)
+			continue
+		}
+		if m.config.RequireCaptureProvenance && (m.config.ValidateCaptureSelection == nil || !m.config.ValidateCaptureSelection(envelope)) {
+			m.statsCollector.IncrementDropped(1)
+			continue
+		}
+		kept = append(kept, envelope)
+	}
+	clear(m.currentBatch[len(kept):])
+	m.currentBatch = kept
 	if len(m.currentBatch) == 0 {
 		m.batchMu.Unlock()
 		return
@@ -560,6 +591,10 @@ func (m *Manager) ApplyCapturePolicy(encoded []byte, apply func() error) error {
 	m.processingMu.Lock()
 	defer m.processingMu.Unlock()
 	m.SendBatch()
+	// Invalidate delayed old callbacks before changing either matchers or token.
+	m.batchMu.Lock()
+	m.captureGeneration = captureGenerations.Add(1)
+	m.batchMu.Unlock()
 	if err := apply(); err != nil {
 		return err
 	}
@@ -832,6 +867,37 @@ func (m *Manager) AddPacketToBatch(envelope *pipeline.PacketEnvelope) bool {
 	return batchLen >= m.config.BatchSize
 }
 
+var captureGenerations atomic.Uint64
+var ErrCaptureProvenance = errors.New("packet capture authority is expired or belongs to an earlier policy generation")
+
+// AddObservedPacket does not acquire processingMu: immediate UDP processing is
+// already inside that boundary, while asynchronous TCP/buffer callbacks are not.
+// batchMu linearizes both paths with policy replacement without lock recursion.
+func (m *Manager) AddObservedPacket(envelope *pipeline.PacketEnvelope) (bool, error) {
+	m.batchMu.Lock()
+	defer m.batchMu.Unlock()
+	if envelope == nil {
+		return false, ErrCaptureProvenance
+	}
+	if m.config.ObservationDomain != nil && !envelope.Source.ObservationDomainKnown {
+		envelope.Source.ObservationDomain, envelope.Source.ObservationDomainKnown = m.config.ObservationDomain(envelope.Source.InterfaceName)
+	}
+	if m.config.RequireCaptureProvenance && (envelope.Source.CapturePolicyGeneration == 0 || envelope.Source.CapturePolicyGeneration != m.captureGeneration || m.config.CaptureAllowed == nil || !m.config.CaptureAllowed(time.Now())) {
+		m.statsCollector.IncrementDropped(1)
+		return false, ErrCaptureProvenance
+	}
+	if m.config.RequireCaptureProvenance && (m.config.ValidateCaptureSelection == nil || !m.config.ValidateCaptureSelection(envelope)) {
+		m.statsCollector.IncrementDropped(1)
+		return false, ErrCaptureProvenance
+	}
+	if envelope.CurrentCaptureSelection != nil && !envelope.CurrentCaptureSelection() {
+		m.statsCollector.IncrementDropped(1)
+		return false, ErrCaptureProvenance
+	}
+	m.currentBatch = append(m.currentBatch, envelope)
+	return len(m.currentBatch) >= m.config.BatchSize, nil
+}
+
 // convertPacket converts capture.PacketInfo to the normalized pipeline format.
 // matchedFilterIDs contains IDs of filters that matched this packet (for LI correlation)
 func convertPacket(pktInfo capture.PacketInfo, matchedFilterIDs []string) *pipeline.PacketEnvelope {
@@ -874,7 +940,7 @@ func convertPacket(pktInfo capture.PacketInfo, matchedFilterIDs []string) *pipel
 		CaptureLength:          captureLen,
 		OriginalLength:         originalLen,
 		LinkType:               pktInfo.LinkType,
-		Source:                 pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, NodeID: "", InterfaceName: pktInfo.Interface},
+		Source:                 pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, NodeID: "", InterfaceName: pktInfo.Interface, CapturePolicyGeneration: capture.CapturePolicyGeneration(pkt)},
 		Stages:                 stages,
 		MatchedFilterIDs:       matchedFilterIDs, // For LI correlation
 		DirectMatchedFilterIDs: append([]string(nil), matchedFilterIDs...),
@@ -913,4 +979,19 @@ func captureScope(config Config) radius.CaptureScope {
 	scope := config.RADIUSScope
 	scope.OriginNodeID = config.HunterID
 	return scope
+}
+
+// WithObservedCaptureBoundary validates the original observation before any
+// asynchronous protocol state changes, under the policy replacement boundary.
+func (m *Manager) WithObservedCaptureBoundary(generation uint64, apply func() bool) bool {
+	m.processingMu.Lock()
+	defer m.processingMu.Unlock()
+	m.batchMu.Lock()
+	valid := !m.config.RequireCaptureProvenance || generation != 0 && generation == m.captureGeneration && m.config.CaptureAllowed != nil && m.config.CaptureAllowed(time.Now())
+	m.batchMu.Unlock()
+	if !valid {
+		m.statsCollector.IncrementDropped(1)
+		return false
+	}
+	return apply()
 }

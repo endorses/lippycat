@@ -246,3 +246,17 @@ func TestCapturePolicyQuiescesDeviceAfterOnlineOnlyDisconnect(t *testing.T) {
 	require.NoError(t, f.manager.QuiesceExpiredPolicy(t.Context()))
 	require.Equal(t, 1, restarter.quiesced)
 }
+
+func TestCaptureSelectionUsesOnlyInstalledSourcePolicy(t *testing.T) {
+	f := newCaptureLeaseFixture(t)
+	require.False(t, f.manager.CaptureSelectionAllowed([]string{"li-original-task-0"}))
+	f.install(t, f.sign(t, 1, true))
+	require.True(t, f.manager.CaptureSelectionAllowed([]string{"li-original-task-0"}))
+	require.False(t, f.manager.CaptureSelectionAllowed(nil))
+	require.False(t, f.manager.CaptureSelectionAllowed([]string{"foreign"}))
+	require.False(t, f.manager.CaptureSelectionAllowed([]string{"li-original-task-0", "foreign"}))
+	f.manager.sharedPolicy.lease.mu.Lock()
+	f.manager.sharedPolicy.lease.fault = true
+	f.manager.sharedPolicy.lease.mu.Unlock()
+	require.False(t, f.manager.CaptureSelectionAllowed([]string{"li-original-task-0"}))
+}

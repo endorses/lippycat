@@ -10,6 +10,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/packetdedup"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/voip"
@@ -131,6 +132,7 @@ type deferredLICorrelationPacket struct {
 	incarnation uuid.UUID
 	admittedAt  time.Time
 	provenance  any
+	dedup       *packetdedup.Observation
 }
 
 func (p *Processor) snapshotLICorrelationPacket(pkt *types.PacketDisplay, tasks []*li.InterceptTask) (*deferredLICorrelationPacket, bool) {
@@ -190,6 +192,12 @@ func (p *Processor) snapshotLICorrelationPacket(pkt *types.PacketDisplay, tasks 
 	}
 	if p.liStorage != nil {
 		snapshot.provenance, _ = p.liStorage.packetProvenance.Load(pkt)
+		if observed, ok := p.liStorage.packetDedup.Load(pkt); ok {
+			observation := observed.(packetdedup.Observation)
+			observation.Packet = append([]byte(nil), observation.Packet...)
+			snapshot.bytes += len(observation.Packet) + len(observation.Consumer) + len(observation.Domain) + len(observation.Flow) + len(observation.Source) + 256
+			snapshot.dedup = &observation
+		}
 	}
 	snapshot.packet = &clone
 	return snapshot, true
@@ -225,6 +233,10 @@ func (p *Processor) deliverLICorrelationSnapshot(snapshot *deferredLICorrelation
 	if snapshot.provenance != nil {
 		p.liStorage.packetProvenance.Store(snapshot.packet, snapshot.provenance)
 		defer p.liStorage.packetProvenance.Delete(snapshot.packet)
+	}
+	if snapshot.dedup != nil {
+		p.liStorage.packetDedup.Store(snapshot.packet, *snapshot.dedup)
+		defer p.liStorage.packetDedup.Delete(snapshot.packet)
 	}
 	for _, task := range snapshot.tasks {
 		process(task, snapshot.packet, &decision)

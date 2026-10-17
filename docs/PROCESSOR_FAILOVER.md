@@ -307,8 +307,11 @@ TLS session-key recovery across handover is unsupported; reliable raw mode rejec
 LI administration/delivery remains on LI-enabled central processor or tap builds.
 A generic hunter can carry signed LI capture policy without the `li` build tag.
 Use `filter_policy.owner: li`, retain the original `li-` filter IDs, and provision
-encrypted policy and raw stores. The current hunter guard supports reliable encrypted
-raw packet mode with synchronous filtering; VoIP call-buffer mode is explicitly rejected.
+encrypted policy and raw stores. This profile requires verified mTLS, reliable raw
+packet delivery and a current signed finite capture policy. VoIP capture supports
+`signalling_policy: matched` or `none`; `all` is rejected because unselected
+signalling exceeds the capture grant. Processor media rules alone do not grant
+capture authority.
 Ordinary best-effort or shared-owner capture does not require an ADMF, MDF or LI lease.
 
 The central deployment additionally configures the following root-level settings:

@@ -219,6 +219,10 @@ func (e *X3Encoder) generateCorrelationID(ssrc uint32, callID string) uint64 {
 
 // addCommonAttributes adds standard attributes to the PDU.
 func (e *X3Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) error {
+	return e.addCommonAttributesWithSequence(pdu, pkt, true)
+}
+
+func (e *X3Encoder) addCommonAttributesWithSequence(pdu *PDU, pkt *types.PacketDisplay, allocate bool) error {
 	// Timestamp from packet capture
 	pdu.AddAttribute(e.attrBuilder.Timestamp(pkt.Timestamp))
 
@@ -228,17 +232,26 @@ func (e *X3Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) erro
 	if e.nfID != "" {
 		pdu.AddAttribute(e.attrBuilder.NFID(e.nfID))
 	}
-	if pkt.NodeID != "" {
-		pdu.AddAttribute(e.attrBuilder.IPID(pkt.NodeID))
+	ipID := e.nfID
+	if ipID == "" {
+		ipID = pkt.NodeID
 	}
-	seq, err := e.sequencer.Next(SequenceContext{
+	if ipID != "" {
+		pdu.AddAttribute(e.attrBuilder.IPID(ipID))
+	}
+	context := SequenceContext{
 		PDUType: PDUTypeX3, XID: pdu.Header.XID, DomainID: e.domainID,
-		NFID: e.nfID, IPID: pkt.NodeID, CorrelationID: pdu.Header.CorrelationID,
-	})
-	if err != nil {
-		return err
+		NFID: e.nfID, IPID: ipID, CorrelationID: pdu.Header.CorrelationID,
 	}
-	e.lastSeq.Store(seq)
+	var seq uint32
+	if allocate {
+		var err error
+		seq, err = e.sequencer.Next(context)
+		if err != nil {
+			return err
+		}
+		e.lastSeq.Store(seq)
+	}
 	pdu.AddAttribute(e.attrBuilder.SequenceNumber(seq))
 	return nil
 }

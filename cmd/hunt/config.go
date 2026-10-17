@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
@@ -76,6 +77,10 @@ func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
 		EventSpoolExhaustionPolicy: strings.ToLower(viper.GetString("hunter.events.spool.exhaustion_policy")),
 	}
 
+	if spec.voIPMode {
+		config.VoIPSignallingPolicy = viper.GetString("hunter.voip.signalling_policy")
+		config.VoIPMediaPolicy = viper.GetString("hunter.voip.media_policy")
+	}
 	if spec.useGPUFlag {
 		gpu := GetGPUConfig()
 		config.GPUBackend = gpu.GPUBackend
@@ -97,6 +102,19 @@ func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
 
 func buildHunterConfigChecked(spec hunterConfigSpec) (hunter.Config, error) {
 	config := buildHunterConfig(spec)
+	if spec.voIPMode {
+		if err := viper.UnmarshalKey("hunter.voip.media_rules", &config.MediaRules); err != nil {
+			return hunter.Config{}, fmt.Errorf("decode hunter media rules: %w", err)
+		}
+		if err := viper.UnmarshalKey("hunter.voip.interface_domains", &config.VoIPInterfaceDomains); err != nil {
+			return hunter.Config{}, fmt.Errorf("decode hunter VoIP interface domains: %w", err)
+		}
+		policies, err := (voip.CapturePolicies{Signalling: voip.SignallingPolicy(config.VoIPSignallingPolicy), Media: voip.MediaPolicy(config.VoIPMediaPolicy)}).Normalize()
+		if err != nil {
+			return hunter.Config{}, err
+		}
+		config.VoIPSignallingPolicy, config.VoIPMediaPolicy = string(policies.Signalling), string(policies.Media)
+	}
 	sipCapacity, err := cmdutil.GetIntConfigStrict("hunter.sip_buffer_size", sipBufferSize)
 	if err != nil {
 		return hunter.Config{}, err

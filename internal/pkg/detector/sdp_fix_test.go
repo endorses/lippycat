@@ -1,11 +1,12 @@
 package detector
 
 import (
-	"os"
+	"fmt"
+	"net"
 	"testing"
 
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,28 +16,45 @@ import (
 // This was a bug where ApplicationLayer().LayerContents() returned only SIP headers,
 // missing the SDP body which is only available in TransportLayer().LayerPayload().
 func TestSIPWithGopacketDecodedSDP(t *testing.T) {
-	pcapFile := "/home/grischa/Downloads/pcaps/gk_72_sip_65f935f1-10d1-411a-8d6f-0ab721165c46.pcap"
-
-	// Skip if pcap file doesn't exist
-	if _, err := os.Stat(pcapFile); os.IsNotExist(err) {
-		t.Skip("Test pcap file not found")
+	sdp := "v=0\r\n" +
+		"o=alice 1 1 IN IP4 192.0.2.20\r\n" +
+		"s=Synthetic call\r\n" +
+		"c=IN IP4 192.0.2.20\r\n" +
+		"t=0 0\r\n" +
+		"m=audio 17802 RTP/AVP 0\r\n" +
+		"a=rtpmap:0 PCMU/8000\r\n"
+	sip := "INVITE sip:bob@example.test SIP/2.0\r\n" +
+		"Via: SIP/2.0/UDP 192.0.2.1:5060;branch=z9hG4bK-synthetic\r\n" +
+		"From: <sip:alice@example.test>;tag=alice\r\n" +
+		"To: <sip:bob@example.test>\r\n" +
+		"Call-ID: synthetic-sdp@example.test\r\n" +
+		"CSeq: 1 INVITE\r\n" +
+		"Content-Type: application/sdp\r\n" +
+		fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(sdp), sdp)
+	ethernet := &layers.Ethernet{
+		SrcMAC: net.HardwareAddr{2, 0, 0, 0, 0, 1}, DstMAC: net.HardwareAddr{2, 0, 0, 0, 0, 2},
+		EthernetType: layers.EthernetTypeIPv4,
 	}
-
-	handle, err := pcap.OpenOffline(pcapFile)
-	require.NoError(t, err)
-	defer handle.Close()
+	ip := &layers.IPv4{
+		Version: 4, TTL: 64, Protocol: layers.IPProtocolUDP,
+		SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 2),
+	}
+	udp := &layers.UDP{SrcPort: 5060, DstPort: 5060}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	buffer := gopacket.NewSerializeBuffer()
+	require.NoError(t, gopacket.SerializeLayers(buffer,
+		gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true},
+		ethernet, ip, udp, gopacket.Payload(sip)))
+	packet := gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
+	require.Nil(t, packet.ErrorLayer())
 
 	det := InitDefault()
-
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	packet, err := packetSource.NextPacket()
-	require.NoError(t, err)
-	require.NotNil(t, packet)
+	t.Cleanup(det.Shutdown)
 
 	// Verify gopacket decoded this as SIP (this is the condition that triggers the bug)
-	layers := packet.Layers()
+	packetLayers := packet.Layers()
 	var hasSIPLayer bool
-	for _, layer := range layers {
+	for _, layer := range packetLayers {
 		if layer.LayerType().String() == "SIP" {
 			hasSIPLayer = true
 			break
@@ -52,7 +70,7 @@ func TestSIPWithGopacketDecodedSDP(t *testing.T) {
 	// Verify Call-ID is extracted
 	callID, ok := result.Metadata["call_id"].(string)
 	assert.True(t, ok, "call_id should be in metadata")
-	assert.Equal(t, "65f935f1-10d1-411a-8d6f-0ab721165c46", callID)
+	assert.Equal(t, "synthetic-sdp@example.test", callID)
 
 	// Verify SDP media_ports is extracted (this was the bug - it was empty before the fix)
 	mediaPorts, ok := result.Metadata["media_ports"].([]uint16)
@@ -63,5 +81,5 @@ func TestSIPWithGopacketDecodedSDP(t *testing.T) {
 	// Verify media_ip is extracted
 	mediaIP, ok := result.Metadata["media_ip"].(string)
 	assert.True(t, ok, "media_ip should be in metadata")
-	assert.Equal(t, "78.111.74.204", mediaIP)
+	assert.Equal(t, "192.0.2.20", mediaIP)
 }

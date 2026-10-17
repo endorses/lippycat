@@ -597,7 +597,16 @@ if len(calls) == 0 {
 
 - Add integration tests for multi-component features
 - Test error paths and edge cases
-- Use real PCAP files from `testdata/pcaps/` for VoIP tests
+
+Default tests must run from a clean checkout. Generate deterministic PCAP fixtures
+in `t.TempDir()` and exercise the real capture reader with them; do not depend on
+ignored `testdata/pcaps/` files or developer-specific paths. Keep protocol and
+packet-count assertions active when generating fixtures. The detector integration
+tests and `internal/pkg/testutil/radiusfixture` provide examples.
+
+Private or downloaded captures may supplement this coverage behind an explicit
+environment-variable opt-in, with a clear skip message when unset. They must not
+be prerequisites for default regression tests or replace synthetic coverage.
 
 ### Running Tests
 

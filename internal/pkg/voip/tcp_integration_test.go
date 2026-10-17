@@ -2,13 +2,17 @@ package voip
 
 import (
 	"context"
+	"io"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -141,111 +145,77 @@ a=rtpmap:0 PCMU/8000
 }
 
 func TestUserSurveillanceFilteringWithTCP(t *testing.T) {
-	// Test user surveillance filtering using actual PCAP files
-	testCases := []struct {
-		name          string
-		pcapFile      string
-		targetUsers   []string
-		expectedUsers []string
-		description   string
+	invite := "INVITE sip:alicent@example.test SIP/2.0\r\nFrom: <sip:robb@example.test>;tag=1\r\nTo: <sip:alicent@example.test>\r\nCall-ID: invite@example.test\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n"
+	register := "REGISTER sip:example.test SIP/2.0\r\nFrom: <sip:testuser@example.test>;tag=2\r\nTo: <sip:testuser@example.test>\r\nCall-ID: register@example.test\r\nCSeq: 1 REGISTER\r\nContent-Length: 0\r\n\r\n"
+	for _, tc := range []struct {
+		name            string
+		messages        []string
+		targetUsers     []string
+		expectedUsers   []string
+		expectedMatches int
 	}{
-		{
-			name:          "alicent surveillance from invite",
-			pcapFile:      "../../../captures/tcp-sip-invite.pcap",
-			targetUsers:   []string{"alicent"},
-			expectedUsers: []string{"alicent"},
-			description:   "Should capture alicent from INVITE call",
-		},
-		{
-			name:          "testuser surveillance from register",
-			pcapFile:      "../../../captures/tcp-sip-register.pcap",
-			targetUsers:   []string{"testuser"},
-			expectedUsers: []string{"testuser"},
-			description:   "Should capture testuser from REGISTER flow",
-		},
-		{
-			name:          "multi-user surveillance",
-			pcapFile:      "../../../captures/tcp-sip-multiuser.pcap",
-			targetUsers:   []string{"alicent", "testuser"},
-			expectedUsers: []string{"alicent", "testuser"},
-			description:   "Should capture multiple targeted users",
-		},
-		{
-			name:          "no match surveillance",
-			pcapFile:      "../../../captures/tcp-sip-invite.pcap",
-			targetUsers:   []string{"charlie"},
-			expectedUsers: []string{},
-			description:   "Should not capture non-targeted users",
-		},
-	}
-
-	for _, tc := range testCases {
+		{name: "alicent surveillance from invite", messages: []string{invite}, targetUsers: []string{"alicent"}, expectedUsers: []string{"alicent"}, expectedMatches: 1},
+		{name: "testuser surveillance from register", messages: []string{register}, targetUsers: []string{"testuser"}, expectedUsers: []string{"testuser"}, expectedMatches: 1},
+		{name: "multi-user surveillance", messages: []string{invite, register}, targetUsers: []string{"alicent", "testuser"}, expectedUsers: []string{"alicent", "testuser"}, expectedMatches: 2},
+		{name: "no match surveillance", messages: []string{invite}, targetUsers: []string{"charlie"}, expectedMatches: 0},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// Reset global state
-			resetGlobalStateForTest()
-
-			// Check if PCAP file exists
-			if _, err := os.Stat(tc.pcapFile); os.IsNotExist(err) {
-				t.Skipf("PCAP file %s not found", tc.pcapFile)
-				return
+			sipusers.ClearAll()
+			t.Cleanup(sipusers.ClearAll)
+			for _, user := range tc.targetUsers {
+				sipusers.AddSipUser(user, &sipusers.SipUser{})
 			}
 
-			// Reset global state for clean test
-			resetGlobalStateForTest()
-
-			// Create basic config for TCP processing
-			config := &Config{
-				TCPPerformanceMode: "balanced",
-				TCPBufferStrategy:  "adaptive",
+			path := filepath.Join(t.TempDir(), "tcp-sip.pcap")
+			file, err := os.Create(path)
+			require.NoError(t, err)
+			writer := pcapgo.NewWriter(file)
+			require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+			for i, message := range tc.messages {
+				ethernet := &layers.Ethernet{SrcMAC: []byte{2, 0, 0, 0, 0, 1}, DstMAC: []byte{2, 0, 0, 0, 0, 2}, EthernetType: layers.EthernetTypeIPv4}
+				ip := &layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolTCP, SrcIP: []byte{192, 0, 2, 1}, DstIP: []byte{192, 0, 2, 2}}
+				tcp := &layers.TCP{SrcPort: layers.TCPPort(40000 + i), DstPort: 5060, Seq: 1, ACK: true, PSH: true, Window: 8192}
+				require.NoError(t, tcp.SetNetworkLayerForChecksum(ip))
+				buffer := gopacket.NewSerializeBuffer()
+				require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, ethernet, ip, tcp, gopacket.Payload(message)))
+				data := buffer.Bytes()
+				require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{Timestamp: time.Unix(1700000000+int64(i), 0), CaptureLength: len(data), Length: len(data)}, data))
 			}
-
-			// Apply configuration for this test
-			applyPerformanceModeOptimizations(config)
-
-			// Track captured users for verification
+			require.NoError(t, file.Close())
+			file, err = os.Open(path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, file.Close()) })
+			reader, err := pcapgo.NewReader(file)
+			require.NoError(t, err)
+			source := gopacket.NewPacketSource(reader, reader.LinkType())
 			capturedUsers := make(map[string]bool)
-
-			// TODO: Process PCAP file and extract SIP users
-			// This is a placeholder for the actual PCAP processing logic
-			// When user surveillance is fully integrated, this test will:
-			// 1. Read packets from the PCAP file using gopacket
-			// 2. Process them through the TCP SIP handling pipeline
-			// 3. Apply user filtering based on SIP From/To headers
-			// 4. Verify only targeted users are captured
-
-			// For now, simulate the expected behavior based on our test PCAP data
-			// These users are known to be in the test PCAP files based on their creation
-			switch tc.pcapFile {
-			case "../../../captures/tcp-sip-invite.pcap":
-				// Contains alicent and robb
-				if contains(tc.targetUsers, "alicent") {
-					capturedUsers["alicent"] = true
+			packetCount, matched := 0, 0
+			for {
+				packet, err := source.NextPacket()
+				if err == io.EOF {
+					break
 				}
-				if contains(tc.targetUsers, "robb") {
-					capturedUsers["robb"] = true
+				require.NoError(t, err)
+				packetCount++
+				tcp, ok := packet.TransportLayer().(*layers.TCP)
+				require.True(t, ok, "fixture must be TCP SIP")
+				headers, _ := parseSipHeaders(tcp.Payload)
+				require.NotEmpty(t, headers["call-id"])
+				if !containsUserInHeaders(headers) {
+					continue
 				}
-			case "../../../captures/tcp-sip-register.pcap":
-				// Contains testuser
-				if contains(tc.targetUsers, "testuser") {
-					capturedUsers["testuser"] = true
-				}
-			case "../../../captures/tcp-sip-multiuser.pcap":
-				// Contains alicent, robb, and testuser
-				if contains(tc.targetUsers, "alicent") {
-					capturedUsers["alicent"] = true
-				}
-				if contains(tc.targetUsers, "robb") {
-					capturedUsers["robb"] = true
-				}
-				if contains(tc.targetUsers, "testuser") {
-					capturedUsers["testuser"] = true
+				matched++
+				for _, field := range []string{"from", "to"} {
+					if sipusers.IsSurveiled(headers[field]) {
+						capturedUsers[extractUserFromSIPURI(headers[field])] = true
+					}
 				}
 			}
-
-			// Verify expected users were captured
-			assert.Equal(t, len(tc.expectedUsers), len(capturedUsers), tc.description)
-			for _, expectedUser := range tc.expectedUsers {
-				assert.True(t, capturedUsers[expectedUser], "Expected user %s to be captured", expectedUser)
+			require.Equal(t, len(tc.messages), packetCount)
+			require.Equal(t, tc.expectedMatches, matched)
+			require.Len(t, capturedUsers, len(tc.expectedUsers))
+			for _, user := range tc.expectedUsers {
+				require.True(t, capturedUsers[user], "expected user %s to be captured", user)
 			}
 		})
 	}

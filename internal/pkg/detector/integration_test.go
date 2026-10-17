@@ -1,9 +1,6 @@
 package detector_test
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/gopacket"
@@ -17,11 +14,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures/vpn"
 )
 
-// TestIntegration_PcapDetection tests protocol detection on real PCAP files
+// TestIntegration_PcapDetection tests protocol detection through generated PCAP files
 func TestIntegration_PcapDetection(t *testing.T) {
-	// Find testdata directory
-	testdataDir := findTestdataDir(t)
-
 	tests := []struct {
 		name              string
 		pcapFile          string
@@ -44,16 +38,10 @@ func TestIntegration_PcapDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pcapPath := filepath.Join(testdataDir, "pcaps", tt.pcapFile)
-
-			// Skip if PCAP doesn't exist
-			if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
-				t.Skipf("PCAP file not found: %s", pcapPath)
-				return
-			}
+			pcapPath := writeDetectorPCAP(t, tt.pcapFile)
 
 			// Create detector with all signatures
-			det := createFullDetector()
+			det := createFullDetector(t)
 
 			// Open PCAP
 			handle, err := pcap.OpenOffline(pcapPath)
@@ -89,15 +77,9 @@ func TestIntegration_PcapDetection(t *testing.T) {
 
 // TestIntegration_MultiProtocolFlow tests flows containing multiple protocols
 func TestIntegration_MultiProtocolFlow(t *testing.T) {
-	testdataDir := findTestdataDir(t)
-	pcapPath := filepath.Join(testdataDir, "pcaps", "dns.pcap")
+	pcapPath := writeDetectorPCAP(t, "mixed.pcap")
 
-	if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
-		t.Skip("DNS PCAP file not found")
-		return
-	}
-
-	det := createFullDetector()
+	det := createFullDetector(t)
 
 	handle, err := pcap.OpenOffline(pcapPath)
 	require.NoError(t, err)
@@ -116,15 +98,12 @@ func TestIntegration_MultiProtocolFlow(t *testing.T) {
 		}
 	}
 
-	// HTTP traffic should contain TCP establishment and HTTP
-	assert.NotEmpty(t, protocolSequence, "Should detect some protocols")
+	assert.Equal(t, []string{"DNS", "HTTP", "RTP"}, protocolSequence)
 	t.Logf("Protocol sequence: %v", protocolSequence)
 }
 
-// TestIntegration_ConfidenceScoring tests confidence levels on real traffic
+// TestIntegration_ConfidenceScoring tests confidence levels on known protocol traffic
 func TestIntegration_ConfidenceScoring(t *testing.T) {
-	testdataDir := findTestdataDir(t)
-
 	tests := []struct {
 		name          string
 		pcapFile      string
@@ -147,14 +126,9 @@ func TestIntegration_ConfidenceScoring(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pcapPath := filepath.Join(testdataDir, "pcaps", tt.pcapFile)
+			pcapPath := writeDetectorPCAP(t, tt.pcapFile)
 
-			if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
-				t.Skipf("PCAP file not found: %s", pcapPath)
-				return
-			}
-
-			det := createFullDetector()
+			det := createFullDetector(t)
 
 			handle, err := pcap.OpenOffline(pcapPath)
 			require.NoError(t, err)
@@ -181,19 +155,13 @@ func TestIntegration_ConfidenceScoring(t *testing.T) {
 	}
 }
 
-// TestIntegration_CachePerformance tests cache hit rates on real traffic
+// TestIntegration_CachePerformance tests cache accounting after reading a capture
 func TestIntegration_CachePerformance(t *testing.T) {
-	testdataDir := findTestdataDir(t)
-	pcapPath := filepath.Join(testdataDir, "pcaps", "dns.pcap")
+	pcapPath := writeDetectorPCAP(t, "dns.pcap")
 
-	if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
-		t.Skip("DNS PCAP file not found")
-		return
-	}
+	det := createFullDetector(t)
 
-	det := createFullDetector()
-
-	// First pass - populate cache
+	// Process the capture and inspect flow accounting
 	handle, err := pcap.OpenOffline(pcapPath)
 	require.NoError(t, err)
 	defer handle.Close()
@@ -214,15 +182,9 @@ func TestIntegration_CachePerformance(t *testing.T) {
 
 // TestIntegration_FlowTracking tests flow context tracking
 func TestIntegration_FlowTracking(t *testing.T) {
-	testdataDir := findTestdataDir(t)
-	pcapPath := filepath.Join(testdataDir, "pcaps", "dns.pcap")
+	pcapPath := writeDetectorPCAP(t, "dns.pcap")
 
-	if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
-		t.Skip("DNS PCAP file not found")
-		return
-	}
-
-	det := createFullDetector()
+	det := createFullDetector(t)
 
 	handle, err := pcap.OpenOffline(pcapPath)
 	require.NoError(t, err)
@@ -247,31 +209,10 @@ func TestIntegration_FlowTracking(t *testing.T) {
 
 // Helper functions
 
-func findTestdataDir(t *testing.T) string {
-	// Try to find testdata directory
-	candidates := []string{
-		"../../../testdata", // From internal/pkg/detector
-		"../../testdata",    // Alternative
-		"testdata",          // Root level
-		"./testdata",        // Current dir
-	}
-
-	for _, candidate := range candidates {
-		absPath, err := filepath.Abs(candidate)
-		if err != nil {
-			continue
-		}
-		if _, err := os.Stat(absPath); err == nil {
-			return absPath
-		}
-	}
-
-	t.Skip("Skipping test: testdata directory not found (test data not available in this environment)")
-	return ""
-}
-
-func createFullDetector() *detector.Detector {
+func createFullDetector(tb testing.TB) *detector.Detector {
+	tb.Helper()
 	det := detector.NewDetector()
+	tb.Cleanup(det.Shutdown)
 
 	// Register all application layer signatures
 	det.RegisterSignature(application.NewDNSSignature())
@@ -296,15 +237,8 @@ func createFullDetector() *detector.Detector {
 
 // BenchmarkIntegration_PcapProcessing benchmarks PCAP processing speed
 func BenchmarkIntegration_PcapProcessing(b *testing.B) {
-	testdataDir := findTestdataDirB(b)
-	pcapPath := filepath.Join(testdataDir, "pcaps", "rtp.pcap")
-
-	if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
-		b.Skip("RTP PCAP file not found")
-		return
-	}
-
-	det := createFullDetector()
+	pcapPath := writeDetectorPCAP(b, "rtp.pcap")
+	det := createFullDetector(b)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -320,27 +254,4 @@ func BenchmarkIntegration_PcapProcessing(b *testing.B) {
 
 		handle.Close()
 	}
-}
-
-// findTestdataDirB for benchmarks (accepts testing.TB)
-func findTestdataDirB(tb testing.TB) string {
-	candidates := []string{
-		"../../../testdata",
-		"../../testdata",
-		"testdata",
-		"./testdata",
-	}
-
-	for _, candidate := range candidates {
-		absPath, err := filepath.Abs(candidate)
-		if err != nil {
-			continue
-		}
-		if _, err := os.Stat(absPath); err == nil {
-			return absPath
-		}
-	}
-
-	fmt.Fprintf(os.Stderr, "Warning: Could not find testdata directory\n")
-	return "testdata"
 }

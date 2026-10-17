@@ -428,80 +428,57 @@ func TestCheckCapturePermissions(t *testing.T) {
 	})
 }
 
-// TestRunOfflineOrderedProcessing tests RunOfflineOrdered with real captures.
+// TestRunOfflineOrderedProcessing tests ordinary TCP and SIP offline replay.
 func TestRunOfflineOrderedProcessing(t *testing.T) {
-	t.Run("successful offline processing with real pcap", func(t *testing.T) {
-		// Use a real small PCAP file
-		pcapFile := "../../testdata/pcaps/http.pcap"
-		if _, err := os.Stat(pcapFile); os.IsNotExist(err) {
-			t.Skip("Test PCAP file not available")
-		}
+	for _, tc := range []struct {
+		name     string
+		port     uint16
+		payload  string
+		assemble bool
+	}{
+		{name: "successful offline processing with HTTP", port: 80, payload: "GET / HTTP/1.1\r\nHost: example.test\r\n\r\n"},
+		{name: "with TCP assembler", port: 5060, payload: "INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: ordered-replay@example.test\r\nFrom: <sip:alice@example.test>;tag=1\r\nTo: <sip:bob@example.test>\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n", assemble: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "capture.pcap")
+			file, err := os.Create(path)
+			require.NoError(t, err)
+			writer := pcapgo.NewWriter(file)
+			require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+			data := offlineDecoderFixture(t, false, true, tc.port, nil, []byte(tc.payload))
+			stamp := time.Unix(1700000000, 123000)
+			require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{Timestamp: stamp, CaptureLength: len(data), Length: len(data)}, data))
+			require.NoError(t, file.Close())
 
-		f, err := os.Open(pcapFile)
-		require.NoError(t, err)
-		defer f.Close()
-
-		devices := []pcaptypes.PcapInterface{
-			pcaptypes.CreateOfflineInterface(f),
-		}
-
-		var processedPackets atomic.Int32
-		processor := func(ch <-chan PacketInfo) {
-			for range ch {
-				processedPackets.Add(1)
+			assembler := NewTCPAssembler(&MockStreamFactory{})
+			t.Cleanup(func() { assembler.FlushAll() })
+			var got []PacketInfo
+			var assembleErr error
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err = RunOfflineOrderedContext(ctx, offlineTestDevices(t, path), "", func(ch <-chan PacketInfo) {
+				for packet := range ch {
+					got = append(got, packet)
+					if tc.assemble {
+						tcp, ok := packet.Packet.TransportLayer().(*layers.TCP)
+						if ok {
+							assembleErr = assembler.AssembleTCP(packet.Packet.NetworkLayer().NetworkFlow(), tcp, packet.Packet.Metadata().Timestamp)
+						}
+					}
+				}
+			})
+			require.NoError(t, err)
+			require.NoError(t, assembleErr)
+			require.Len(t, got, 1)
+			require.True(t, got[0].Packet.Metadata().Timestamp.Equal(stamp))
+			tcp, ok := got[0].Packet.TransportLayer().(*layers.TCP)
+			require.True(t, ok, "offline replay must retain TCP")
+			require.Equal(t, tc.payload, string(tcp.Payload))
+			if tc.assemble {
+				require.Equal(t, 1, assembler.FlushAll(), "SIP TCP stream must reach the assembler")
 			}
-		}
-
-		// Run with timeout to ensure completion
-		done := make(chan struct{})
-		go func() {
-			RunOfflineOrdered(devices, "", processor)
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			// Completed successfully
-			assert.Greater(t, processedPackets.Load(), int32(0), "Should process at least one packet")
-		case <-time.After(5 * time.Second):
-			t.Fatal("RunOfflineOrdered timed out")
-		}
-	})
-
-	t.Run("with TCP assembler", func(t *testing.T) {
-		pcapFile := "../../testdata/pcaps/tcp_sip_complete_call.pcap"
-		if _, err := os.Stat(pcapFile); os.IsNotExist(err) {
-			t.Skip("Test PCAP file not available")
-		}
-
-		f, err := os.Open(pcapFile)
-		require.NoError(t, err)
-		defer f.Close()
-
-		devices := []pcaptypes.PcapInterface{
-			pcaptypes.CreateOfflineInterface(f),
-		}
-
-		var processedPackets atomic.Int32
-		processor := func(ch <-chan PacketInfo) {
-			for range ch {
-				processedPackets.Add(1)
-			}
-		}
-
-		done := make(chan struct{})
-		go func() {
-			RunOfflineOrdered(devices, "", processor)
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			assert.Greater(t, processedPackets.Load(), int32(0), "Should process packets")
-		case <-time.After(5 * time.Second):
-			t.Fatal("RunOfflineOrdered timed out")
-		}
-	})
+		})
+	}
 }
 
 func offlineTestDevices(t *testing.T, names ...string) []pcaptypes.PcapInterface {

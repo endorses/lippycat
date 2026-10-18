@@ -411,3 +411,15 @@ processor/tap and command settings. After the final producer change, the affecte
 hunter/forwarding/connection/filtering race suites and full test/vet/build gates
 passed. Tests generate their own traffic and protected storage; no private PCAP
 files or unavailable capture fixtures are required.
+
+### CI follow-up (2026-10-18)
+
+[CI run 39107669003](https://github.com/endorses/lippycat/actions/runs/39107669003)
+exposed an ordering assumption in
+`TestCompletedCallClosesThroughRegistryLifecycle`: registry removal becomes
+visible before the output-close callback finishes. The test now waits for both
+observable effects in one synchronized polling assertion, retaining its existing
+completion deadline and exact close-count check. Production lifecycle ordering is
+unchanged. The focused test passes 100 repetitions with race detection and atomic
+coverage. The complete LI CI command also passes locally:
+`go test -v -race -tags='all li' -coverprofile=coverage-li.txt -covermode=atomic ./...`.

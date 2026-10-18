@@ -11,6 +11,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -219,11 +220,13 @@ func TestCompletedCallClosesThroughRegistryLifecycle(t *testing.T) {
 	require.NotNil(t, call)
 	call.SetCallInfoState("BYE")
 
-	require.Eventually(t, func() bool {
+	// Removal precedes the output callback, which runs after the tracker lock
+	// is released. Wait for both observable effects of completion.
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		_, err := tracker.GetCall(call.CallID)
-		return err != nil
+		assert.Error(collect, err)
+		output.mu.Lock()
+		defer output.mu.Unlock()
+		assert.Equal(collect, []string{"completed"}, output.closed)
 	}, time.Second, 10*time.Millisecond)
-	output.mu.Lock()
-	defer output.mu.Unlock()
-	require.Equal(t, []string{"completed"}, output.closed)
 }

@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-18
 
-**Status:** Implementation verified. Required checks and bounded closure review
-pass; commit recording is the remaining workflow step.
+**Status:** Complete. Implementation, tests, documentation and translations are
+committed in `8fd1b345`. Required checks and the bounded closure review pass.
 
 **Baseline:** `main` at `757719f5`, including the distributed-media implementation
 in `bb991f88` and its completion record. This plan completes the remaining LI
@@ -324,7 +324,7 @@ target-pattern privacy and capture-source continuity under the actual LI checks.
 - [x] Verify this plan's outcomes against production paths and receiver results;
       check off only demonstrated tasks and correct the preceding plan's closure
       note when these integration gaps are actually resolved.
-- [ ] Format changed files and commit the implementation, documentation,
+- [x] Format changed files and commit the implementation, documentation,
       translations and updated plan together.
 
 ## Completion criteria
@@ -343,7 +343,7 @@ Completion requires all of the following observed behaviors:
       media products while processor delivery identity and call continuity hold.
 - [x] Encoded provenance survives ordinary delivery, reordering, fan-out and
       persistent recovery; legacy bytes retain their original meaning.
-- [ ] Ordinary and LI-enabled processor/tap paths, remote hunters, documentation,
+- [x] Ordinary and LI-enabled processor/tap paths, remote hunters, documentation,
       translations and required checks are verified and committed.
 
 A journal-only measurement fallback does not satisfy receiver-visible source

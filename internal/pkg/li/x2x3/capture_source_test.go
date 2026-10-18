@@ -38,6 +38,7 @@ func TestCaptureSourceCodec(t *testing.T) {
 		require.Equal(t, known, domainKnown)
 	}
 	maximum := sourceProduct(t, strings.Repeat("a", 4096), strings.Repeat("b", 4096), ^uint32(0), true)
+	require.Len(t, maximum.Attributes[0].Value, MaxCaptureSourceAttributeBytes)
 	wire, err := maximum.MarshalBinary()
 	require.NoError(t, err)
 	_, available, err := DecodeProductCaptureSource(wire)
@@ -53,18 +54,19 @@ func TestCaptureSourceCodec(t *testing.T) {
 }
 
 func TestCaptureSourceRejectsMalformedValues(t *testing.T) {
-	offset := len(captureSourcePrefix)
+	offset := captureSourceOwnerSize
 	for name, mutate := range map[string]func(*PDU){
 		"duplicate":                   func(p *PDU) { p.AddAttribute(p.Attributes[0]) },
-		"version":                     func(p *PDU) { p.Attributes[0].Value[offset+1] = 2 },
-		"subtype":                     func(p *PDU) { p.Attributes[0].Value[offset] = 2 },
+		"draft-version":               func(p *PDU) { p.Attributes[0].Value[offset+1] = 1 },
+		"future-version":              func(p *PDU) { p.Attributes[0].Value[offset+1] = 3 },
 		"flags":                       func(p *PDU) { p.Attributes[0].Value[offset+2] = 2 },
 		"noncanonical-unknown-domain": func(p *PDU) { p.Attributes[0].Value[offset+2] = 0 },
 		"length":                      func(p *PDU) { binary.BigEndian.PutUint16(p.Attributes[0].Value[offset+3:], 60000) },
 		"empty-node":                  func(p *PDU) { binary.BigEndian.PutUint16(p.Attributes[0].Value[offset+3:], 0) },
 		"utf8":                        func(p *PDU) { p.Attributes[0].Value[captureSourceHeaderSize] = 0xff },
 		"truncated":                   func(p *PDU) { p.Attributes[0].Value = p.Attributes[0].Value[:len(p.Attributes[0].Value)-1] },
-		"header-only":                 func(p *PDU) { p.Attributes[0].Value = p.Attributes[0].Value[:len(captureSourcePrefix)] },
+		"owner-only":                  func(p *PDU) { p.Attributes[0].Value = p.Attributes[0].Value[:offset] },
+		"subtype-only":                func(p *PDU) { p.Attributes[0].Value = p.Attributes[0].Value[:offset+1] },
 		"trailing":                    func(p *PDU) { p.Attributes[0].Value = append(p.Attributes[0].Value, 0) },
 		"oversize": func(p *PDU) {
 			p.Attributes[0].Value = append(p.Attributes[0].Value, make([]byte, MaxCaptureSourceAttributeBytes)...)
@@ -91,6 +93,64 @@ func TestCaptureSourceRejectsMalformedValues(t *testing.T) {
 	}
 }
 
+func TestCaptureSourceIgnoresUnrelatedValues(t *testing.T) {
+	for name, value := range map[string][]byte{
+		"empty":                 nil,
+		"zero-owner-length":     {0},
+		"truncated-owner":       []byte("\x09lippy"),
+		"non-ascii-owner":       []byte("\x09lipp\xff.cat\x01"),
+		"invalid-owner-label":   []byte("\x09lippy_cat\x01"),
+		"owner-with-nul":        []byte("\x0alippy.cat\x00\x01"),
+		"other-owner":           []byte("\x0aother.test\x01"),
+		"unknown-subtype":       []byte("\x09lippy.cat\x02"),
+		"original-draft-format": []byte("lippycat.capture_source\x00\x01\x01\x01\x00\x01\x00\x01\x01\x02\x03\x04he"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			unrelated := TLVAttribute{Type: AttrProprietary, Value: value}
+			product := NewX2SIPPDU(uuid.Nil, 1)
+			product.AddAttribute(unrelated)
+			wire, err := product.MarshalBinary()
+			require.NoError(t, err)
+			_, available, err := DecodeProductCaptureSource(wire)
+			require.NoError(t, err)
+			require.False(t, available)
+
+			// Neither position may mask the source, including another subtype
+			// under the same owner. Exercise the complete on-wire product.
+			for _, before := range []bool{true, false} {
+				product = sourceProduct(t, "hunter", "eth0", 9, true)
+				product.AddAttribute(unrelated)
+				if before {
+					last := len(product.Attributes) - 1
+					copy(product.Attributes[1:], product.Attributes[:last])
+					product.Attributes[0] = unrelated
+				}
+				wire, err = product.MarshalBinary()
+				require.NoError(t, err)
+				source, available, err := DecodeProductCaptureSource(wire)
+				require.NoError(t, err)
+				require.True(t, available)
+				require.Equal(t, "hunter", source.NodeID())
+				require.Equal(t, "eth0", source.Interface())
+				domain, known := source.ObservationDomain()
+				require.True(t, known)
+				require.Equal(t, uint32(9), domain)
+			}
+		})
+	}
+}
+
+func TestCaptureSourceDuplicateWithOtherSubtype(t *testing.T) {
+	product := sourceProduct(t, "hunter", "eth0", 9, true)
+	product.AddAttribute(TLVAttribute{Type: AttrProprietary, Value: []byte("\x09lippy.cat\x02")})
+	product.AddAttribute(product.Attributes[0])
+	wire, err := product.MarshalBinary()
+	require.NoError(t, err)
+	_, available, err := DecodeProductCaptureSource(wire)
+	require.ErrorIs(t, err, ErrInvalidCaptureSourceAttribute)
+	require.False(t, available)
+}
+
 func TestCaptureSourceProductBounds(t *testing.T) {
 	p := sourceProduct(t, "hunter", "eth0", 0, false)
 	p.SetPayload([]byte("payload"))
@@ -102,6 +162,10 @@ func TestCaptureSourceProductBounds(t *testing.T) {
 	}
 	// A TLV length crossing the header boundary must not consume payload bytes.
 	binary.BigEndian.PutUint16(wire[HeaderMinSize+2:], uint16(len(p.Attributes[0].Value)+1))
+	_, _, err = DecodeProductCaptureSource(wire)
+	require.Error(t, err)
+	// Ignoring an unrecognized owner must not bypass the same TLV bounds.
+	wire[HeaderMinSize+TLVHeaderSize] = 0
 	_, _, err = DecodeProductCaptureSource(wire)
 	require.Error(t, err)
 }
@@ -225,15 +289,18 @@ func FuzzDecodeProductCaptureSource(f *testing.F) {
 }
 
 func TestCaptureSourceWireVector(t *testing.T) {
-	// Independent version-1 vector: namespace+NUL, source subtype, version,
+	// Independent clause 5.3.5 envelope: owner length 0x09, ASCII "lippy.cat".
+	// The version-2 body contains source subtype, version,
 	// domain-known flag, two one-byte identifiers, domain 0x01020304, "h", "e".
-	wire, err := hex.DecodeString("6c697070796361742e636170747572655f736f757263650001010100010001010203046865")
+	wire, err := hex.DecodeString("096c697070792e63617401020100010001010203046865")
 	require.NoError(t, err)
 	source, err := types.NewCaptureSource("h", "e", 0x01020304, true)
 	require.NoError(t, err)
 	attribute, err := EncodeCaptureSource(source)
 	require.NoError(t, err)
 	require.Equal(t, wire, attribute.Value)
+	require.Equal(t, byte(9), attribute.Value[0])
+	require.Equal(t, "lippy.cat", string(attribute.Value[1:10]))
 	product := NewX2SIPPDU(uuid.Nil, 1)
 	product.AddAttribute(TLVAttribute{Type: AttrProprietary, Value: wire})
 	decoded, available, err := DecodeCaptureSource(product)

@@ -1,7 +1,6 @@
 package x2x3
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -9,17 +8,19 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
-// CaptureSourceNamespace identifies a lippycat private extension carried inside
-// AttrProprietary. It does not allocate a standard ETSI attribute identifier.
-const CaptureSourceNamespace = "lippycat.capture_source"
+// CaptureSourceOwner identifies the organization defining this proprietary
+// attribute, as an ASCII FQDN per TS 103 221-2 clause 5.3.5.
+const CaptureSourceOwner = "lippy.cat"
 
-// Version 1 wire format (network byte order): namespace + NUL, subtype u8 (1),
-// version u8 (1), flags u8 (bit 0: domain known), node length u16, interface
-// length u16, domain u32, node UTF-8 bytes, interface UTF-8 bytes. No padding or
-// trailing bytes are permitted. Each identifier is 1..4096 bytes, and the whole
-// value must fit the enclosing uint16-length TLV. Unknown domain is encoded zero.
-const captureSourcePrefix = CaptureSourceNamespace + "\x00"
-const captureSourceHeaderSize = len(captureSourcePrefix) + 11
+// Version 2 wire format (network byte order): owner length u8, owner ASCII,
+// subtype u8 (1), version u8 (2), flags u8 (bit 0: domain known), node length u16,
+// interface length u16, domain u32, node UTF-8 bytes, interface UTF-8 bytes.
+// No padding or trailing bytes are permitted. Each identifier is 1..4096 bytes,
+// and the whole value must fit the uint16-length TLV. Unknown domain is zero.
+const captureSourceOwnerSize = 1 + len(CaptureSourceOwner)
+const captureSourceHeaderSize = captureSourceOwnerSize + 11
+const captureSourceSubtype = 1
+const captureSourceVersion = 2
 
 // MaxCaptureSourceAttributeBytes bounds the complete private attribute value.
 const MaxCaptureSourceAttributeBytes = captureSourceHeaderSize + 2*types.MaxCaptureSourceStringBytes
@@ -27,7 +28,7 @@ const MaxCaptureSourceAttributeBytes = captureSourceHeaderSize + 2*types.MaxCapt
 // ErrInvalidCaptureSourceAttribute rejects malformed or unsupported source data.
 var ErrInvalidCaptureSourceAttribute = errors.New("invalid capture-source attribute")
 
-// EncodeCaptureSource freezes a validated source in a privately namespaced TLV.
+// EncodeCaptureSource freezes a validated source in a proprietary TLV.
 func EncodeCaptureSource(source types.CaptureSource) (TLVAttribute, error) {
 	domain, known := source.ObservationDomain()
 	if _, err := types.NewCaptureSource(source.NodeID(), source.Interface(), domain, known); err != nil {
@@ -38,9 +39,10 @@ func EncodeCaptureSource(source types.CaptureSource) (TLVAttribute, error) {
 		return TLVAttribute{}, ErrInvalidCaptureSourceAttribute
 	}
 	value := make([]byte, int(size))
-	copy(value, captureSourcePrefix)
-	offset := len(captureSourcePrefix)
-	value[offset], value[offset+1] = 1, 1
+	value[0] = byte(len(CaptureSourceOwner))
+	copy(value[1:], CaptureSourceOwner)
+	offset := captureSourceOwnerSize
+	value[offset], value[offset+1] = captureSourceSubtype, captureSourceVersion
 	if known {
 		value[offset+2] = 1
 	}
@@ -52,9 +54,10 @@ func EncodeCaptureSource(source types.CaptureSource) (TLVAttribute, error) {
 	return TLVAttribute{Type: AttrProprietary, Value: value}, nil
 }
 
-// DecodeCaptureSource returns available=false for legacy products or unrelated
-// proprietary values. Duplicate recognized attributes and unsupported source
-// formats are errors; callers must not silently downgrade these to legacy data.
+// DecodeCaptureSource ignores absent metadata, malformed owner fields, unrelated
+// owners and unknown subtypes. Duplicate recognized attributes and malformed or
+// unsupported capture-source bodies are errors. The original NUL-prefixed draft
+// is not recognized; journaled products are never rewritten here.
 func DecodeCaptureSource(pdu *PDU) (types.CaptureSource, bool, error) {
 	if pdu == nil {
 		return types.CaptureSource{}, false, ErrInvalidCaptureSourceAttribute
@@ -62,19 +65,33 @@ func DecodeCaptureSource(pdu *PDU) (types.CaptureSource, bool, error) {
 	var result types.CaptureSource
 	found := false
 	for _, attr := range pdu.Attributes {
-		if attr.Type != AttrProprietary || !bytes.HasPrefix(attr.Value, []byte(captureSourcePrefix)) {
+		if attr.Type != AttrProprietary {
+			continue
+		}
+		value := attr.Value
+		if len(value) == 0 || value[0] == 0 || int(value[0]) > len(value)-1 {
+			continue
+		}
+		offset := 1 + int(value[0])
+		// Only this exact owner can identify capture-source metadata. Invalid
+		// ASCII/FQDN spellings cannot match it and remain unrelated values.
+		if string(value[1:offset]) != CaptureSourceOwner {
+			continue
+		}
+		if len(value) == offset {
+			return types.CaptureSource{}, false, ErrInvalidCaptureSourceAttribute
+		}
+		if value[offset] != captureSourceSubtype {
 			continue
 		}
 		if found {
 			return types.CaptureSource{}, false, fmt.Errorf("%w: duplicate", ErrInvalidCaptureSourceAttribute)
 		}
 		found = true
-		value := attr.Value
 		if len(value) < captureSourceHeaderSize || len(value) > MaxCaptureSourceAttributeBytes {
 			return types.CaptureSource{}, false, ErrInvalidCaptureSourceAttribute
 		}
-		offset := len(captureSourcePrefix)
-		if value[offset] != 1 || value[offset+1] != 1 || value[offset+2] & ^byte(1) != 0 {
+		if value[offset+1] != captureSourceVersion || value[offset+2] & ^byte(1) != 0 {
 			return types.CaptureSource{}, false, ErrInvalidCaptureSourceAttribute
 		}
 		nodeLen := int(binary.BigEndian.Uint16(value[offset+3:]))

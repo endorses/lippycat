@@ -358,10 +358,14 @@ carry opaque references and immutable signed rules, independently of matcher
 membership. The task adapter binds references to protected owner incarnation and
 task generation. Target-list reordering also invalidates position-based bindings.
 
-The source extension uses `lippycat.capture_source`, subtype/version 1, inside the
-existing proprietary container. It carries bounded UTF-8 node/interface values
-and explicit domain presence; capture time retains its existing field. Exact
-encoded products are persisted, including their source attribute, before replay.
+The source extension uses the existing proprietary container with the
+TS 103 221-2 §5.3.5 envelope: owner length `9`, ASCII owner `lippy.cat`,
+source subtype `1` and value version `2`. The interoperability fix replaces the
+initial NUL-prefixed draft; unrelated owners and unknown subtypes remain
+independent attributes. It carries bounded UTF-8 node/interface values and
+explicit domain presence; capture time retains its existing field. Exact encoded
+products are persisted, including their source attribute, before replay. Existing
+draft-format journal records retain their original bytes on replay.
 
 Focused regressions cover signed contracts and configuration precedence, task
 lifecycle and confirmed recovery, exact capture proof, deferred release, receiver
@@ -423,3 +427,12 @@ completion deadline and exact close-count check. Production lifecycle ordering i
 unchanged. The focused test passes 100 repetitions with race detection and atomic
 coverage. The complete LI CI command also passes locally:
 `go test -v -race -tags='all li' -coverprofile=coverage-li.txt -covermode=atomic ./...`.
+
+### Proprietary attribute interoperability follow-up (2026-10-18)
+
+The corrected owner envelope and version-2 body pass an independent byte vector,
+malformed-owner/body, mixed-owner/subtype, duplicate and TLV-boundary regressions.
+A 10-second decoder fuzz run and race suites for `internal/pkg/li/...`,
+`internal/pkg/processor`, `cmd/process` and `cmd/tap` pass with `all li` tags.
+`make manual-check` passes all 47 checks with ca/de each fully translated
+(5844 current messages), and `make manual` builds all three editions.

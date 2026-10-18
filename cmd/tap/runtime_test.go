@@ -170,11 +170,11 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 	// complete-help snapshots so non-LI help remains an independent contract.
 	if TapCmd.PersistentFlags().Lookup("li-enabled") != nil {
 		liHashes := map[string]string{
-			"dns":   "ffca882cb30dfa35819e507bf2fe93c373487453b172018af4c6ad076fcce9fe",
-			"http":  "9aded123f7ecf8cf27d6ec3112330c2b7678c1c8c706522cdb071ba5852849e9",
-			"tls":   "ef164a79cc841b7c0da6e6a64b7e6c6c7e35e47b63afaa4e89ef05b244418f1b",
-			"email": "97e7a35ba8c4edf86edf715f04ed9a8dbc7901a36c3a8eecdcfccd548122c234",
-			"voip":  "53d2108d53df5b9559e984df75dfb462f87e7c1a3b026f9f5d53528051942a94",
+			"dns":   "77315471b72d5a1919b98c5de89cf52edb02fc01828057a9a7ee071f94117839",
+			"http":  "178a483b9406d9e743e36aa04c9968683d8c946f5852275faef3d6203f9a3ae5",
+			"tls":   "0390bba2c89e914e11f63c67f57965ca3c1fc7c30636a830028ea9d2a5df053b",
+			"email": "14b62d12f54ac1dd91e8c57329cdeb055432bbf914d56a5b4992c87042bd375a",
+			"voip":  "409cd96dffe8259127dd89bf00b42a977c5d8e10157eb54383df9b2e5eed212b",
 		}
 		for name, hash := range liHashes {
 			contract := contracts[name]

@@ -8,35 +8,40 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
 	"github.com/endorses/lippycat/internal/pkg/mediarules/admissionadapter"
+	"github.com/endorses/lippycat/internal/pkg/mediarules/wire"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"google.golang.org/protobuf/proto"
 )
 
 // tapMediaRules consumes the same publisher snapshots locally. It owns no
 // loopback connection and never turns a remote registry lifetime into a local
 // admission-controller capability.
 type tapMediaRules struct {
-	store        *mediarules.Store
-	subscription *mediarules.Subscription
-	projection   *admissionadapter.Projection
-	control      mediarules.Control
-	domains      map[string]mediaadmission.DomainID
-	hunterID     string
-	interval     time.Duration
+	store             *mediarules.Store
+	subscription      *mediarules.Subscription
+	projection        *admissionadapter.Projection
+	control           mediarules.Control
+	domains           map[string]mediaadmission.DomainID
+	hunterID          string
+	interval          time.Duration
+	validateMediaRule func(*management.MediaRule, string, uint32, gopacket.Packet, time.Time) bool
 }
 
 func newTapMediaRules(p *processor.Processor, cfg processor.MediaRulesConfig, domains map[string]mediaadmission.DomainID, controller *mediaadmission.Controller) (_ *tapMediaRules, err error) {
 	if p == nil || !cfg.Enabled || len(domains) == 0 {
 		return nil, errors.New("tap processor media requires publication and explicit interface domains")
 	}
-	r := &tapMediaRules{domains: make(map[string]mediaadmission.DomainID, len(domains)), hunterID: cfg.ProcessorID + "-local", interval: cfg.RuleTTL / 3}
+	r := &tapMediaRules{validateMediaRule: p.ValidateLocalMediaRule, domains: make(map[string]mediaadmission.DomainID, len(domains)), hunterID: cfg.ProcessorID + "-local", interval: cfg.RuleTTL / 3}
 	set := make(map[mediaadmission.DomainID]bool)
 	for iface, domain := range domains {
 		if iface == "" {
@@ -109,6 +114,10 @@ func (r *tapMediaRules) apply(snapshot mediarules.Snapshot) error {
 			if allowed[endpoint.Key.Domain] {
 				endpoints = append(endpoints, endpoint)
 			}
+		}
+		if len(rule.Call.SelectionGrants) > 0 {
+			rules = append(rules, rule)
+			continue
 		}
 		rule.Scope = scopes
 		rule.Endpoints = endpoints
@@ -206,21 +215,56 @@ func (r *tapMediaRules) ResolveMedia(packet gopacket.Packet, iface string) (voip
 	if !resolved.Resolved {
 		return voip.RemoteCallAssociation{}, false
 	}
-	for _, rule := range r.store.ActiveRules() {
-		if rule.Call.CallID != resolved.Call.CallID || rule.Call.Lifetime != resolved.Call.Lifetime {
-			continue
-		}
-		for _, endpoint := range rule.Endpoints {
-			if endpoint.Key != left && endpoint.Key != right {
+
+	if resolved.Rule == nil {
+		return voip.RemoteCallAssociation{}, false
+	}
+	rule := resolved.Rule
+	if len(rule.Call.SelectionGrants) == 0 {
+		for _, candidate := range r.store.ActiveRules() {
+			if candidate.Call.CallID != resolved.Call.CallID || candidate.Call.Lifetime != resolved.Call.Lifetime {
 				continue
 			}
-			if endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP) {
-				if r.ready(sequence) {
-					return tapRemoteAssociation(resolved.Call, r.store.Status().Session), true
+			matched := false
+			for _, endpoint := range candidate.Endpoints {
+				if (endpoint.Key == left || endpoint.Key == right) && (endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP)) {
+					matched = true
+					break
 				}
+			}
+			if matched {
+				owned := candidate
+				rule = &owned
+				break
 			}
 		}
 	}
+	association := tapRemoteAssociation(rule.Call, rule.Session)
+	if len(rule.Call.SelectionGrants) > 0 {
+		encoded := wire.EncodeRule(*rule)
+		if r.validateMediaRule == nil || !r.validateMediaRule(encoded, r.hunterID, uint32(domain), packet, time.Now()) {
+			return voip.RemoteCallAssociation{}, false
+		}
+		proof, err := (proto.MarshalOptions{Deterministic: true}).Marshal(encoded)
+		if err != nil {
+			return voip.RemoteCallAssociation{}, false
+		}
+		association.CaptureSelectionProof = proof
+		for _, ref := range rule.Call.SelectionGrants {
+			association.InheritedFilterIDs = append(association.InheritedFilterIDs, ref.ID)
+		}
+	}
+	for _, endpoint := range rule.Endpoints {
+		if endpoint.Key != left && endpoint.Key != right {
+			continue
+		}
+		if endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP) {
+			if r.ready(sequence) {
+				return association, true
+			}
+		}
+	}
+
 	return voip.RemoteCallAssociation{}, false
 }
 
@@ -232,6 +276,9 @@ func (r *tapMediaRules) ResolveSignalling(event sip.Event, packet gopacket.Packe
 	}
 	var found *mediarules.CallAssociation
 	for _, rule := range r.store.ActiveRules() {
+		if len(rule.Call.SelectionGrants) > 0 {
+			continue
+		}
 		call := rule.Call
 		if call.CallID != event.CallID || !((call.FromTag == event.FromTag && call.ToTag == event.ToTag) || (call.FromTag == event.ToTag && call.ToTag == event.FromTag)) {
 			continue
@@ -251,4 +298,14 @@ func (r *tapMediaRules) ResolveSignalling(event sip.Event, packet gopacket.Packe
 		return tapRemoteAssociation(*found, r.store.Status().Session), true
 	}
 	return voip.RemoteCallAssociation{}, false
+}
+
+// ValidateMediaProof preserves original capture time during queued release.
+func (r *tapMediaRules) ValidateMediaProof(packet gopacket.Packet, iface string, proof []byte, at time.Time) bool {
+	domain, ok := r.domains[iface]
+	if !ok || r.validateMediaRule == nil || len(proof) == 0 || len(proof) > filterpolicy.MaxMediaRuleBytes {
+		return false
+	}
+	rule := &management.MediaRule{}
+	return proto.Unmarshal(proof, rule) == nil && r.validateMediaRule(rule, r.hunterID, uint32(domain), packet, at)
 }

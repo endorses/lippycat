@@ -763,8 +763,10 @@ type CapturedPacket struct {
 	// processor domain. This claim is never source authentication by itself.
 	ObservationDomain      uint32 `protobuf:"varint,14,opt,name=observation_domain,json=observationDomain,proto3" json:"observation_domain,omitempty"`
 	ObservationDomainKnown bool   `protobuf:"varint,15,opt,name=observation_domain_known,json=observationDomainKnown,proto3" json:"observation_domain_known,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Complete signed public MediaRule for centrally selected media.
+	CaptureSelectionProof []byte `protobuf:"bytes,16,opt,name=capture_selection_proof,json=captureSelectionProof,proto3" json:"capture_selection_proof,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *CapturedPacket) Reset() {
@@ -900,6 +902,13 @@ func (x *CapturedPacket) GetObservationDomainKnown() bool {
 		return x.ObservationDomainKnown
 	}
 	return false
+}
+
+func (x *CapturedPacket) GetCaptureSelectionProof() []byte {
+	if x != nil {
+		return x.CaptureSelectionProof
+	}
+	return nil
 }
 
 // PacketMetadata contains hunter-side analysis results
@@ -3430,7 +3439,7 @@ const file_data_proto_rawDesc = "" +
 	"\x16monitor_event_analysis\x18\x06 \x01(\x0e2#.lippycat.data.MonitorEventAnalysisR\x14monitorEventAnalysis\x12.\n" +
 	"\x13producer_session_id\x18\a \x01(\tR\x11producerSessionId\x12#\n" +
 	"\rcapture_epoch\x18\b \x01(\tR\fcaptureEpoch\x122\n" +
-	"\x15signed_capture_policy\x18\t \x01(\fR\x13signedCapturePolicy\"\xc6\x05\n" +
+	"\x15signed_capture_policy\x18\t \x01(\fR\x13signedCapturePolicy\"\xfe\x05\n" +
 	"\x0eCapturedPacket\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x12%\n" +
@@ -3447,7 +3456,8 @@ const file_data_proto_rawDesc = "" +
 	"\x1cinherited_matched_filter_ids\x18\f \x03(\tR\x19inheritedMatchedFilterIds\x128\n" +
 	"\x06radius\x18\r \x01(\v2 .lippycat.data.RADIUSObservationR\x06radius\x12-\n" +
 	"\x12observation_domain\x18\x0e \x01(\rR\x11observationDomain\x128\n" +
-	"\x18observation_domain_known\x18\x0f \x01(\bR\x16observationDomainKnown\"\xe1\x04\n" +
+	"\x18observation_domain_known\x18\x0f \x01(\bR\x16observationDomainKnown\x126\n" +
+	"\x17capture_selection_proof\x18\x10 \x01(\fR\x15captureSelectionProof\"\xe1\x04\n" +
 	"\x0ePacketMetadata\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x15\n" +
 	"\x06src_ip\x18\x02 \x01(\tR\x05srcIp\x12\x15\n" +

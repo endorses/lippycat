@@ -14,18 +14,29 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 )
 
 var ErrCaptureAuthority = errors.New("LI capture authority is invalid, stale or outside its scope")
 
-// HandoverFilters returns only current, enabled filters owned by active tasks.
+// HandoverFilters returns only current, enabled distributed filters owned by active tasks.
 // Local operator filters and stale stored IDs never become signed LI authority.
 func (m *Manager) HandoverFilters() ([]*management.Filter, error) {
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	return m.handoverFiltersLocked()
+	filters, err := m.handoverFiltersLocked()
+	if err != nil {
+		return nil, err
+	}
+	public := filters[:0]
+	for _, f := range filters {
+		if filtering.IsDistributedFilter(f) {
+			public = append(public, f)
+		}
+	}
+	return public, nil
 }
 
 func (m *Manager) handoverFiltersLocked() ([]*management.Filter, error) {
@@ -60,7 +71,8 @@ type HandoverAuthority struct {
 
 type CaptureGrant struct {
 	FilterID             string    `json:"filter_id"`
-	FilterSHA256         string    `json:"filter_sha256"`
+	FilterSHA256         string    `json:"filter_sha256,omitempty"`
+	LocalOnly            bool      `json:"local_only,omitempty"`
 	XID                  uuid.UUID `json:"xid"`
 	ActivationGeneration uint64    `json:"activation_generation"`
 	FilterRevision       uint64    `json:"filter_revision"`
@@ -115,7 +127,7 @@ func (m *Manager) buildHandoverAuthorityLocked(filters []*management.Filter, con
 	}
 	authority := HandoverAuthority{Version: 1, Incarnation: incarnation, Grants: []CaptureGrant{}}
 	for _, filter := range filters {
-		if filter == nil || !filter.Enabled {
+		if filter == nil || !filter.Enabled || !filtering.IsDistributedFilter(filter) {
 			return nil, ErrCaptureAuthority
 		}
 		match, ok := m.filters.LookupFilter(filter.Id)
@@ -195,7 +207,7 @@ func DecodeHandoverAuthority(encoded []byte) (*HandoverAuthority, error) {
 		return nil, ErrCaptureAuthority
 	}
 	canonical, err := json.Marshal(authority)
-	if err != nil || !bytes.Equal(canonical, encoded) || authority.Version != 1 || authority.Incarnation == uuid.Nil || len(authority.Grants) > 65536 {
+	if err != nil || !bytes.Equal(canonical, encoded) || (authority.Version != 1 && authority.Version != 2) || authority.Incarnation == uuid.Nil || len(authority.Grants) > 65536 {
 		return nil, ErrCaptureAuthority
 	}
 	previous := ""
@@ -204,7 +216,7 @@ func DecodeHandoverAuthority(encoded []byte) (*HandoverAuthority, error) {
 			return nil, ErrCaptureAuthority
 		}
 		digest, err := hex.DecodeString(grant.FilterSHA256)
-		if err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != grant.FilterSHA256 {
+		if (grant.LocalOnly && (authority.Version != 2 || grant.FilterSHA256 != "" || grant.FilterRevision != grant.ActivationGeneration)) || (!grant.LocalOnly && (err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != grant.FilterSHA256)) {
 			return nil, ErrCaptureAuthority
 		}
 		previous = grant.FilterID
@@ -245,7 +257,13 @@ func (m *Manager) ValidateHandoverAuthority(encoded []byte, policyFilters []*man
 	for _, grant := range authority.Grants {
 		grants[grant.FilterID] = grant
 	}
-	if len(filters) != len(grants) {
+	localGrants := 0
+	for _, grant := range authority.Grants {
+		if grant.LocalOnly {
+			localGrants++
+		}
+	}
+	if len(filters) != len(grants)-localGrants {
 		return ErrCaptureAuthority
 	}
 	m.lifecycleMu.RLock()
@@ -256,7 +274,7 @@ func (m *Manager) ValidateHandoverAuthority(encoded []byte, policyFilters []*man
 	for _, id := range stableFilterUnion(matchedIDs, nil) {
 		grant, ok := grants[id]
 		filter := filters[id]
-		if !ok || filter == nil || len(grantSources(grant.SourceIDs, []string{source})) == 0 {
+		if !ok || (!grant.LocalOnly && filter == nil) || len(grantSources(grant.SourceIDs, []string{source})) == 0 {
 			return ErrCaptureAuthority
 		}
 		from, until := time.Unix(0, grant.ValidFromNS), time.Unix(0, grant.ValidUntilNS)
@@ -264,11 +282,11 @@ func (m *Manager) ValidateHandoverAuthority(encoded []byte, policyFilters []*man
 			return ErrCaptureAuthority
 		}
 		match, ok := m.filters.LookupFilter(id)
-		if !ok || match.XID != grant.XID || !proto.Equal(filter, match.Filter) || filter.Revision != grant.FilterRevision {
+		if !ok || match.XID != grant.XID || match.Filter.Revision != grant.FilterRevision || (grant.LocalOnly && filtering.IsDistributedFilter(match.Filter)) || (!grant.LocalOnly && (!proto.Equal(filter, match.Filter) || filter.Revision != grant.FilterRevision)) {
 			return ErrCaptureAuthority
 		}
-		digest, err := captureFilterDigest(filter)
-		if err != nil || digest != grant.FilterSHA256 {
+		digest, err := captureFilterDigest(match.Filter)
+		if !grant.LocalOnly && (err != nil || digest != grant.FilterSHA256) {
 			return ErrCaptureAuthority
 		}
 		task, err := m.registry.GetTaskDetails(grant.XID)
@@ -314,5 +332,5 @@ func (m *Manager) handoverMatchCurrent(authority *HandoverAuthority, match Match
 	}
 	grant := authority.Grants[index]
 	digest, err := captureFilterDigest(match.Filter)
-	return err == nil && grant.FilterID == match.FilterID && grant.XID == task.XID && grant.ActivationGeneration == task.ActivationGeneration && grant.FilterRevision == match.Filter.Revision && grant.FilterSHA256 == digest
+	return (grant.LocalOnly && authority.Version == 2 && !filtering.IsDistributedFilter(match.Filter) || !grant.LocalOnly && err == nil && grant.FilterSHA256 == digest) && grant.FilterID == match.FilterID && grant.XID == task.XID && grant.ActivationGeneration == task.ActivationGeneration && grant.FilterRevision == match.Filter.Revision
 }

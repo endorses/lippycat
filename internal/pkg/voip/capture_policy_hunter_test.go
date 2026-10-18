@@ -28,6 +28,7 @@ type policyRemoteResolver struct {
 	sipAllowed bool
 	generation uint64
 	calls      int
+	grantProof []byte
 }
 
 func (r *policyRemoteResolver) ResolveMedia(packet gopacket.Packet, iface string) (RemoteCallAssociation, bool) {
@@ -38,7 +39,7 @@ func (r *policyRemoteResolver) ResolveMedia(packet gopacket.Packet, iface string
 	if !r.active || !ok || iface != "media-domain" || packet.NetworkLayer().NetworkFlow().Dst().String() != "192.168.1.200" || udp.DstPort != 45000 {
 		return RemoteCallAssociation{}, false
 	}
-	return RemoteCallAssociation{CallID: "policy-call", Lifetime: callregistry.Lifetime{Session: 77, Generation: r.generation}, InheritedFilterIDs: []string{"remote-filter"}}, true
+	return RemoteCallAssociation{CallID: "policy-call", Lifetime: callregistry.Lifetime{Session: 77, Generation: r.generation}, InheritedFilterIDs: []string{"remote-filter"}, CaptureSelectionProof: append([]byte(nil), r.grantProof...)}, true
 }
 func (r *policyRemoteResolver) ResolveSignalling(event sharedsip.Event, _ gopacket.Packet, iface string) (RemoteCallAssociation, bool) {
 	r.mu.Lock()
@@ -299,4 +300,36 @@ func TestHunterRemoteMediaRetainsSelectionCheckUntilProducerAcceptance(t *testin
 	resolver.generation++
 	resolver.mu.Unlock()
 	require.False(t, check(), "a reused Call-ID/endpoint cannot authorize the old queued packet")
+}
+
+type queuedCaptureProofForwarder struct {
+	queuedSelectionForwarder
+	proof []byte
+}
+
+func (f *queuedCaptureProofForwarder) ForwardPacketWithCaptureSelectionProof(_ gopacket.Packet, _ *data.PacketMetadata, _ string, _ layers.LinkType, _ []string, _ []string, proof []byte, current func() bool) error {
+	f.queueMu.Lock()
+	defer f.queueMu.Unlock()
+	f.proof = append([]byte(nil), proof...)
+	f.check = current
+	return nil
+}
+func TestHunterRemoteMediaFreezesSignedProofUntilProducerAcceptance(t *testing.T) {
+	resolver := &policyRemoteResolver{active: true, generation: 1, grantProof: []byte("original-signed-rule")}
+	forwarder := &queuedCaptureProofForwarder{}
+	buffers := NewBufferManager(time.Minute, 10)
+	t.Cleanup(buffers.Close)
+	handler := NewUDPPacketHandler(TestCallTracker(t), forwarder, buffers)
+	t.Cleanup(handler.Close)
+	require.NoError(t, handler.SetCapturePolicies(CapturePolicies{Signalling: SignallingNone, Media: MediaProcessor}, resolver))
+	packet := createUDPPacket(30000, 45000, []byte{0x80, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1})
+	require.True(t, handler.HandleUDPPacket(capture.PacketInfo{Packet: packet, Interface: "media-domain", LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP)))
+	require.Equal(t, []byte("original-signed-rule"), forwarder.proof)
+	require.True(t, forwarder.selectionCheck()())
+	resolver.mu.Lock()
+	resolver.grantProof = []byte("new-lease-rule")
+	resolver.mu.Unlock()
+	require.False(t, forwarder.selectionCheck()(), "same visible call cannot retag a packet under replacement proof")
+	require.Equal(t, []byte("original-signed-rule"), forwarder.proof)
+	require.Error(t, forwardPacketWithCaptureSelectionProof(&recordingHunterForwarder{}, packet, nil, "media-domain", layers.LinkTypeEthernet, nil, []string{"opaque"}, []byte("proof"), func() bool { return true }), "unsupported forwarder cannot drop required proof")
 }

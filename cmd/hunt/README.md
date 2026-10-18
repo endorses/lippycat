@@ -848,3 +848,14 @@ Configure policies under `hunter.voip`, the independent interface map under
 not extend expired rules, and unsupported peers do not authorize remote media.
 See [distributed media selection](../../docs/DISTRIBUTED_MEDIA.md) for complete
 processor/hunter configurations, expiry, buffering and duplicate coverage.
+
+For LI-owned central task selection, use `signalling_policy: none` with
+`media_policy: processor` when trusted tap-local capture supplies initial SIP.
+The hunter receives separate scoped `MEDIA` grants and exact signed media rules,
+without private task patterns or selector digests. Both authorities, their
+source/domain scope and deadlines must validate; neither an opaque ID nor a
+kernel endpoint match permits capture by itself. LI-owned capture requires
+verified mTLS, encrypted policy/raw stores and reliable raw forwarding, and
+rejects `signalling_policy: all`. Upgrade peers for signed-policy version 2 before
+enabling this profile; unsupported peers fail without pattern-distribution fallback.
+See [central LI task selection](../../docs/DISTRIBUTED_MEDIA.md#li-central-task-selection).

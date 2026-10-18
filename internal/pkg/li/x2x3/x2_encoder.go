@@ -36,12 +36,17 @@ var (
 // The encoder is safe for concurrent use.
 type X2Encoder struct {
 	// attrBuilder is used to construct TLV attributes.
-	attrBuilder *AttributeBuilder
-	sequencer   *Sequencer
-	domainID    string
-	nfID        string
-	lastSeq     atomic.Uint32
+	attrBuilder           *AttributeBuilder
+	sequencer             *Sequencer
+	domainID              string
+	nfID                  string
+	lastSeq               atomic.Uint32
+	captureSourceMetadata atomic.Bool
 }
+
+// SetCaptureSourceMetadata enables the private source extension for new products.
+// It defaults to false for wire compatibility.
+func (e *X2Encoder) SetCaptureSourceMetadata(enabled bool) { e.captureSourceMetadata.Store(enabled) }
 
 // NewX2Encoder creates a new X2 encoder.
 func NewX2Encoder() *X2Encoder {
@@ -126,6 +131,13 @@ func (e *X2Encoder) generateCorrelationID(callID string) uint64 {
 // addCommonAttributes adds the standard conditional attributes (timestamp and
 // sequence number) to the PDU per the ETSI TS 103 221-2 attribute dictionary.
 func (e *X2Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) error {
+	if e.captureSourceMetadata.Load() {
+		attribute, err := packetCaptureSource(pkt)
+		if err != nil {
+			return err
+		}
+		pdu.AddAttribute(attribute)
+	}
 	// Timestamp from packet capture (attribute 9)
 	pdu.AddAttribute(e.attrBuilder.Timestamp(pkt.Timestamp))
 	if e.domainID != "" {

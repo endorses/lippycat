@@ -2,7 +2,9 @@
 package capturepolicy
 
 import (
+	"bytes"
 	"fmt"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
@@ -57,6 +59,14 @@ type RemoteCallAssociation struct {
 	ControlGeneration     uint64
 	CallID                string
 	InheritedFilterIDs    []string
+	CaptureSelectionProof []byte
+}
+
+// Clone owns the variable selection evidence retained by queued callbacks.
+func (a RemoteCallAssociation) Clone() RemoteCallAssociation {
+	a.InheritedFilterIDs = append([]string(nil), a.InheritedFilterIDs...)
+	a.CaptureSelectionProof = append([]byte(nil), a.CaptureSelectionProof...)
+	return a
 }
 
 // RemoteMediaResolver must fail closed on expired, withdrawn, stale, ambiguous or
@@ -68,10 +78,16 @@ type RemoteMediaResolver interface {
 	ResolveSignalling(sharedsip.Event, gopacket.Packet, string) (RemoteCallAssociation, bool)
 }
 
+// RemoteMediaProofValidator rechecks original capture-time proof separately
+// from a resolver's current live selection. Buffered packets never get retagged.
+type RemoteMediaProofValidator interface {
+	ValidateMediaProof(gopacket.Packet, string, []byte, time.Time) bool
+}
+
 // SameSelection compares opaque authority without treating it as a local registry
-// capability. Lease refreshes do not change this identity.
+// capability. Signed media evidence must remain byte-identical while queued.
 func (a RemoteCallAssociation) SameSelection(b RemoteCallAssociation) bool {
-	return a.CallID == b.CallID && a.Lifetime == b.Lifetime && a.SelectionRevision == b.SelectionRevision && a.CapturePolicyRevision == b.CapturePolicyRevision && a.ProcessorID == b.ProcessorID && a.ControlGeneration == b.ControlGeneration
+	return a.CallID == b.CallID && a.Lifetime == b.Lifetime && a.SelectionRevision == b.SelectionRevision && a.CapturePolicyRevision == b.CapturePolicyRevision && a.ProcessorID == b.ProcessorID && a.ControlGeneration == b.ControlGeneration && bytes.Equal(a.CaptureSelectionProof, b.CaptureSelectionProof)
 }
 
 // FilterSelectionProof freezes semantic filter definitions at direct matching.

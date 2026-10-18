@@ -416,3 +416,25 @@ func TestDialogResolutionRequiresObservationDomain(t *testing.T) {
 	clock.advance(11 * time.Second)
 	require.False(t, store.ResolveDialogInDomain(1, rule.Call.CallID, "alice", "bob").Resolved)
 }
+
+func TestGrantResolutionRetainsImmutableExactProofAndRejectsConflictingSelection(t *testing.T) {
+	store, control, clock := newTestStore(t)
+	first := testRule(clock, "a")
+	first.Call.CapturePolicyRevision = 7
+	first.Call.SelectionGrants = []SelectionRef{{ID: "opaque", Revision: 3}}
+	first.CaptureSignature = []byte("signature")
+	second := cloneRule(first)
+	second.ID = "b"
+	require.NoError(t, store.ApplySnapshot(control, 1, []Rule{second, first}))
+	resolved := store.Resolve(first.Endpoints[0].Key, first.Endpoints[1].Key)
+	require.True(t, resolved.Resolved)
+	require.NotNil(t, resolved.Rule)
+	require.Equal(t, "a", resolved.Rule.ID)
+	resolved.Rule.Call.SelectionGrants[0].ID = "mutated"
+	resolved.Rule.CaptureSignature[0] = 'x'
+	require.Equal(t, "opaque", store.Resolve(first.Endpoints[0].Key, first.Endpoints[1].Key).Rule.Call.SelectionGrants[0].ID)
+	second.Revision = 2
+	second.Call.SelectionGrants[0].Revision++
+	require.NoError(t, store.ApplyDelta(control, 2, []Rule{second}, nil))
+	require.True(t, store.Resolve(first.Endpoints[0].Key, first.Endpoints[1].Key).Ambiguous)
+}

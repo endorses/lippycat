@@ -55,3 +55,6 @@ func (p *Processor) processLIRADIUSPacket(_ *types.PacketDisplay, _ *data.Captur
 }
 
 func (p *Processor) liCorrelationKeyring() *securestore.Keyring { return nil }
+
+func (p *Processor) processLocalLIPacketWithAdmissionAndDedup(_ *types.PacketDisplay, _, _ []string, _ *CallAdmission, _ *packetdedup.Observation) {
+}

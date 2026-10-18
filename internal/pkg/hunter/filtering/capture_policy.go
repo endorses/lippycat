@@ -110,6 +110,19 @@ func (m *Manager) CaptureAllowed(now time.Time) bool {
 		}
 	}
 	if !hasApplicableFilter {
+		for _, grant := range policy.SelectionGrants {
+			if grant == nil || wall < grant.NotBeforeNs || wall >= grant.ExpiresAtNs {
+				continue
+			}
+			for _, scope := range grant.Scopes {
+				if scope != nil && scope.HunterId == m.hunterID {
+					hasApplicableFilter = true
+					break
+				}
+			}
+		}
+	}
+	if !hasApplicableFilter {
 		return false
 	}
 	if wall < policy.ValidFromNs || wall >= policy.ValidUntilNs || !now.Before(lease.deadline) {

@@ -228,3 +228,37 @@ func TestLocalProcessorSharesCurrentSelectionAcrossTCPAndUDP(t *testing.T) {
 	_, _, err = proc.ProcessReassembledSIPResultWithLifetime(pipeline.SIPResultFromEvent(event, captureadapter.FromPacketInfo(info, pipeline.SourceLiveCapture)))
 	require.Error(t, err, "old TCP selection must be rejected before registry mutation")
 }
+
+type sourceMediaProofResolver struct {
+	*sourcePolicyResolver
+	expectedAt time.Time
+	allowProof bool
+	checkedAt  time.Time
+}
+
+func (r *sourceMediaProofResolver) ValidateMediaProof(_ gopacket.Packet, _ string, proof []byte, at time.Time) bool {
+	r.checkedAt = at
+	return r.allowProof && at.Equal(r.expectedAt) && bytes.Equal(proof, []byte("signed-at-capture"))
+}
+func TestLocalSourceRetainsOriginalProofAndValidatesOriginalCaptureTime(t *testing.T) {
+	cfg := DefaultLocalSourceConfig()
+	cfg.ProtocolMode = "voip"
+	s := NewLocalSource(cfg)
+	info := sourcePolicyPacket(t, []byte{0x80, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1}, 45000)
+	remote := &sourceMediaProofResolver{sourcePolicyResolver: &sourcePolicyResolver{active: true, proof: capturepolicy.RemoteCallAssociation{CallID: "policy", Lifetime: callregistry.Lifetime{Session: 9, Generation: 1}, SelectionRevision: 1, ProcessorID: "processor", ControlGeneration: 1, InheritedFilterIDs: []string{"opaque"}, CaptureSelectionProof: []byte("signed-at-capture")}}, expectedAt: info.Packet.Metadata().Timestamp, allowProof: true}
+	require.NoError(t, s.SetCapturePolicies(capturepolicy.CapturePolicies{Signalling: capturepolicy.SignallingNone, Media: capturepolicy.MediaProcessor}, remote))
+	handled, accepted := s.policyPacket(info, nil)
+	require.True(t, handled)
+	require.NotNil(t, accepted)
+	env, err := s.normalizeLocalPacket(accepted.packet)
+	require.NoError(t, err)
+	require.True(t, accepted.check(env))
+	require.Equal(t, remote.expectedAt, remote.checkedAt)
+	require.Equal(t, []byte("signed-at-capture"), env.CaptureSelectionProof)
+	remote.allowProof = false
+	require.False(t, accepted.check(env), "capture-time authority is required even when live resolver still selects the call")
+	remote.allowProof = true
+	remote.proof.CaptureSelectionProof = []byte("new-lease-proof")
+	require.False(t, accepted.check(env), "lease replacement cannot retag old retained proof")
+	require.Equal(t, []byte("signed-at-capture"), env.CaptureSelectionProof)
+}

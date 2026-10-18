@@ -166,6 +166,25 @@ func (m *Manager) installSharedPolicy(snapshot *management.SignedPolicySnapshot,
 		if policy.config.Owner == "li" {
 			return m.installCaptureSnapshot(snapshot, filters)
 		}
+		if m.sharedSelectionSnapshotRequired(verified) {
+			if m.filterValidator != nil {
+				if err := m.filterValidator(filters); err != nil {
+					return err
+				}
+			}
+			m.mu.RLock()
+			coordinator := m.policyCoordinator
+			m.mu.RUnlock()
+			if coordinator != nil {
+				if _, ok := coordinator.(captureSnapshotCoordinator); !ok {
+					return errors.New("capture-selection grants require a producer boundary that preserves signed capture proof")
+				}
+			}
+			// The same producer boundary installs matching filters and signed
+			// grant evidence. Later ordinary replacements, including version 1
+			// withdrawals, must also replace the previously installed evidence.
+			return m.installCaptureSnapshot(snapshot, filters)
+		}
 		if initial {
 			return m.setInitialFilters(filters)
 		}

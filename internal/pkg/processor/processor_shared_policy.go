@@ -25,10 +25,13 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 type processorPolicy struct {
-	installedRevision atomic.Uint64
+	installedRevision   atomic.Uint64
+	installedSnapshot   atomic.Pointer[management.PolicySnapshot]
+	localAuthorityReady atomic.Bool
 	management.UnimplementedFilterPolicyServiceServer
 	processor     *Processor
 	config        filterpolicy.Config
@@ -192,6 +195,7 @@ func (runtime *processorPolicy) install(snapshot *management.SignedPolicySnapsho
 		return err
 	}
 	runtime.readyOnce.Do(func() { close(runtime.ready) })
+	runtime.installedSnapshot.Store(proto.Clone(snapshot.GetSnapshot()).(*management.PolicySnapshot))
 	runtime.installedRevision.Store(snapshot.GetSnapshot().GetRevision())
 	return p.reconcileMediaSelection()
 }
@@ -338,6 +342,12 @@ func (runtime *processorPolicy) replicate(ctx context.Context, endpoint failover
 	}
 }
 func (runtime *processorPolicy) replicateOnce(ctx context.Context, endpoint failover.Endpoint) error {
+	// A cached LI snapshot may contain selectors from the previous distribution
+	// setting. Reconcile the current task owner and publish its fresh policy
+	// before exporting anything to replicas during startup.
+	if runtime.config.Owner == "li" && runtime.signer != nil && !runtime.localAuthorityReady.Load() {
+		return nil
+	}
 	snapshot, err := runtime.state.Snapshot()
 	if errors.Is(err, filterpolicy.ErrNotReady) {
 		return nil

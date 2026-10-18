@@ -1363,6 +1363,28 @@ message MediaAdmissionUncertainty {
 // Signed full replacement policy, independent of transport route. All filter
 // IDs are preserved and belong to shared/<domain>/; an empty list deletes the
 // previous owned policy. The signature covers deterministic Snapshot bytes.
+// Generic opaque authority for centrally selected media; never a matcher.
+enum CaptureSelectionPurpose {
+    CAPTURE_SELECTION_PURPOSE_UNSPECIFIED = 0;
+    CAPTURE_SELECTION_PURPOSE_MEDIA = 1;
+}
+message CaptureSelectionScope {
+    string hunter_id = 1;
+    uint32 domain = 2;
+}
+message CaptureSelectionRef {
+    string id = 1;
+    uint64 revision = 2;
+}
+message CaptureSelectionGrant {
+    string id = 1;
+    uint64 revision = 2;
+    string processor_id = 3;
+    repeated CaptureSelectionScope scopes = 4;
+    int64 not_before_ns = 5;
+    int64 expires_at_ns = 6;
+    CaptureSelectionPurpose purpose = 7;
+}
 message PolicySnapshot {
     uint32 protocol_version = 1;
     string domain = 2;
@@ -1375,6 +1397,7 @@ message PolicySnapshot {
     int64 valid_until_ns = 9;
     bool allow_offline_capture = 10;
     repeated string source_ids = 11;
+    repeated CaptureSelectionGrant selection_grants = 12;
 }
 message SignedPolicySnapshot {
     PolicySnapshot snapshot = 1;

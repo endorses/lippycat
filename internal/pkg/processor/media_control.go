@@ -355,6 +355,11 @@ func (r *processorMediaControl) publishLocked(p *Processor, renew bool) error {
 			})
 		}
 	}
+	var scopeErr error
+	rules, scopeErr = p.scopedCaptureRules(rules)
+	if scopeErr != nil {
+		return errors.Join(scopeErr, r.withdrawLocked())
+	}
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
 	unchanged := len(rules) == len(r.rules)
 	if unchanged {
@@ -365,6 +370,7 @@ func (r *processorMediaControl) publishLocked(p *Processor, renew bool) error {
 				break
 			}
 			old.Revision = 0
+			old.CaptureSignature = nil
 			old.NotBefore = rule.NotBefore
 			old.ExpiresAt = rule.ExpiresAt
 			if !reflect.DeepEqual(old, rule) {
@@ -379,6 +385,9 @@ func (r *processorMediaControl) publishLocked(p *Processor, renew bool) error {
 	r.revision++
 	for i := range rules {
 		rules[i].Revision = r.revision
+		if err := p.signCaptureRule(&rules[i]); err != nil {
+			return errors.Join(err, r.withdrawLocked())
+		}
 	}
 	if err := r.store.ApplySnapshot(r.control, r.revision, rules); err != nil {
 		// A partial new selection cannot leave an old, broader snapshot live.

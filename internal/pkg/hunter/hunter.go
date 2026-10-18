@@ -478,11 +478,10 @@ func (h *Hunter) Start(ctx context.Context) error {
 			Processors:       append([]failover.Endpoint(nil), h.config.Processors...),
 			Failover:         h.config.Failover,
 			OnEndpoint: func(ctx context.Context, endpoint failover.Endpoint) error {
-				if h.mediaRules != nil {
-					if err := h.mediaRules.invalidate(); err != nil {
-						return err
-					}
-				}
+				// An attempted route does not replace the authenticated media
+				// session. Existing signed offline rules retain their bounded
+				// deadlines; openMediaRules invalidates them during new control
+				// setup and pins the replacement to its verified issuer.
 				return h.captureManager.PrepareProcessor(ctx, endpoint, h.filterManager.GetFilters())
 			},
 			HunterID:              h.config.HunterID,
@@ -1082,6 +1081,12 @@ func (h *Hunter) ForwardPacketWithFilterProvenance(packet gopacket.Packet, metad
 // ForwardPacketWithSelectionCheck keeps current source selection attached until
 // the lifetime producer accepts this packet into a sealed batch.
 func (h *Hunter) ForwardPacketWithSelectionCheck(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string, selectionCurrent func() bool) error {
+	return h.ForwardPacketWithCaptureSelectionProof(packet, metadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs, nil, selectionCurrent)
+}
+
+// ForwardPacketWithCaptureSelectionProof freezes signed media evidence until
+// the producer validates the original capture against the installed policy.
+func (h *Hunter) ForwardPacketWithCaptureSelectionProof(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string, proof []byte, selectionCurrent func() bool) error {
 	if packet == nil {
 		return fmt.Errorf("cannot forward nil packet")
 	}
@@ -1134,6 +1139,7 @@ func (h *Hunter) ForwardPacketWithSelectionCheck(packet gopacket.Packet, metadat
 	// Use the provided link type from the capture source (preserves Linux cooked, raw IP, etc.)
 	envelope := &pipeline.PacketEnvelope{
 		CurrentCaptureSelection: selectionCurrent,
+		CaptureSelectionProof:   append([]byte(nil), proof...),
 		Data:                    packetData,
 		CaptureTime:             timestamp,
 		CaptureLength:           captureLen,

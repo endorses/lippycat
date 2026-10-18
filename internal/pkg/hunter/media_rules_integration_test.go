@@ -139,3 +139,29 @@ func TestHunterLiveMediaRulesRejectsIssuerOutsideVerifiedSAN(t *testing.T) {
 	require.Nil(t, run)
 	require.False(t, runtime.ready())
 }
+
+type otherProcessorMediaSnapshot struct {
+	management.UnimplementedMediaControlServiceServer
+}
+
+func (otherProcessorMediaSnapshot) SubscribeMediaRules(_ *management.MediaRuleRequest, stream management.MediaControlService_SubscribeMediaRulesServer) error {
+	return stream.Send(&management.MediaRuleUpdate{ProtocolVersion: wire.GrantVersion, Session: &management.MediaRuleSession{ProcessorId: "other-processor", Generation: 2}, Revision: 1, SnapshotBegin: true, SnapshotEnd: true})
+}
+func TestHunterMediaReplacementCannotInheritAnotherProcessorSession(t *testing.T) {
+	runtime := mediaRuleHunterFixture(t).mediaRules
+	rule := currentMediaRule()
+	control, err := runtime.store.StartSession("receiver", rule.Session)
+	require.NoError(t, err)
+	require.NoError(t, runtime.store.ApplySnapshot(control, 1, []mediarules.Rule{rule}))
+	_, ok := runtime.ResolveMedia(mediaRuleTestPacket(t), "first")
+	require.True(t, ok)
+	conn := mediaRuleTLSConnection(t, otherProcessorMediaSnapshot{})
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	run, err := runtime.open(t.Context(), ctx, conn)
+	require.ErrorIs(t, err, mediarules.ErrAuthority)
+	require.Nil(t, run)
+	require.False(t, runtime.ready(), "a replacement control session must synchronize under the configured authenticated issuer")
+	_, ok = runtime.ResolveMedia(mediaRuleTestPacket(t), "first")
+	require.False(t, ok, "previous rule cannot be inherited by an unrecognized processor session")
+}

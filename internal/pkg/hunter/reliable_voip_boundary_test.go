@@ -126,7 +126,7 @@ func (f *reliableVoIPBoundaryFixture) signed(t *testing.T, revision, filterRevis
 	require.NoError(t, err)
 	return signed
 }
-func newReliableVoIPBoundaryFixture(t *testing.T) *reliableVoIPBoundaryFixture {
+func newReliableVoIPBoundaryFixture(t *testing.T, configure ...func(*reliableVoIPBoundaryFixture, *grpc.Server, *Config)) *reliableVoIPBoundaryFixture {
 	t.Helper()
 	pair, certificate, key, roots := rawIntegrationCertificate(t)
 	policyConfig, signer := policyfixture.Config(t)
@@ -153,10 +153,14 @@ func newReliableVoIPBoundaryFixture(t *testing.T) *reliableVoIPBoundaryFixture {
 	data.RegisterReliablePacketServiceServer(f.server, f.receiver)
 	management.RegisterFilterPolicyServiceServer(f.server, f.policy)
 	serverDone := make(chan error, 1)
-	go func() { serverDone <- f.server.Serve(listener) }()
 	policyConfig.SigningKeyFile = ""
-	f.h, err = New(Config{HunterID: "edge", Processors: []failover.Endpoint{{Address: listener.Addr().String()}}, Failover: failover.Config{AttemptTimeout: time.Second, RetryInitial: 10 * time.Millisecond, RetryMax: 20 * time.Millisecond}, BufferSize: 32, BatchSize: 1, BatchTimeout: 10 * time.Millisecond, TLSEnabled: true, TLSCAFile: certificate, TLSCertFile: certificate, TLSKeyFile: key, NoFilterPolicy: "deny", ForwardMode: "packets", VoIPMode: true, VoIPSignallingPolicy: "matched", VoIPMediaPolicy: "local", SupportedFilterTypes: []string{"sip_user"}, FilterPolicy: policyConfig, Packets: delivery})
+	hunterConfig := Config{HunterID: "edge", Processors: []failover.Endpoint{{Address: listener.Addr().String()}}, Failover: failover.Config{AttemptTimeout: time.Second, RetryInitial: 10 * time.Millisecond, RetryMax: 20 * time.Millisecond}, BufferSize: 32, BatchSize: 1, BatchTimeout: 10 * time.Millisecond, TLSEnabled: true, TLSCAFile: certificate, TLSCertFile: certificate, TLSKeyFile: key, NoFilterPolicy: "deny", ForwardMode: "packets", VoIPMode: true, VoIPSignallingPolicy: "matched", VoIPMediaPolicy: "local", SupportedFilterTypes: []string{"sip_user"}, FilterPolicy: policyConfig, Packets: delivery}
+	for _, setup := range configure {
+		setup(f, f.server, &hunterConfig)
+	}
+	f.h, err = New(hunterConfig)
 	require.NoError(t, err)
+	go func() { serverDone <- f.server.Serve(listener) }()
 	cfg := voip.DefaultConfig()
 	f.tracker = voip.NewCallTrackerWithConfig(cfg)
 	f.buffers = voip.NewBufferManager(time.Minute, 100)
@@ -168,7 +172,7 @@ func newReliableVoIPBoundaryFixture(t *testing.T) *reliableVoIPBoundaryFixture {
 	vp := voip.NewVoIPPacketProcessor(f.tracker, f.h, f.buffers)
 	vp.SetTCPHandler(handler)
 	vp.SetAssembler(assembler)
-	require.NoError(t, vp.SetCapturePolicies(voip.CapturePolicies{}, nil))
+	require.NoError(t, vp.SetCapturePolicies(voip.CapturePolicies{Signalling: voip.SignallingPolicy(f.h.config.VoIPSignallingPolicy), Media: voip.MediaPolicy(f.h.config.VoIPMediaPolicy)}, f.h.VoIPMediaResolver()))
 	f.h.SetPacketProcessor(vp)
 	require.NoError(t, f.h.captureManager.PrepareBuffer())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -177,7 +181,7 @@ func newReliableVoIPBoundaryFixture(t *testing.T) *reliableVoIPBoundaryFixture {
 	go func() { f.done <- f.h.Start(ctx) }()
 	t.Cleanup(func() {
 		if !f.stopped {
-			cancel()
+			f.cancel()
 			require.NoError(t, <-f.done)
 		}
 		select {

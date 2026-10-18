@@ -15,5 +15,8 @@ func (h *Hunter) captureObservationDomain(iface string) (uint32, bool) {
 }
 
 func (h *Hunter) captureSelectionAllowed(envelope *pipeline.PacketEnvelope) bool {
+	if envelope != nil && len(envelope.CaptureSelectionProof) > 0 {
+		return h.filterManager != nil && h.filterManager.CaptureSelectionProofAllowed(envelope)
+	}
 	return envelope != nil && h.filterManager != nil && h.filterManager.CaptureSelectionAllowed(envelope.MatchedFilterIDs)
 }

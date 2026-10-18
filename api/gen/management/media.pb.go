@@ -312,7 +312,8 @@ type MediaRuleCall struct {
 	SelectionRevision  uint64                 `protobuf:"varint,6,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
 	FilterIds          []string               `protobuf:"bytes,7,rep,name=filter_ids,json=filterIds,proto3" json:"filter_ids,omitempty"`
 	// Optional shared signed capture-policy revision; zero for ordinary policy.
-	CapturePolicyRevision uint64 `protobuf:"varint,8,opt,name=capture_policy_revision,json=capturePolicyRevision,proto3" json:"capture_policy_revision,omitempty"`
+	CapturePolicyRevision uint64                 `protobuf:"varint,8,opt,name=capture_policy_revision,json=capturePolicyRevision,proto3" json:"capture_policy_revision,omitempty"`
+	SelectionGrants       []*CaptureSelectionRef `protobuf:"bytes,9,rep,name=selection_grants,json=selectionGrants,proto3" json:"selection_grants,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -403,18 +404,27 @@ func (x *MediaRuleCall) GetCapturePolicyRevision() uint64 {
 	return 0
 }
 
+func (x *MediaRuleCall) GetSelectionGrants() []*CaptureSelectionRef {
+	if x != nil {
+		return x.SelectionGrants
+	}
+	return nil
+}
+
 type MediaRule struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Session       *MediaRuleSession      `protobuf:"bytes,2,opt,name=session,proto3" json:"session,omitempty"`
-	Revision      uint64                 `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
-	Call          *MediaRuleCall         `protobuf:"bytes,4,opt,name=call,proto3" json:"call,omitempty"`
-	Scopes        []*MediaRuleScope      `protobuf:"bytes,5,rep,name=scopes,proto3" json:"scopes,omitempty"`
-	Endpoints     []*MediaRuleEndpoint   `protobuf:"bytes,6,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
-	NotBeforeNs   int64                  `protobuf:"varint,7,opt,name=not_before_ns,json=notBeforeNs,proto3" json:"not_before_ns,omitempty"`
-	ExpiresAtNs   int64                  `protobuf:"varint,8,opt,name=expires_at_ns,json=expiresAtNs,proto3" json:"expires_at_ns,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Session     *MediaRuleSession      `protobuf:"bytes,2,opt,name=session,proto3" json:"session,omitempty"`
+	Revision    uint64                 `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
+	Call        *MediaRuleCall         `protobuf:"bytes,4,opt,name=call,proto3" json:"call,omitempty"`
+	Scopes      []*MediaRuleScope      `protobuf:"bytes,5,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	Endpoints   []*MediaRuleEndpoint   `protobuf:"bytes,6,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
+	NotBeforeNs int64                  `protobuf:"varint,7,opt,name=not_before_ns,json=notBeforeNs,proto3" json:"not_before_ns,omitempty"`
+	ExpiresAtNs int64                  `protobuf:"varint,8,opt,name=expires_at_ns,json=expiresAtNs,proto3" json:"expires_at_ns,omitempty"`
+	// Signed exact rule proof for capture-time historical verification.
+	CaptureSignature []byte `protobuf:"bytes,9,opt,name=capture_signature,json=captureSignature,proto3" json:"capture_signature,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *MediaRule) Reset() {
@@ -501,6 +511,13 @@ func (x *MediaRule) GetExpiresAtNs() int64 {
 		return x.ExpiresAtNs
 	}
 	return 0
+}
+
+func (x *MediaRule) GetCaptureSignature() []byte {
+	if x != nil {
+		return x.CaptureSignature
+	}
+	return nil
 }
 
 // Snapshot chunks share one session and revision. The receiver stages all chunks
@@ -746,7 +763,7 @@ var File_media_proto protoreflect.FileDescriptor
 
 const file_media_proto_rawDesc = "" +
 	"\n" +
-	"\vmedia.proto\x12\x13lippycat.management\"}\n" +
+	"\vmedia.proto\x12\x13lippycat.management\x1a\x10management.proto\"}\n" +
 	"\x10MediaRuleRequest\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12\x1b\n" +
 	"\thunter_id\x18\x02 \x01(\tR\bhunterId\x12!\n" +
@@ -763,7 +780,7 @@ const file_media_proto_rawDesc = "" +
 	"\x06domain\x18\x01 \x01(\rR\x06domain\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04port\x18\x03 \x01(\rR\x04port\x12>\n" +
-	"\x04kind\x18\x04 \x01(\x0e2*.lippycat.management.MediaRuleEndpointKindR\x04kind\"\xbc\x02\n" +
+	"\x04kind\x18\x04 \x01(\x0e2*.lippycat.management.MediaRuleEndpointKindR\x04kind\"\x91\x03\n" +
 	"\rMediaRuleCall\x12)\n" +
 	"\x10registry_session\x18\x01 \x01(\x04R\x0fregistrySession\x12/\n" +
 	"\x13registry_generation\x18\x02 \x01(\x04R\x12registryGeneration\x12\x17\n" +
@@ -773,7 +790,8 @@ const file_media_proto_rawDesc = "" +
 	"\x12selection_revision\x18\x06 \x01(\x04R\x11selectionRevision\x12\x1d\n" +
 	"\n" +
 	"filter_ids\x18\a \x03(\tR\tfilterIds\x126\n" +
-	"\x17capture_policy_revision\x18\b \x01(\x04R\x15capturePolicyRevision\"\xfb\x02\n" +
+	"\x17capture_policy_revision\x18\b \x01(\x04R\x15capturePolicyRevision\x12S\n" +
+	"\x10selection_grants\x18\t \x03(\v2(.lippycat.management.CaptureSelectionRefR\x0fselectionGrants\"\xa8\x03\n" +
 	"\tMediaRule\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12?\n" +
 	"\asession\x18\x02 \x01(\v2%.lippycat.management.MediaRuleSessionR\asession\x12\x1a\n" +
@@ -782,7 +800,8 @@ const file_media_proto_rawDesc = "" +
 	"\x06scopes\x18\x05 \x03(\v2#.lippycat.management.MediaRuleScopeR\x06scopes\x12D\n" +
 	"\tendpoints\x18\x06 \x03(\v2&.lippycat.management.MediaRuleEndpointR\tendpoints\x12\"\n" +
 	"\rnot_before_ns\x18\a \x01(\x03R\vnotBeforeNs\x12\"\n" +
-	"\rexpires_at_ns\x18\b \x01(\x03R\vexpiresAtNs\"\xe3\x02\n" +
+	"\rexpires_at_ns\x18\b \x01(\x03R\vexpiresAtNs\x12+\n" +
+	"\x11capture_signature\x18\t \x01(\fR\x10captureSignature\"\xe3\x02\n" +
 	"\x0fMediaRuleUpdate\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12?\n" +
 	"\asession\x18\x02 \x01(\v2%.lippycat.management.MediaRuleSessionR\asession\x12\x1a\n" +
@@ -836,25 +855,27 @@ var file_media_proto_goTypes = []any{
 	(*MediaRuleUpdate)(nil),      // 7: lippycat.management.MediaRuleUpdate
 	(*MediaRuleApplication)(nil), // 8: lippycat.management.MediaRuleApplication
 	(*MediaRuleReceipt)(nil),     // 9: lippycat.management.MediaRuleReceipt
+	(*CaptureSelectionRef)(nil),  // 10: lippycat.management.CaptureSelectionRef
 }
 var file_media_proto_depIdxs = []int32{
 	0,  // 0: lippycat.management.MediaRuleEndpoint.kind:type_name -> lippycat.management.MediaRuleEndpointKind
-	2,  // 1: lippycat.management.MediaRule.session:type_name -> lippycat.management.MediaRuleSession
-	5,  // 2: lippycat.management.MediaRule.call:type_name -> lippycat.management.MediaRuleCall
-	3,  // 3: lippycat.management.MediaRule.scopes:type_name -> lippycat.management.MediaRuleScope
-	4,  // 4: lippycat.management.MediaRule.endpoints:type_name -> lippycat.management.MediaRuleEndpoint
-	2,  // 5: lippycat.management.MediaRuleUpdate.session:type_name -> lippycat.management.MediaRuleSession
-	6,  // 6: lippycat.management.MediaRuleUpdate.rules:type_name -> lippycat.management.MediaRule
-	2,  // 7: lippycat.management.MediaRuleApplication.session:type_name -> lippycat.management.MediaRuleSession
-	1,  // 8: lippycat.management.MediaControlService.SubscribeMediaRules:input_type -> lippycat.management.MediaRuleRequest
-	8,  // 9: lippycat.management.MediaControlService.ReportMediaRuleStatus:input_type -> lippycat.management.MediaRuleApplication
-	7,  // 10: lippycat.management.MediaControlService.SubscribeMediaRules:output_type -> lippycat.management.MediaRuleUpdate
-	9,  // 11: lippycat.management.MediaControlService.ReportMediaRuleStatus:output_type -> lippycat.management.MediaRuleReceipt
-	10, // [10:12] is the sub-list for method output_type
-	8,  // [8:10] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	10, // 1: lippycat.management.MediaRuleCall.selection_grants:type_name -> lippycat.management.CaptureSelectionRef
+	2,  // 2: lippycat.management.MediaRule.session:type_name -> lippycat.management.MediaRuleSession
+	5,  // 3: lippycat.management.MediaRule.call:type_name -> lippycat.management.MediaRuleCall
+	3,  // 4: lippycat.management.MediaRule.scopes:type_name -> lippycat.management.MediaRuleScope
+	4,  // 5: lippycat.management.MediaRule.endpoints:type_name -> lippycat.management.MediaRuleEndpoint
+	2,  // 6: lippycat.management.MediaRuleUpdate.session:type_name -> lippycat.management.MediaRuleSession
+	6,  // 7: lippycat.management.MediaRuleUpdate.rules:type_name -> lippycat.management.MediaRule
+	2,  // 8: lippycat.management.MediaRuleApplication.session:type_name -> lippycat.management.MediaRuleSession
+	1,  // 9: lippycat.management.MediaControlService.SubscribeMediaRules:input_type -> lippycat.management.MediaRuleRequest
+	8,  // 10: lippycat.management.MediaControlService.ReportMediaRuleStatus:input_type -> lippycat.management.MediaRuleApplication
+	7,  // 11: lippycat.management.MediaControlService.SubscribeMediaRules:output_type -> lippycat.management.MediaRuleUpdate
+	9,  // 12: lippycat.management.MediaControlService.ReportMediaRuleStatus:output_type -> lippycat.management.MediaRuleReceipt
+	11, // [11:13] is the sub-list for method output_type
+	9,  // [9:11] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_media_proto_init() }
@@ -862,6 +883,7 @@ func file_media_proto_init() {
 	if File_media_proto != nil {
 		return
 	}
+	file_management_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

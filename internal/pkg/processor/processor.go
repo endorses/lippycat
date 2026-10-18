@@ -117,17 +117,19 @@ type Config struct {
 	// API Key Authentication (for non-mTLS deployments)
 	AuthConfig *auth.Config // API key authentication configuration (alternative to mTLS)
 	// LI (Lawful Interception) settings - only functional with -tags li build
-	LIEnabled                    bool // Enable LI processing
-	LIHandover                   li.HandoverConfig
-	LIRADIUSScope                radius.ScopeBinding
-	LIRADIUSMACProfile           string
-	LIRADIUSCorrelationLifetime  time.Duration
-	LIRADIUSCorrelationStateFile string // Explicit allocator path; encrypted LI state retains its migration-time pin
-	LIX1ListenAddr               string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
-	LIX1TLSCertFile              string // Path to X1 server TLS certificate
-	LIX1TLSKeyFile               string // Path to X1 server TLS key
-	LIX1TLSCAFile                string // Path to CA certificate for X1 client verification (mutual TLS)
-	LIADMFEndpoint               string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
+	LIEnabled                       bool // Enable LI processing
+	LITaskFilterDistributionScope   string
+	LIDeliveryCaptureSourceMetadata bool
+	LIHandover                      li.HandoverConfig
+	LIRADIUSScope                   radius.ScopeBinding
+	LIRADIUSMACProfile              string
+	LIRADIUSCorrelationLifetime     time.Duration
+	LIRADIUSCorrelationStateFile    string // Explicit allocator path; encrypted LI state retains its migration-time pin
+	LIX1ListenAddr                  string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
+	LIX1TLSCertFile                 string // Path to X1 server TLS certificate
+	LIX1TLSKeyFile                  string // Path to X1 server TLS key
+	LIX1TLSCAFile                   string // Path to CA certificate for X1 client verification (mutual TLS)
+	LIADMFEndpoint                  string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
 	// LI ADMF client (X1 notifications) TLS settings - for connecting to ADMF
 	LIADMFTLSCertFile string // Path to client TLS certificate for ADMF notifications (mutual TLS)
 	LIADMFTLSKeyFile  string // Path to client TLS key for ADMF notifications
@@ -337,6 +339,13 @@ type Processor struct {
 
 // New creates a new processor instance
 func New(config Config) (_ *Processor, constructorErr error) {
+	if config.LITaskFilterDistributionScope == "" {
+		config.LITaskFilterDistributionScope = "distributed"
+	}
+	if config.LITaskFilterDistributionScope != "distributed" && config.LITaskFilterDistributionScope != "local_only" {
+		return nil, fmt.Errorf("invalid LI task filter distribution scope %q", config.LITaskFilterDistributionScope)
+	}
+
 	var relayErr error
 	config.RelayOrigins, relayErr = normalizeRelayOrigins(config.RelayOrigins)
 	if relayErr != nil {

@@ -18,6 +18,7 @@ import (
 )
 
 const Version = 1
+const GrantVersion = 2
 
 func EncodeSession(s mediarules.Session) *management.MediaRuleSession {
 	return &management.MediaRuleSession{ProcessorId: s.ProcessorID, Generation: s.Generation}
@@ -36,6 +37,10 @@ func EncodeRule(r mediarules.Rule) *management.MediaRule {
 			CallId: r.Call.CallID, FromTag: r.Call.FromTag, ToTag: r.Call.ToTag,
 			SelectionRevision: r.Call.SelectionRevision, CapturePolicyRevision: r.Call.CapturePolicyRevision, FilterIds: append([]string(nil), r.Call.FilterIDs...)},
 		NotBeforeNs: r.NotBefore.UnixNano(), ExpiresAtNs: r.ExpiresAt.UnixNano()}
+	w.CaptureSignature = append([]byte(nil), r.CaptureSignature...)
+	for _, ref := range r.Call.SelectionGrants {
+		w.Call.SelectionGrants = append(w.Call.SelectionGrants, &management.CaptureSelectionRef{Id: ref.ID, Revision: ref.Revision})
+	}
 	for _, scope := range r.Scope {
 		w.Scopes = append(w.Scopes, &management.MediaRuleScope{HunterId: scope.HunterID, Domain: uint32(scope.Domain)})
 	}
@@ -62,6 +67,13 @@ func DecodeRule(w *management.MediaRule) (mediarules.Rule, error) {
 			CallID: w.Call.CallId, FromTag: w.Call.FromTag, ToTag: w.Call.ToTag,
 			SelectionRevision: w.Call.SelectionRevision, CapturePolicyRevision: w.Call.CapturePolicyRevision, FilterIDs: append([]string(nil), w.Call.FilterIds...)},
 		NotBefore: time.Unix(0, w.NotBeforeNs), ExpiresAt: time.Unix(0, w.ExpiresAtNs)}
+	r.CaptureSignature = append([]byte(nil), w.CaptureSignature...)
+	for _, ref := range w.Call.SelectionGrants {
+		if ref == nil {
+			return mediarules.Rule{}, mediarules.ErrInvalid
+		}
+		r.Call.SelectionGrants = append(r.Call.SelectionGrants, mediarules.SelectionRef{ID: ref.Id, Revision: ref.Revision})
+	}
 	for _, scope := range w.Scopes {
 		if scope == nil {
 			return mediarules.Rule{}, mediarules.ErrScope
@@ -109,8 +121,14 @@ func SnapshotChunks(session mediarules.Session, revision mediarules.Revision, ru
 	if session.ProcessorID == "" || session.Generation == 0 || revision == 0 || len(rules) > limits.MaxRules {
 		return nil, mediarules.ErrInvalid
 	}
+	version := uint32(Version)
+	for _, rule := range rules {
+		if len(rule.Call.SelectionGrants) > 0 {
+			version = GrantVersion
+		}
+	}
 	newChunk := func() *management.MediaRuleUpdate {
-		return &management.MediaRuleUpdate{ProtocolVersion: Version, Session: EncodeSession(session), Revision: uint64(revision)}
+		return &management.MediaRuleUpdate{ProtocolVersion: version, Session: EncodeSession(session), Revision: uint64(revision)}
 	}
 	chunk := newChunk()
 	chunk.SnapshotBegin = true
@@ -180,11 +198,16 @@ func NewReceiver(store *mediarules.Store, authenticatedIssuer string, limits Lim
 func (r *Receiver) Apply(update *management.MediaRuleUpdate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if update == nil || update.ProtocolVersion != Version {
+	if update == nil || (update.ProtocolVersion != Version && update.ProtocolVersion != GrantVersion) {
 		return mediarules.ErrInvalid
 	}
 	if proto.Size(update) > r.limits.MaxMessageBytes || len(update.Rules) > r.limits.MaxRules || len(update.RemovedIds) > r.limits.MaxRules {
 		return mediarules.ErrCapacity
+	}
+	for _, encoded := range update.Rules {
+		if update.ProtocolVersion == Version && encoded != nil && (len(encoded.GetCall().GetSelectionGrants()) > 0 || len(encoded.CaptureSignature) > 0) {
+			return mediarules.ErrInvalid
+		}
 	}
 	session, err := DecodeSession(update.Session)
 	if err != nil || session.ProcessorID != r.issuer {

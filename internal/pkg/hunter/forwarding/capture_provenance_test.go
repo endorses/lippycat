@@ -79,3 +79,34 @@ func TestObservedBoundaryRejectsBeforeStateMutation(t *testing.T) {
 	require.False(t, m.WithObservedCaptureBoundary(0, func() bool { mutations++; return true }))
 	require.Equal(t, 1, mutations)
 }
+
+func TestTypedMediaProofRequiresValidationWithoutGlobalProvenanceLease(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var valid atomic.Bool
+	accepted := 0
+	m := New(Config{BatchSize: 10, ValidateCaptureSelection: func(*pipeline.PacketEnvelope) bool { return valid.Load() }, BatchSink: func(batch *pipeline.PacketBatch) error { accepted += len(batch.Packets); return nil }}, &flowStats{}, nil, ctx, nil)
+	defer func() { cancel(); m.Wait() }()
+	_, err := m.AddObservedPacket(&pipeline.PacketEnvelope{})
+	require.NoError(t, err)
+	m.SendBatch()
+	require.Equal(t, 1, accepted, "ordinary no-proof traffic remains unleased")
+	proof := func() *pipeline.PacketEnvelope {
+		return &pipeline.PacketEnvelope{CaptureSelectionProof: []byte("immutable-signed-rule")}
+	}
+	_, err = m.AddObservedPacket(proof())
+	require.ErrorIs(t, err, ErrCaptureProvenance)
+	valid.Store(true)
+	_, err = m.AddObservedPacket(proof())
+	require.NoError(t, err)
+	valid.Store(false)
+	m.SendBatch()
+	require.Equal(t, 1, accepted, "proof must be revalidated at sealing even without a current-selection callback")
+	valid.Store(true)
+	_, err = m.AddObservedPacket(proof())
+	require.NoError(t, err)
+	m.SendBatch()
+	require.Equal(t, 2, accepted)
+	m.config.ValidateCaptureSelection = nil
+	_, err = m.AddObservedPacket(proof())
+	require.ErrorIs(t, err, ErrCaptureProvenance, "missing proof validator fails closed")
+}

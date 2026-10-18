@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"strings"
@@ -76,11 +77,13 @@ func (s *LocalSource) policyPacket(info capture.PacketInfo, injected *InjectedPa
 		if !ok || association.CallID == "" {
 			return true, nil
 		}
+		association = association.Clone()
 		result := convertPacketInfo(info)
 		result.Metadata = &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: association.CallID}}
 		if len(payload) >= 12 && !(payload[1] >= 192 && payload[1] <= 223) {
 			result.Metadata.Rtp = &data.RTPMetadata{Ssrc: binary.BigEndian.Uint32(payload[8:12]), PayloadType: uint32(payload[1] & 0x7f), Sequence: uint32(binary.BigEndian.Uint16(payload[2:4])), Timestamp: binary.BigEndian.Uint32(payload[4:8])}
 		}
+		result.CaptureSelectionProof = append([]byte(nil), association.CaptureSelectionProof...)
 		result.InheritedMatchedFilterIds = composeFilterIDs(association.InheritedFilterIDs, nil)
 		result.MatchedFilterIds = append([]string(nil), result.InheritedMatchedFilterIds...)
 		return true, &policyCapture{packet: result, check: s.policyReleaseCheck(info, nil, &association, true)}
@@ -201,10 +204,17 @@ func (s *LocalSource) policyReleaseCheck(info capture.PacketInfo, event *shareds
 			}
 		}
 		valid = valid && proof != nil && proof.SameSelection(current)
+		if valid && event == nil && len(proof.CaptureSelectionProof) > 0 {
+			verifier, ok := resolver.(capturepolicy.RemoteMediaProofValidator)
+			valid = ok && bytes.Equal(envelope.CaptureSelectionProof, proof.CaptureSelectionProof) && verifier.ValidateMediaProof(info.Packet, info.Interface, proof.CaptureSelectionProof, envelope.CaptureTime)
+		}
 		if !valid && required {
 			return false
 		}
 		envelope.InheritedMatchedFilterIDs = nil
+		if !valid {
+			envelope.CaptureSelectionProof = nil
+		}
 		if valid {
 			envelope.InheritedMatchedFilterIDs = composeFilterIDs(current.InheritedFilterIDs, nil)
 		}

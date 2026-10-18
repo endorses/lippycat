@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
+	"github.com/endorses/lippycat/internal/pkg/mediarules/wire"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
@@ -21,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/protobuf/proto"
 )
 
 func mediaRuleHunterFixture(t *testing.T) *Hunter {
@@ -149,4 +151,35 @@ func TestRemoteRuleRequiresCurrentInstalledCaptureRevision(t *testing.T) {
 	refreshed, ok := runtime.ResolveMedia(packet, "first")
 	require.True(t, ok)
 	require.False(t, association.SameSelection(refreshed), "pending old callback retains its original revision proof")
+}
+
+func TestHunterGrantResolverRequiresTypedPermissionAndPreservesExactProof(t *testing.T) {
+	h := mediaRuleHunterFixture(t)
+	r := h.mediaRules
+	rule := currentMediaRule()
+	rule.Call.FilterIDs = nil
+	rule.Call.CapturePolicyRevision = 7
+	rule.Call.SelectionGrants = []mediarules.SelectionRef{{ID: "opaque", Revision: 3}}
+	rule.CaptureSignature = []byte("trusted-signature")
+	control, err := r.store.StartSession("receiver", rule.Session)
+	require.NoError(t, err)
+	require.NoError(t, r.store.ApplySnapshot(control, 1, []mediarules.Rule{rule}))
+	packet := mediaRuleTestPacket(t)
+	_, ok := r.ResolveMedia(packet, "first")
+	require.False(t, ok, "rule alone is insufficient")
+	permitted := true
+	r.captureMediaRuleAllowed = func(w *management.MediaRule, p gopacket.Packet, domain uint32, at time.Time) bool {
+		return permitted && proto.Equal(w, wire.EncodeRule(rule)) && p == packet && domain == 0
+	}
+	association, ok := r.ResolveMedia(packet, "first")
+	require.True(t, ok)
+	require.Equal(t, []string{"opaque"}, association.InheritedFilterIDs)
+	decoded := &management.MediaRule{}
+	require.NoError(t, proto.Unmarshal(association.CaptureSelectionProof, decoded))
+	require.True(t, proto.Equal(wire.EncodeRule(rule), decoded))
+	_, ok = r.ResolveSignalling(sharedsip.Event{CallID: "call", FromTag: "alice", ToTag: "bob", Method: "BYE", CSeqMethod: "BYE"}, packet, "first")
+	require.False(t, ok, "media grant cannot select SIP")
+	permitted = false
+	_, ok = r.ResolveMedia(packet, "first")
+	require.False(t, ok, "revoked permission wins over installed endpoints")
 }

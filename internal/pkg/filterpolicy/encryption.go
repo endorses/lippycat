@@ -117,11 +117,11 @@ func (s *State) writeSnapshot(encoded []byte, snapshot *management.SignedPolicyS
 // previously nonempty policy. Opaque authority bytes cannot be interpreted here,
 // so even empty filter lists carrying such authority use ordinary encryption.
 func (s *State) emptyWithdrawal(snapshot *management.SignedPolicySnapshot) bool {
-	if s.latest == nil || len(s.latest.Snapshot.Filters) == 0 {
+	if s.latest == nil || (len(s.latest.Snapshot.Filters) == 0 && len(s.latest.Snapshot.SelectionGrants) == 0) {
 		return false
 	}
 	policy := snapshot.GetSnapshot()
-	return policy != nil && len(policy.Filters) == 0 && len(policy.CaptureAuthority) == 0 && !policy.AllowOfflineCapture && len(policy.SourceIds) == 0
+	return policy != nil && len(policy.Filters) == 0 && len(policy.SelectionGrants) == 0 && len(policy.CaptureAuthority) == 0 && !policy.AllowOfflineCapture && len(policy.SourceIds) == 0
 }
 
 // Initialize explicitly provisions an encrypted policy store offline. It never

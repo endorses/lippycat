@@ -316,30 +316,79 @@ queries should retain them. Check existing capture/output queue-drop counters
 separately: successful rule application and duplicate suppression do not prove
 lossless capture or delivery.
 
-## LI integration
+## LI central task selection
 
-LI builds consume the same general selection, source provenance, expiry and
-per-consumer duplicate boundaries. A media rule associates traffic with a selected
-call; it is not independent interception authorization. Existing task validation,
-expiry, revocation, capture grants, replay approvals and protected storage remain
-necessary. LI-generated identity filters keep their existing distributed default;
-enabling central media rules does not automatically hide their patterns from
-hunters. LI-owned reliable VoIP capture requires verified mTLS, encrypted origin
-spool storage and a current signed finite capture policy. It supports `matched`
-or `none`; `all` is rejected because exporting unselected signalling would exceed
-the capture grant. Processor media rules alone do not grant capture authority.
+Set root-level `li.task_filter_distribution_scope: local_only` (default `distributed`) on the LI processor or tap to retain task-created identity filters and their derived selectors centrally, including after modification and recovery. The equivalent flag is `--li-task-filter-distribution-scope local_only`. Administrative queries retain their authorized visibility; hunter filters, signed policies and media rules omit private patterns and guessable selector digests.
 
-Configured processor/tap identity now supplies the stable live delivery context;
-switching capture hunters does not reset that context. Original capture node,
-interface and timestamp remain source metadata. No new identity mode is needed.
-Production delivery preserves bounded RTP reordering, then assigns the output
-sequence once before destination fan-out in both ordinary and persistent paths.
-Late packets can still arrive outside the reorder window, and output rejection
-can still produce gaps; fan-out is not atomic across destinations.
+Central selection exports a separate signed `MEDIA` grant with an opaque reference/revision, issuer, source/domain scope and finite validity. A hunter needs both that grant and the exact current authenticated media rule, including the call incarnation and unambiguous RTP/RTCP endpoints. A grant ID alone, a kernel endpoint hit or an empty filter list does not authorize capture. Media-only grants do not authorize SIP or arbitrary UDP. Initial SIP must arrive through an independently authorized observation path, such as trusted tap-local capture; remote hunters can use `signalling_policy: none` with `media_policy: processor`. LI-owned capture still rejects `signalling_policy: all`.
 
-Upgrading does not rewrite or relabel already encoded durable records or their
-checkpoints. Their original bytes and delivery contexts replay unchanged after
-existing authorization checks. New live products use the configured processor
-context, so old capture-node contexts and the stable live context can coexist
-while an approved backlog drains. Keep processor identity stable across restarts
-and follow [LI recovery procedures](LI_INTEGRATION.md) for journal migration.
+Grant-bearing signed policies use protocol version 2; ordinary filter policies retain version 1 and historical version-1 evidence remains readable. Upgrade participating peers before enabling grant-based capture. Unsupported peers fail explicitly and never fall back to distributing private patterns. Packets retain the original signed policy and exact signed media-rule proof; historical replay checks capture-time authority and current delivery authorization without renewing capture rules.
+
+Include every eligible source explicitly in `li.handover.source_ids`. Include
+`tap-1-local` if the tap's own media capture participates, as well as remote IDs.
+Every source also needs a concrete `*.voip.media_rules.sources` mapping with its
+actual interface and local observation domain; the mapping's `domain` joins the
+central address realm and does not replace the exported local capture domain.
+The following tap fragment supplements the protected LI/shared-policy and reliable
+raw setup in [the failover guide](PROCESSOR_FAILOVER.md#optional-li-handover):
+
+```yaml
+li:
+  task_filter_distribution_scope: local_only
+  delivery:
+    capture_source_metadata: true
+  handover:
+    enabled: true
+    lease_duration: 2m
+    allow_offline: false
+    clock_uncertainty: 1s
+    source_ids: [tap-1-local, edge-a, edge-b]
+tap:
+  voip:
+    signalling_policy: matched
+    media_policy: processor
+    interface_domains:
+      eth0: 10
+    media_rules:
+      enabled: true
+      sources:
+        - hunter_id: tap-1-local
+          interface: eth0
+          domain: 7
+          hunter_domain: 10
+        - hunter_id: edge-a
+          interface: eth0
+          domain: 7
+          hunter_domain: 20
+        - hunter_id: edge-b
+          interface: eth1
+          domain: 7
+          hunter_domain: 30
+```
+
+Provision the LI task through X1. Observe eligible SIP on the trusted local tap
+path; the processor's real task filters select the call and publish grants/rules.
+Configure each remote hunter with its corresponding interface-domain number,
+`signalling_policy: none`, `media_policy: processor`, the stable tap processor ID,
+verified mTLS, `filter_policy.owner: li`, encrypted policy/raw stores and reliable
+raw packet delivery. Initial SIP and media-only capture authority are separate.
+An otherwise identical separate processor needs an authorized SIP source; a
+media-only grant cannot bootstrap signalling observation. Keep `allow_offline`
+false unless bounded disconnected capture is explicitly required. Lease expiry,
+source exclusion and withdrawal reject new capture independently of delivery.
+
+## Receiver-visible capture source
+
+Enable root-level `li.delivery.capture_source_metadata: true` or `--li-delivery-capture-source-metadata` only when every configured MDF destination is intended to consume the private extension. The default is `false`, preserving existing wire output. New enabled products require actual nonempty node and interface/source identifiers before sequence allocation. Capture time keeps its existing timestamp field and missing-time behavior; unknown observation domains remain distinct from known domain zero.
+
+The extension uses the existing `AttrProprietary` container and namespace `lippycat.capture_source`, not a new standard identifier. Version 1 carries namespace plus NUL, source subtype `1`, version `1`, flags (bit zero means domain known), node length, interface length, domain, node and interface. Lengths are big-endian unsigned 16-bit values, domain is unsigned 32-bit, and identifiers are UTF-8 with a 4096-byte bound each. Unknown domain uses zero; invalid flags, lengths, UTF-8, trailing bytes, duplicate recognized values and unsupported versions are rejected. `x2x3.DecodeProductCaptureSource` reads live or journaled product and reports unavailable for legacy absence or unrelated proprietary attributes. SIP X2, RTP X3 and the RADIUS source adapter use the same extension; RADIUS has no observation-domain fact and exports it as unknown.
+
+The configured processor/tap identity continues to define delivery context and sequencing. Capture-source changes do not enter the sequence key. The attribute is frozen before deferred RTP ordering and destination fan-out; destinations receive the same encoded source bytes and sequence. Journals retain the exact encoded product through recovery and approved replay. Enabling the setting never synthesizes source metadata into already encoded legacy records, and existing task, expiry, revocation and replay checks remain required.
+
+Late RTP and rejected outputs can still cause disorder or sequence gaps; destination
+fan-out retains its existing non-atomic admission semantics. Keep processor identity
+stable across restart and follow [LI recovery procedures](LI_INTEGRATION.md).
+
+## Measure the selection path
+
+The duplicate window bounds observation age and retained comparison evidence, not the total duration of source overlap. A long overlap can suppress corresponding copies that arrive promptly; delayed copies and replay outside the window remain eligible. Measure signalling observation, central selection, rule activation and first admitted media separately, including missing early media and disconnected expiry. These measurements describe the actual control path and do not imply a one-round-trip or fixed packet-loss guarantee.

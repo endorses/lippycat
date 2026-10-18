@@ -424,7 +424,8 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 		if !ok || association.CallID == "" {
 			return false
 		}
-		h.forwardRTPPacket(association.CallID, packet, layer, interfaceName, pkt.LinkType, nil, association.InheritedFilterIDs, func() bool {
+		association = association.Clone()
+		h.forwardRTPPacketWithProof(association.CallID, packet, layer, interfaceName, pkt.LinkType, nil, association.InheritedFilterIDs, association.CaptureSelectionProof, func() bool {
 			current, valid := h.capturePolicy.remote.ResolveMedia(packet, interfaceName)
 			return valid && association.SameSelection(current)
 		})
@@ -602,6 +603,14 @@ func (h *UDPPacketHandler) RTPAttributionStats() RTPAttributionStats {
 
 // forwardRTPPacket forwards a single RTP packet immediately (call already matched)
 func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string, selectionChecks ...func() bool) {
+	var current func() bool
+	if len(selectionChecks) > 0 {
+		current = selectionChecks[0]
+	}
+	h.forwardRTPPacketWithProof(callID, packet, layer, interfaceName, linkType, directFilterIDs, inheritedFilterIDs, nil, current)
+}
+
+func (h *UDPPacketHandler) forwardRTPPacketWithProof(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string, proof []byte, selectionCurrent func() bool) {
 	// Try to extract RTP header for metadata
 	var pbMetadata *data.PacketMetadata
 	if callID != "" {
@@ -634,11 +643,7 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 	}
 
 	// Forward with RTP metadata if available
-	var selectionCurrent func() bool
-	if len(selectionChecks) > 0 {
-		selectionCurrent = selectionChecks[0]
-	}
-	if err := forwardPacketWithSelectionCheck(h.forwarder, packet, pbMetadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs, selectionCurrent); err != nil {
+	if err := forwardPacketWithCaptureSelectionProof(h.forwarder, packet, pbMetadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs, proof, selectionCurrent); err != nil {
 		logger.Error("Failed to forward RTP packet",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"error", err)

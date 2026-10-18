@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package lippycat.management;
 
+import "management.proto";
+
 option go_package = "github.com/endorses/lippycat/api/gen/management";
 
 // MediaControlService distributes temporary call associations independently of
@@ -50,6 +52,7 @@ message MediaRuleCall {
     repeated string filter_ids = 7;
     // Optional shared signed capture-policy revision; zero for ordinary policy.
     uint64 capture_policy_revision = 8;
+    repeated CaptureSelectionRef selection_grants = 9;
 }
 
 message MediaRule {
@@ -61,6 +64,8 @@ message MediaRule {
     repeated MediaRuleEndpoint endpoints = 6;
     int64 not_before_ns = 7;
     int64 expires_at_ns = 8;
+    // Signed exact rule proof for capture-time historical verification.
+    bytes capture_signature = 9;
 }
 
 // Snapshot chunks share one session and revision. The receiver stages all chunks

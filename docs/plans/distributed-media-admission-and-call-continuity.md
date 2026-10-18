@@ -2,8 +2,16 @@
 
 **Date:** 2026-10-17
 
-**Status:** Complete. All implementation tasks are verified and committed.
-Required checks and the bounded closure review pass.
+**Status:** Shared feature implementation committed and validated. LI completion
+work remains in the follow-up below. The checked tasks and original closure
+record describe the implementation assessed at `757719f5`.
+
+**Follow-up (2026-10-18):** Verification identified incomplete task-driven LI
+selection privacy and receiver-visible capture-source metadata. The earlier
+blanket completion statement was too broad for those end-to-end requirements.
+The follow-up implementation and receiver evidence now resolve those gaps;
+completion is recorded in
+[Central task selection and capture-source export](central-task-selection-and-capture-source-export.md).
 
 **Baseline:** local `main` at `adcf6f43`. Ordered processor failover, reliable
 raw-packet forwarding, packet receipts and packet spooling already exist. Extend
@@ -488,6 +496,8 @@ checks and subscription lifecycle regressions pass under the race detector,
 including the LI-enabled query build. The integrated review found no further
 material defects; no supplemental remediation batch was needed.
 
-**Closure decision:** `CLOSED`. Implementation and updated plan committed in
-`bb991f88`; fixture repair committed separately in `b044038b`. All plan tasks are
-verified and complete.
+**Original closure decision (at `757719f5`):** `CLOSED`. Implementation and updated
+plan committed in `bb991f88`; fixture repair committed separately in `b044038b`.
+The 2026-10-18 verification qualified that completion claim. The remaining LI
+selection-privacy and source-export work is recorded in the follow-up plan linked
+at the top of this document.

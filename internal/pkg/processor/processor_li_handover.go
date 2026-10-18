@@ -95,8 +95,11 @@ func (p *Processor) publishLIHandoverPolicy(now time.Time) error {
 	if revision == ^uint64(0) {
 		return li.ErrCaptureAuthority
 	}
-	return p.liManager.PublishHandoverAuthority(p.config.LIHandover, now, func(filters []*management.Filter, authority []byte) error {
-		snapshot := &management.PolicySnapshot{ProtocolVersion: 1, Domain: runtime.config.Domain, AuthorityId: runtime.config.AuthorityID, OwnerKind: "li", Revision: revision + 1, Filters: filters}
+	err := p.liManager.PublishCaptureSelectionAuthority(p.config.LIHandover, p.config.ProcessorID, p.captureGrantScopes(), now, func(filters []*management.Filter, grants []*management.CaptureSelectionGrant, authority []byte) error {
+		snapshot := &management.PolicySnapshot{ProtocolVersion: 1, Domain: runtime.config.Domain, AuthorityId: runtime.config.AuthorityID, OwnerKind: "li", Revision: revision + 1, Filters: filters, SelectionGrants: grants}
+		if len(grants) > 0 {
+			snapshot.ProtocolVersion = 2
+		}
 		if err := p.completeLICapturePolicy(snapshot, authority, p.config.LIHandover, now); err != nil {
 			return err
 		}
@@ -106,6 +109,10 @@ func (p *Processor) publishLIHandoverPolicy(now time.Time) error {
 		}
 		return runtime.install(signed)
 	})
+	if err == nil {
+		runtime.localAuthorityReady.Store(true)
+	}
+	return err
 }
 
 // buildLICapturePolicy bridges the actual local LI owner into a signed snapshot.
@@ -138,6 +145,11 @@ func (p *Processor) completeLICapturePolicy(snapshot *management.PolicySnapshot,
 	// to interpret task JSON or becoming an X1 task manager.
 	snapshot.ValidFromNs = now.Add(config.ClockUncertainty).UnixNano()
 	snapshot.ValidUntilNs = until.Add(-config.ClockUncertainty).UnixNano()
+	for _, grant := range snapshot.SelectionGrants {
+		if grant.ExpiresAtNs > snapshot.ValidUntilNs {
+			grant.ExpiresAtNs = snapshot.ValidUntilNs
+		}
+	}
 	snapshot.AllowOfflineCapture = config.AllowOffline
 	snapshot.SourceIds = append([]string(nil), config.SourceIDs...)
 	return nil
@@ -196,6 +208,14 @@ func (p *Processor) validateLICapturePolicy(batch *data.PacketBatch) error {
 			return li.ErrCaptureAuthority
 		}
 		ids := capturePacketFilterIDs(packet)
+		selectionIDs, err := p.validateLICaptureSelectionProof(snapshot, packet, batch.HunterId)
+		if err != nil {
+			return err
+		}
+		ids = append(ids, selectionIDs...)
+		if len(snapshot.SelectionGrants) > 0 && len(ids) == 0 && packet.Radius == nil {
+			return li.ErrCaptureAuthority
+		}
 		if packet.Radius != nil {
 			// RADIUS carries additional generation-aware attribution internally.
 			// Bind its entire owner snapshot here; its dedicated LI admission still
@@ -226,6 +246,10 @@ func (p *Processor) liPacketCaptureAuthority(packet *types.PacketDisplay, direct
 	}
 	snapshot, err := p.verifiedLICaptureSnapshot(encoded)
 	if err != nil {
+		return nil, err
+	}
+	raw := &data.CapturedPacket{DirectMatchedFilterIds: direct, InheritedMatchedFilterIds: inherited}
+	if _, err := p.validateLICaptureSelectionProof(snapshot, raw, packet.NodeID); err != nil {
 		return nil, err
 	}
 	ids := append(append([]string(nil), direct...), inherited...)

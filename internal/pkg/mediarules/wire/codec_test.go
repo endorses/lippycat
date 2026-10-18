@@ -135,3 +135,30 @@ func TestCapturePolicyRevisionRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, rule.Call.CapturePolicyRevision, decoded.Call.CapturePolicyRevision)
 }
+
+func TestGrantCodecRoundtripRejectsV1AndOwnsProof(t *testing.T) {
+	rule := testRule(0)
+	rule.Call.CapturePolicyRevision = 1
+	rule.Call.SelectionGrants = []mediarules.SelectionRef{{ID: "opaque", Revision: 3}}
+	rule.CaptureSignature = []byte("signed-proof")
+	limits := Limits{MaxMessageBytes: 4096, MaxSnapshotBytes: 8192, MaxRules: 16}
+	chunks, err := SnapshotChunks(rule.Session, 1, []mediarules.Rule{rule}, limits)
+	require.NoError(t, err)
+	require.EqualValues(t, GrantVersion, chunks[0].ProtocolVersion)
+	receiver, err := NewReceiver(testStore(t), "processor", limits)
+	require.NoError(t, err)
+	downgrade := proto.Clone(chunks[0]).(*management.MediaRuleUpdate)
+	downgrade.ProtocolVersion = Version
+	require.ErrorIs(t, receiver.Apply(downgrade), mediarules.ErrInvalid)
+	require.NoError(t, receiver.Apply(chunks[0]))
+	got := receiver.store.ActiveRules()[0]
+	require.Equal(t, rule.Call.SelectionGrants, got.Call.SelectionGrants)
+	require.Equal(t, rule.CaptureSignature, got.CaptureSignature)
+	got.Call.SelectionGrants[0].ID = "mutated"
+	got.CaptureSignature[0] = 'x'
+	require.Equal(t, rule.Call.SelectionGrants, receiver.store.ActiveRules()[0].Call.SelectionGrants)
+	require.Equal(t, rule.CaptureSignature, receiver.store.ActiveRules()[0].CaptureSignature)
+	require.False(t, receiver.store.ResolveDialog(rule.Call.CallID, rule.Call.FromTag, rule.Call.ToTag).Resolved, "media grants cannot authorize signalling")
+	scoped := scopedRules([]mediarules.Rule{rule}, "hunter", 99)
+	require.Equal(t, rule, scoped[0], "signed rule cannot be rewritten by scope or revision projection")
+}

@@ -38,7 +38,7 @@ func NewService(store *mediarules.Store, limits Limits, maxApplications int, aut
 }
 
 func (s *Service) SubscribeMediaRules(req *management.MediaRuleRequest, stream management.MediaControlService_SubscribeMediaRulesServer) error {
-	if req == nil || req.ProtocolVersion != Version || req.HunterId == "" {
+	if req == nil || (req.ProtocolVersion != Version && req.ProtocolVersion != GrantVersion) || req.HunterId == "" {
 		return status.Error(codes.InvalidArgument, "unsupported media-rule subscription")
 	}
 	if err := s.authorize(stream.Context(), req.HunterId); err != nil {
@@ -58,7 +58,7 @@ func (s *Service) SubscribeMediaRules(req *management.MediaRuleRequest, stream m
 	}
 	defer s.releaseApplication(req.HunterId)
 	previous := scopedRules(initial.Rules, req.HunterId, initial.Sequence)
-	if err := s.sendSnapshot(stream, initial.Session, initial.Sequence, previous); err != nil {
+	if err := s.sendSnapshot(stream, req.ProtocolVersion, initial.Session, initial.Sequence, previous); err != nil {
 		return err
 	}
 	for {
@@ -76,7 +76,20 @@ func (s *Service) SubscribeMediaRules(req *management.MediaRuleRequest, stream m
 				return status.Error(codes.Aborted, "media-rule control generation changed")
 			}
 			next := scopedRules(change.Rules, req.HunterId, change.Sequence)
-			update := &management.MediaRuleUpdate{ProtocolVersion: Version, Session: EncodeSession(change.Session), Revision: change.Sequence}
+			if req.ProtocolVersion == Version && hasGrantedRules(next) {
+				return status.Error(codes.FailedPrecondition, "capture-selection grants require media protocol version 2")
+			}
+			// Signed rule revisions are immutable and can differ from the
+			// publisher sequence. Delta upserts require that sequence as their
+			// rule revision, so replace the bounded snapshot for grant state.
+			if hasGrantedRules(next) || hasGrantedRules(previous) {
+				if err := s.sendSnapshot(stream, req.ProtocolVersion, change.Session, change.Sequence, next); err != nil {
+					return err
+				}
+				previous = next
+				continue
+			}
+			update := &management.MediaRuleUpdate{ProtocolVersion: req.ProtocolVersion, Session: EncodeSession(change.Session), Revision: change.Sequence}
 			ids := make(map[string]struct{}, len(next))
 			for _, rule := range next {
 				ids[rule.ID] = struct{}{}
@@ -90,7 +103,7 @@ func (s *Service) SubscribeMediaRules(req *management.MediaRuleRequest, stream m
 			if proto.Size(update) > s.limits.MaxMessageBytes {
 				// A complete staged snapshot can replace a delta that exceeds a
 				// single message, without exposing any partial replacement.
-				if err := s.sendSnapshot(stream, change.Session, change.Sequence, next); err != nil {
+				if err := s.sendSnapshot(stream, req.ProtocolVersion, change.Session, change.Sequence, next); err != nil {
 					return err
 				}
 			} else if err := stream.Send(update); err != nil {
@@ -101,12 +114,16 @@ func (s *Service) SubscribeMediaRules(req *management.MediaRuleRequest, stream m
 	}
 }
 
-func (s *Service) sendSnapshot(stream management.MediaControlService_SubscribeMediaRulesServer, session mediarules.Session, revision uint64, rules []mediarules.Rule) error {
+func (s *Service) sendSnapshot(stream management.MediaControlService_SubscribeMediaRulesServer, version uint32, session mediarules.Session, revision uint64, rules []mediarules.Rule) error {
+	if version == Version && hasGrantedRules(rules) {
+		return status.Error(codes.FailedPrecondition, "capture-selection grants require media protocol version 2")
+	}
 	chunks, err := SnapshotChunks(session, mediarules.Revision(revision), rules, s.limits)
 	if err != nil {
 		return ruleStatus(err)
 	}
 	for _, chunk := range chunks {
+		chunk.ProtocolVersion = version
 		if err := stream.Send(chunk); err != nil {
 			return err
 		}
@@ -130,6 +147,12 @@ func scopedRules(rules []mediarules.Rule, hunterID string, revision uint64) []me
 			}
 		}
 		if len(copy.Scope) == 0 {
+			continue
+		}
+		if len(rule.Call.SelectionGrants) > 0 {
+			// A signature binds the complete rule, including its own revision.
+			// Issuers provide bounded source scopes rather than rewriting proof.
+			result = append(result, rule)
 			continue
 		}
 		copy.Endpoints = nil
@@ -219,4 +242,13 @@ func ruleStatus(err error) error {
 	default:
 		return status.Error(codes.FailedPrecondition, "media-rule state requires reconciliation")
 	}
+}
+
+func hasGrantedRules(rules []mediarules.Rule) bool {
+	for _, rule := range rules {
+		if len(rule.Call.SelectionGrants) > 0 || len(rule.CaptureSignature) > 0 {
+			return true
+		}
+	}
+	return false
 }

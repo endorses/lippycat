@@ -4,6 +4,7 @@ package li
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -549,7 +550,7 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		return err
 	}
 
-	deliveryChanged := !equivalentDeliveryDefinition(task, &candidate) || authorizationWindowNarrows(task, &candidate) || (task.Definition.Conflict && !candidate.Definition.Conflict)
+	deliveryChanged := !slices.Equal(task.Targets, candidate.Targets) || !equivalentDeliveryDefinition(task, &candidate) || authorizationWindowNarrows(task, &candidate) || (task.Definition.Conflict && !candidate.Definition.Conflict)
 	if deliveryChanged && r.generations[xid] == ^uint64(0) {
 		return fmt.Errorf("%w: task generation exhausted", ErrInvalidTask)
 	}

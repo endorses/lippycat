@@ -3,6 +3,7 @@
 package voip
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -50,6 +51,22 @@ func forwardPacketWithSelectionCheck(forwarder PacketForwarder, packet gopacket.
 		return nil
 	}
 	return forwardPacketWithFilterProvenance(forwarder, packet, metadata, iface, link, direct, inherited)
+}
+
+// PacketForwarderWithCaptureSelectionProof preserves signed public selection
+// evidence and its current-state callback together until producer acceptance.
+type PacketForwarderWithCaptureSelectionProof interface {
+	ForwardPacketWithCaptureSelectionProof(gopacket.Packet, *data.PacketMetadata, string, layers.LinkType, []string, []string, []byte, func() bool) error
+}
+
+func forwardPacketWithCaptureSelectionProof(forwarder PacketForwarder, packet gopacket.Packet, metadata *data.PacketMetadata, iface string, link layers.LinkType, direct, inherited []string, proof []byte, current func() bool) error {
+	if len(proof) == 0 {
+		return forwardPacketWithSelectionCheck(forwarder, packet, metadata, iface, link, direct, inherited, current)
+	}
+	if typed, ok := forwarder.(PacketForwarderWithCaptureSelectionProof); ok {
+		return typed.ForwardPacketWithCaptureSelectionProof(packet, metadata, iface, link, direct, inherited, append([]byte(nil), proof...), current)
+	}
+	return fmt.Errorf("forwarder cannot preserve capture-selection proof")
 }
 
 type packetFilterWithIDs interface {

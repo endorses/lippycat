@@ -89,3 +89,15 @@ func TestPacketBatchRoundTripPreservesAbsentOptionalValues(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, proto.Equal(in, out))
 }
+
+func TestCaptureSelectionProofRoundtripOwnsImmutableBytes(t *testing.T) {
+	in := &data.CapturedPacket{CaptureSelectionProof: []byte("signed-public-rule")}
+	env, err := FromCapturedPacket(in, pipeline.SourceProvenance{})
+	require.NoError(t, err)
+	in.CaptureSelectionProof[0] = 'x'
+	require.Equal(t, []byte("signed-public-rule"), env.CaptureSelectionProof)
+	out, err := ToCapturedPacket(env)
+	require.NoError(t, err)
+	env.CaptureSelectionProof[0] = 'y'
+	require.Equal(t, []byte("signed-public-rule"), out.CaptureSelectionProof)
+}

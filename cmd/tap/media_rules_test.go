@@ -10,13 +10,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
+	"github.com/endorses/lippycat/internal/pkg/mediarules/wire"
 	"github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestTapLocalMediaSubscriptionScopesExpiryAndWithdrawal(t *testing.T) {
@@ -74,4 +77,37 @@ func tapRuleMediaPacket(t *testing.T) gopacket.Packet {
 	buffer := gopacket.NewSerializeBuffer()
 	require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, ip, udp, gopacket.Payload([]byte{0x80, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2})))
 	return gopacket.NewPacket(buffer.Bytes(), layers.LinkTypeRaw, gopacket.Default)
+}
+
+func TestTapGrantRulesPreserveSignatureAndRequireTypedMediaPermission(t *testing.T) {
+	settings, err := (mediarules.Settings{}).Normalize()
+	require.NoError(t, err)
+	store, err := mediarules.New(settings.StoreConfig("processor", "local", []mediaadmission.DomainID{1}, nil))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	session := mediarules.Session{ProcessorID: "processor", Generation: 1}
+	control, err := store.StartSession("processor", session)
+	require.NoError(t, err)
+	r := &tapMediaRules{store: store, control: control, hunterID: "local", domains: map[string]mediaadmission.DomainID{"left": 1}}
+	now := time.Now()
+	rule := mediarules.Rule{ID: "grant", Session: session, Revision: 1, Call: mediarules.CallAssociation{Lifetime: callregistry.Lifetime{Session: 3, Generation: 4}, CallID: "call", FromTag: "from", ToTag: "to", SelectionRevision: 1, CapturePolicyRevision: 7, SelectionGrants: []mediarules.SelectionRef{{ID: "opaque", Revision: 3}}}, Scope: []mediarules.Scope{{HunterID: "local", Domain: 1}}, Endpoints: []mediarules.Endpoint{{Key: mediaadmission.EndpointKey{Domain: 1, Addr: netip.MustParseAddr("192.0.2.1"), Port: 40000}, Kind: mediarules.RTP}}, NotBefore: now.Add(-time.Second), ExpiresAt: now.Add(time.Minute), CaptureSignature: []byte("signature")}
+	require.NoError(t, r.apply(mediarules.Snapshot{Ready: true, Session: session, Sequence: 5, Rules: []mediarules.Rule{rule}}))
+	require.Equal(t, rule, store.ActiveRules()[0], "projection cannot rewrite signed revision")
+	packet := tapRuleMediaPacket(t)
+	_, ok := r.ResolveMedia(packet, "left")
+	require.False(t, ok)
+	permitted := true
+	r.validateMediaRule = func(w *management.MediaRule, source string, domain uint32, p gopacket.Packet, at time.Time) bool {
+		return permitted && source == "local" && domain == 1 && proto.Equal(w, wire.EncodeRule(rule))
+	}
+	association, ok := r.ResolveMedia(packet, "left")
+	require.True(t, ok)
+	require.Equal(t, []string{"opaque"}, association.InheritedFilterIDs)
+	require.True(t, r.ValidateMediaProof(packet, "left", association.CaptureSelectionProof, now))
+	_, ok = r.ResolveSignalling(sip.Event{CallID: "call", FromTag: "from", ToTag: "to", Method: "BYE", CSeqMethod: "BYE"}, packet, "left")
+	require.False(t, ok)
+	permitted = false
+	_, ok = r.ResolveMedia(packet, "left")
+	require.False(t, ok)
+	require.False(t, r.ValidateMediaProof(packet, "left", association.CaptureSelectionProof, now))
 }

@@ -31,6 +31,8 @@ import (
 // The manager maintains a bidirectional mapping between task XIDs and filter IDs
 // to enable correlation when packets match filters.
 type FilterManager struct {
+	// Immutable deployment setting applied on every reconstruction.
+	distributionScope string
 	// External pushes may drain packet processing, whose lookups require mu.
 	// Serialize mutations separately and never hold mu across those calls.
 	mutationMu sync.Mutex
@@ -719,6 +721,22 @@ func IsRADIUSTask(task *InterceptTask) bool {
 }
 
 func (m *FilterManager) filtersForTask(task *InterceptTask) ([]*management.Filter, error) {
+	scope, err := filtering.ParseDistributionScope(m.distributionScope)
+	if err != nil {
+		return nil, err
+	}
+	if scope == management.FilterDistributionScope_FILTER_DISTRIBUTION_SCOPE_LOCAL_ONLY {
+		// Only selector families supported by the central SIP matcher can select
+		// calls. Other families need independent purposes and cannot fall back.
+		for _, target := range task.Targets {
+			switch target.Type {
+			case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeE164, TargetTypeUsername, TargetTypeIPv4Address, TargetTypeIPv6Address, TargetTypeIPv4CIDR, TargetTypeIPv6CIDR:
+			default:
+				return nil, fmt.Errorf("local_only LI task selection does not support target type %s", target.Type)
+			}
+		}
+	}
+
 	if !IsRADIUSTask(task) {
 		var result []*management.Filter
 		for i, t := range task.Targets {
@@ -726,6 +744,8 @@ func (m *FilterManager) filtersForTask(task *InterceptTask) ([]*management.Filte
 			if err != nil {
 				return nil, err
 			}
+			f.DistributionScope = scope
+			f.Revision = task.ActivationGeneration
 			result = append(result, f)
 		}
 		return result, nil
@@ -734,6 +754,7 @@ func (m *FilterManager) filtersForTask(task *InterceptTask) ([]*management.Filte
 	if err != nil {
 		return nil, err
 	}
+	f.DistributionScope = scope
 	return []*management.Filter{f}, nil
 }
 

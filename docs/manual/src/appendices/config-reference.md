@@ -1035,3 +1035,24 @@ The hunter's `packets` section selects `delivery_profile` (best_effort or reliab
 Receiver configuration is `processor.packets.receiver` or `tap.packets.receiver`: `enabled`, matching receipt `authority`, `signing_cert`, `signing_key` and `store`. The store requires `dir`, matching `destination_id`, explicit `protection`, `max_bytes`, `max_record_bytes`, `max_sessions`, `max_records` and `max_loss_ranges`; encrypted stores also require independent `keys`. Receiver custody is currently terminal-only. Relay processors use central scope and leave unconfirmed records at the source.
 
 Optional root-level `li.handover` contains `enabled`, `lease_duration`, `allow_offline`, `clock_uncertainty` and `source_ids`. Offline LI capture defaults to disabled; ordinary shared policy has no lease. The LI-owned hunter profile requires verified mTLS, encrypted policy/raw stores, reliable raw packet delivery and a current signed finite capture policy. VoIP capture supports `signalling_policy: matched` or `none` and rejects `all`; processor media rules alone do not grant capture authority.
+
+## Central LI selection and source export {#central-li-selection-and-source-export}
+
+`li.task_filter_distribution_scope` accepts `distributed` (default) or `local_only`; `--li-task-filter-distribution-scope` overrides it on LI-enabled process/tap commands. `li.delivery.capture_source_metadata` is a boolean, defaults to `false`, and corresponds to `--li-delivery-capture-source-metadata`. These are root-level LI keys, separate from protocol media-rule configuration and optional call correlation.
+
+<!-- i18n:skip -->
+
+```yaml
+li:
+  task_filter_distribution_scope: local_only
+  delivery:
+    capture_source_metadata: true
+  handover:
+    enabled: true
+    lease_duration: 2m
+    allow_offline: false
+    clock_uncertainty: 1s
+    source_ids: [tap-1-local, edge-a, edge-b]
+```
+
+This fragment supplements the protected LI deployment; it does not initialize keys or stores. Include the local source ID only when that source participates, and map every eligible source/interface/domain under `processor.voip.media_rules.sources` or `tap.voip.media_rules.sources`. The remote LI profile uses signed policy version 2, scoped media grants plus exact authenticated rules, verified mTLS, encrypted policy/raw stores and reliable packet delivery. It rejects `signalling_policy: all`; media-only grants do not authorize initial SIP. See [Distributed Media Selection](../part3-distributed/media-selection.md#media-li-compatibility).

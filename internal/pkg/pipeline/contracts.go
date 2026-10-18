@@ -100,6 +100,7 @@ type PacketEnvelope struct {
 	CallLifecycleRejected bool
 	// CurrentCaptureSelection rechecks ephemeral selection at producer acceptance.
 	// It is local-only and is never decoded from a transport metadata claim.
+	CaptureSelectionProof     []byte
 	CurrentCaptureSelection   func() bool
 	Data                      []byte
 	LinkType                  layers.LinkType

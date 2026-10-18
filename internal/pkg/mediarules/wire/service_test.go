@@ -116,3 +116,50 @@ func TestServiceRequiresAuthenticatedSourceBeforeSubscription(t *testing.T) {
 	_, err = service.ReportMediaRuleStatus(context.Background(), &management.MediaRuleApplication{HunterId: "forged-hunter"})
 	require.Equal(t, codes.Unauthenticated, status.Code(err))
 }
+
+func TestServiceRefusesGrantRulesToVersionOneWithoutSendingData(t *testing.T) {
+	publisher := testStore(t)
+	rule := testRule(0)
+	rule.Call.CapturePolicyRevision = 1
+	rule.Call.SelectionGrants = []mediarules.SelectionRef{{ID: "opaque", Revision: 1}}
+	rule.CaptureSignature = []byte("proof")
+	control, err := publisher.StartSession("processor", rule.Session)
+	require.NoError(t, err)
+	require.NoError(t, publisher.ApplySnapshot(control, 1, []mediarules.Rule{rule}))
+	service, err := NewService(publisher, Limits{MaxMessageBytes: 4096, MaxSnapshotBytes: 8192, MaxRules: 16}, 2, func(context.Context, string) error { return nil })
+	require.NoError(t, err)
+	stream := &ruleStream{ctx: context.Background(), updates: make(chan *management.MediaRuleUpdate, 4)}
+	err = service.SubscribeMediaRules(&management.MediaRuleRequest{ProtocolVersion: Version, HunterId: "hunter", ProcessorId: "processor"}, stream)
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	require.Empty(t, stream.updates)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream.ctx = ctx
+	done := make(chan error, 1)
+	go func() {
+		done <- service.SubscribeMediaRules(&management.MediaRuleRequest{ProtocolVersion: GrantVersion, HunterId: "hunter", ProcessorId: "processor"}, stream)
+	}()
+	update := takeUpdate(t, stream)
+	require.EqualValues(t, GrantVersion, update.ProtocolVersion)
+	require.Equal(t, EncodeRule(rule), update.Rules[0])
+	limits := Limits{MaxMessageBytes: 4096, MaxSnapshotBytes: 8192, MaxRules: 16}
+	receiver, err := NewReceiver(testStore(t), "processor", limits)
+	require.NoError(t, err)
+	require.NoError(t, receiver.Apply(update))
+	ordinary := testRule(1)
+	ordinary.Revision = 2
+	require.NoError(t, publisher.ApplyDelta(control, 2, []mediarules.Rule{ordinary}, nil))
+	update = takeUpdate(t, stream)
+	require.True(t, update.SnapshotBegin)
+	require.True(t, update.SnapshotEnd)
+	require.NoError(t, receiver.Apply(update))
+	require.Equal(t, rule.CaptureSignature, receiver.store.ActiveRules()[0].CaptureSignature, "stream sequencing preserves signed rule revision and proof")
+	require.NoError(t, publisher.ApplyDelta(control, 3, nil, []string{rule.ID}))
+	update = takeUpdate(t, stream)
+	require.True(t, update.SnapshotBegin)
+	require.NoError(t, receiver.Apply(update))
+	require.Len(t, receiver.store.ActiveRules(), 1)
+	require.Empty(t, receiver.store.ActiveRules()[0].Call.SelectionGrants)
+	cancel()
+	require.Error(t, <-done)
+}

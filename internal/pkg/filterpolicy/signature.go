@@ -79,7 +79,7 @@ func NewVerifier(config Config) (*Verifier, error) {
 func (v *Verifier) TrustedCertificate() *x509.Certificate { return v.certificate }
 
 func validateSnapshot(s *management.PolicySnapshot, c Config) error {
-	if s == nil || s.ProtocolVersion != 1 || s.Domain != c.Domain || s.AuthorityId != c.AuthorityID || s.Revision == 0 || len(s.Filters) > maxSnapshotFilters || proto.Size(s) > MaxSnapshotBytes || len(s.ProtoReflect().GetUnknown()) != 0 {
+	if s == nil || (s.ProtocolVersion != 1 && s.ProtocolVersion != SelectionProtocolVersion) || s.Domain != c.Domain || s.AuthorityId != c.AuthorityID || s.Revision == 0 || len(s.Filters) > maxSnapshotFilters || proto.Size(s) > MaxSnapshotBytes || len(s.ProtoReflect().GetUnknown()) != 0 {
 		return ErrInvalid
 	}
 	owner := s.GetOwnerKind()
@@ -89,11 +89,14 @@ func validateSnapshot(s *management.PolicySnapshot, c Config) error {
 	if owner != c.Owner {
 		return ErrInvalid
 	}
-	if owner == "shared" && (len(s.CaptureAuthority) > 0 || s.ValidFromNs != 0 || s.ValidUntilNs != 0 || s.AllowOfflineCapture || len(s.SourceIds) > 0) {
+	if owner == "shared" && (len(s.CaptureAuthority) > 0 || (len(s.SelectionGrants) == 0 && (s.ValidFromNs != 0 || s.ValidUntilNs != 0 || s.AllowOfflineCapture || len(s.SourceIds) > 0))) {
 		return ErrInvalid
 	}
 	if owner == "li" && ((s.ValidFromNs < 0 || s.ValidUntilNs < 0) || (s.ValidUntilNs != 0 && s.ValidUntilNs <= s.ValidFromNs)) {
 		return ErrInvalid
+	}
+	if err := validateSelectionGrants(s); err != nil {
+		return err
 	}
 	prefix := c.Namespace()
 	previous := ""
@@ -214,6 +217,14 @@ func (v *Verifier) SignSnapshot(signer crypto.Signer, inputSnapshot *management.
 		return nil, ErrInvalid
 	}
 	snapshot := proto.Clone(inputSnapshot).(*management.PolicySnapshot)
+	for _, f := range snapshot.Filters {
+		if f == nil {
+			return nil, ErrInvalid
+		}
+	}
+	if err := canonicalSelectionGrants(snapshot); err != nil {
+		return nil, err
+	}
 	sort.Slice(snapshot.Filters, func(i, j int) bool { return snapshot.Filters[i].Id < snapshot.Filters[j].Id })
 	if err := validateSnapshot(snapshot, v.config); err != nil {
 		return nil, err

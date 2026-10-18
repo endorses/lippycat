@@ -1036,3 +1036,20 @@ observations independently for each output/analysis owner after source validatio
 It defaults to disabled and preserves raw ingress/receipt accounting. See
 [distributed media selection](../../docs/DISTRIBUTED_MEDIA.md) for configuration,
 resource defaults, exact consumer boundaries and LI integration/migration.
+
+### Central LI task selection and source metadata
+
+LI builds accept `--li-task-filter-distribution-scope local_only` (default
+`distributed`) or root-level `li.task_filter_distribution_scope`. This keeps task
+selectors central and exports scoped media grants instead of target patterns.
+Grant-based capture needs compatible peers, current signed grants plus exact
+media rules, verified mTLS and the LI-owned reliable encrypted capture profile.
+Initial SIP needs an independently authorized source, such as trusted tap-local
+capture; a media-only grant does not authorize SIP and LI rejects `all` signalling.
+
+`--li-delivery-capture-source-metadata` or root-level
+`li.delivery.capture_source_metadata: true` enables the private capture node,
+interface and domain extension for compatible MDFs. It defaults to `false`.
+Processor delivery identity and sequencing remain stable across source changes;
+legacy journal bytes replay unchanged. See [central LI selection and the receiver
+contract](../../docs/DISTRIBUTED_MEDIA.md#li-central-task-selection).

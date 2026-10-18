@@ -43,6 +43,9 @@ type X1ClientConfig struct {
 
 // ManagerConfig holds configuration for the LI Manager.
 type ManagerConfig struct {
+	// TaskFilterDistributionScope is distributed (default) or local_only.
+	TaskFilterDistributionScope string
+
 	// Enabled controls whether LI processing is active.
 	Enabled bool
 
@@ -350,6 +353,8 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 		stateCleanup:          make(map[uuid.UUID][]string),
 	}
 
+	m.filters.distributionScope = config.TaskFilterDistributionScope
+
 	// Create X1 client if ADMF endpoint is configured.
 	// This is used to send notifications (keepalive, errors, etc.) to the ADMF.
 	if config.ADMFEndpoint != "" {
@@ -556,6 +561,9 @@ func (m *Manager) Start() (result error) {
 // ValidateConfiguration checks security-sensitive LI configuration before any
 // listener or background worker is started.
 func (m *Manager) ValidateConfiguration() error {
+	if _, err := sharedfilter.ParseDistributionScope(m.config.TaskFilterDistributionScope); err != nil {
+		return err
+	}
 	configured := m.config.X1ListenAddr != "" || m.config.X1TLSCertFile != "" ||
 		m.config.X1TLSKeyFile != "" || m.config.X1TLSCAFile != ""
 	if !configured {
@@ -1244,7 +1252,16 @@ func (m *Manager) validatedFilterIDs(pkt *types.PacketDisplay, provenance Packet
 		provenance.InheritedFromCallID == provenance.AuthoritativeCallID
 	for _, filterID := range provenance.InheritedFilterIDs {
 		match, exists := m.filters.LookupFilter(filterID)
-		if authoritative && exists && match.Filter.Type != management.FilterType_FILTER_IP_ADDRESS && !sharedfilter.IsRADIUSFilter(match.Filter.Type) {
+		localSelection := false
+		if exists && provenance.CaptureAuthority != nil && provenance.CaptureAuthority.Version == 2 {
+			for _, grant := range provenance.CaptureAuthority.Grants {
+				if grant.LocalOnly && grant.FilterID == filterID {
+					localSelection = true
+					break
+				}
+			}
+		}
+		if authoritative && exists && (match.Filter.Type != management.FilterType_FILTER_IP_ADDRESS || localSelection) && !sharedfilter.IsRADIUSFilter(match.Filter.Type) {
 			valid = append(valid, match.FilterID)
 		} else if exists {
 			m.stats.inheritedProvenanceRejected.Add(1)
@@ -1276,6 +1293,11 @@ func stableFilterUnion(first, second []string) []string {
 // This creates filters for the task's targets and pushes them
 // to the filter management system.
 func (m *Manager) ActivateTask(task *InterceptTask) error {
+	if task != nil && m.config.TaskFilterDistributionScope == "local_only" {
+		if _, err := m.filters.filtersForTask(task); err != nil {
+			return err
+		}
+	}
 	if task != nil && task.Definition.Source == "" {
 		task = cloneInterceptTask(task)
 		task.Definition = authoritativeDefinition(task)
@@ -1497,7 +1519,7 @@ func (m *Manager) modifyTask(xid uuid.UUID, mod *TaskModification) error {
 	}
 
 	// If targets changed, update filters
-	if previous.Status == TaskStatusActive && (mod.Targets != nil || (IsRADIUSTask(current) && current.ActivationGeneration != previous.ActivationGeneration)) {
+	if previous.Status == TaskStatusActive && (mod.Targets != nil || current.ActivationGeneration != previous.ActivationGeneration) {
 		task, err := m.registry.GetTaskDetails(xid)
 		if err != nil {
 			return err

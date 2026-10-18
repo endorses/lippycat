@@ -520,6 +520,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	// Apply LI configuration (only available in -tags li builds)
 	if liConfig := GetLIConfig(); liConfig != nil {
 		config.LIEnabled = liConfig.Enabled
+		config.LITaskFilterDistributionScope = liConfig.TaskFilterDistributionScope
+		config.LIDeliveryCaptureSourceMetadata = liConfig.DeliveryCaptureSourceMetadata
 		config.LICallCorrelation = liConfig.CallCorrelation
 		config.LIX1ListenAddr = liConfig.X1ListenAddr
 		config.LIX1TLSCertFile = liConfig.X1TLSCertFile

@@ -3,6 +3,9 @@ package x2x3
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
+
+	"github.com/endorses/lippycat/internal/pkg/types"
 
 	"github.com/google/uuid"
 
@@ -16,11 +19,18 @@ var ErrInvalidRADIUSObservation = errors.New("invalid RADIUS X2 observation")
 // and a nonzero correlation allocation from the persistent radius-poi-v1
 // allocator. All encoders in a delivery pipeline must share the Sequencer.
 type RADIUSEncoder struct {
-	sequencer *Sequencer
-	builder   *AttributeBuilder
-	domainID  string
-	nfID      string
-	ipID      string
+	sequencer             *Sequencer
+	builder               *AttributeBuilder
+	domainID              string
+	nfID                  string
+	ipID                  string
+	captureSourceMetadata atomic.Bool
+}
+
+// SetCaptureSourceMetadata enables the private source extension for new products.
+// RADIUS has node and source identity, but no observation-domain fact.
+func (e *RADIUSEncoder) SetCaptureSourceMetadata(enabled bool) {
+	e.captureSourceMetadata.Store(enabled)
 }
 
 func NewRADIUSEncoder(sequencer *Sequencer, domainID, nfID, ipID string) *RADIUSEncoder {
@@ -58,6 +68,17 @@ func (e *RADIUSEncoder) Encode(observation *radius.Observation, xid uuid.UUID, c
 	if err != nil {
 		return nil, fmt.Errorf("encode RADIUS destination: %w", err)
 	}
+	var captureAttribute TLVAttribute
+	if e.captureSourceMetadata.Load() {
+		captureSource, err := types.NewCaptureSource(observation.Scope.OriginNodeID, observation.Scope.SourceID, 0, false)
+		if err != nil {
+			return nil, err
+		}
+		captureAttribute, err = EncodeCaptureSource(captureSource)
+		if err != nil {
+			return nil, err
+		}
+	}
 	seq, err := e.sequencer.Next(SequenceContext{PDUType: PDUTypeX2, XID: xid, DomainID: e.domainID, NFID: e.nfID, IPID: e.ipID, CorrelationID: correlationID})
 	if err != nil {
 		return nil, fmt.Errorf("sequence RADIUS X2: %w", err)
@@ -65,6 +86,9 @@ func (e *RADIUSEncoder) Encode(observation *radius.Observation, xid uuid.UUID, c
 	pdu := NewPDU(PDUTypeX2, xid, correlationID)
 	pdu.Header.PayloadFormat = PayloadFormatRADIUS
 	pdu.Header.PayloadDirection = PayloadDirectionUnknown
+	if captureAttribute.Type == AttrProprietary {
+		pdu.AddAttribute(captureAttribute)
+	}
 	pdu.AddAttribute(e.builder.Timestamp(observation.Capture.Timestamp))
 	if e.domainID != "" {
 		pdu.AddAttribute(e.builder.DomainID(e.domainID))

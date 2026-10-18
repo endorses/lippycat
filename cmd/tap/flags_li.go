@@ -24,14 +24,18 @@ import (
 
 var radiusLICommand *cobra.Command
 
+var liSelectionSettingsCommand *cobra.Command
+
 var (
 	// LI (Lawful Interception) flags - requires -tags li build
-	liEnabled       bool
-	liX1ListenAddr  string
-	liX1TLSCertFile string
-	liX1TLSKeyFile  string
-	liX1TLSCAFile   string
-	liADMFEndpoint  string
+	liTaskFilterDistributionScope   string
+	liDeliveryCaptureSourceMetadata bool
+	liEnabled                       bool
+	liX1ListenAddr                  string
+	liX1TLSCertFile                 string
+	liX1TLSKeyFile                  string
+	liX1TLSCAFile                   string
+	liADMFEndpoint                  string
 	// LI ADMF client (X1 notifications) TLS flags
 	liADMFTLSCertFile string
 	liADMFTLSKeyFile  string
@@ -86,14 +90,16 @@ var (
 
 // LIConfig holds all LI-related configuration.
 type LIConfig struct {
-	CallCorrelation      li.CallCorrelationConfig
-	callCorrelationError error
-	Enabled              bool
-	X1ListenAddr         string
-	X1TLSCertFile        string
-	X1TLSKeyFile         string
-	X1TLSCAFile          string
-	ADMFEndpoint         string
+	TaskFilterDistributionScope   string
+	DeliveryCaptureSourceMetadata bool
+	CallCorrelation               li.CallCorrelationConfig
+	callCorrelationError          error
+	Enabled                       bool
+	X1ListenAddr                  string
+	X1TLSCertFile                 string
+	X1TLSKeyFile                  string
+	X1TLSCAFile                   string
+	ADMFEndpoint                  string
 	// ADMF client (X1 notifications) TLS
 	ADMFTLSCertFile string
 	ADMFTLSKeyFile  string
@@ -154,12 +160,15 @@ type LIConfig struct {
 
 // RegisterLIFlags adds LI-related flags to the command.
 func RegisterLIFlags(cmd *cobra.Command) {
+	liSelectionSettingsCommand = cmd
 	if radiusLICommand == nil {
 		radiusLICommand = cmd
 	}
 	radiusconfig.RegisterLIFlags(cmd)
 	// LI (Lawful Interception) flags - requires build with -tags li
 	cmd.PersistentFlags().BoolVar(&liEnabled, "li-enabled", false, "Enable ETSI LI (Lawful Interception) support (requires -tags li build)")
+	cmd.PersistentFlags().StringVar(&liTaskFilterDistributionScope, "li-task-filter-distribution-scope", "", "Task filter distribution: distributed (default) or local_only")
+	cmd.PersistentFlags().BoolVar(&liDeliveryCaptureSourceMetadata, "li-delivery-capture-source-metadata", false, "Include versioned lippycat capture-source metadata in LI output")
 	cmd.PersistentFlags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
 	cmd.PersistentFlags().StringVar(&liX1TLSCertFile, "li-x1-tls-cert", "", "Path to X1 server TLS certificate")
 	cmd.PersistentFlags().StringVar(&liX1TLSKeyFile, "li-x1-tls-key", "", "Path to X1 server TLS key")
@@ -222,6 +231,8 @@ func RegisterLIFlags(cmd *cobra.Command) {
 func BindLIViperFlags(cmd *cobra.Command) {
 	bindLICallCorrelationEnvironment()
 	_ = viper.BindPFlag("tap.li.enabled", cmd.PersistentFlags().Lookup("li-enabled"))
+	_ = viper.BindEnv("li.task_filter_distribution_scope", "LIPPYCAT_LI_TASK_FILTER_DISTRIBUTION_SCOPE")
+	_ = viper.BindEnv("li.delivery.capture_source_metadata", "LIPPYCAT_LI_DELIVERY_CAPTURE_SOURCE_METADATA")
 	_ = viper.BindPFlag("tap.li.x1_listen_addr", cmd.PersistentFlags().Lookup("li-x1-listen"))
 	_ = viper.BindPFlag("tap.li.x1_tls_cert", cmd.PersistentFlags().Lookup("li-x1-tls-cert"))
 	_ = viper.BindPFlag("tap.li.x1_tls_key", cmd.PersistentFlags().Lookup("li-x1-tls-key"))
@@ -305,6 +316,8 @@ func GetLIConfig() *LIConfig {
 	return &LIConfig{
 		CallCorrelation:                       correlation,
 		callCorrelationError:                  correlationErr,
+		TaskFilterDistributionScope:           cmdutil.GetStringConfig("li.task_filter_distribution_scope", liTaskFilterDistributionScope),
+		DeliveryCaptureSourceMetadata:         getLICaptureSourceMetadata(),
 		Enabled:                               cmdutil.GetBoolConfig("tap.li.enabled", liEnabled),
 		X1ListenAddr:                          cmdutil.GetStringConfig("tap.li.x1_listen_addr", liX1ListenAddr),
 		X1TLSCertFile:                         cmdutil.GetStringConfig("tap.li.x1_tls_cert", liX1TLSCertFile),
@@ -363,6 +376,8 @@ func GetLIConfig() *LIConfig {
 }
 
 func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {
+	config.LITaskFilterDistributionScope = liConfig.TaskFilterDistributionScope
+	config.LIDeliveryCaptureSourceMetadata = liConfig.DeliveryCaptureSourceMetadata
 	config.LIStateFile = liConfig.StateFile
 	config.LIStateKeys = liConfig.StateKeys
 	config.LIDeliveryQueueSize = liConfig.DeliveryQueueSize
@@ -586,4 +601,13 @@ func readLICorrelationKeys(raw any) ([]securestore.KeyRef, error) {
 		keys = append(keys, key)
 	}
 	return keys, nil
+}
+
+// getLICaptureSourceMetadata preserves explicit false CLI overrides while the
+// shared configuration key stays independent of another command's flags.
+func getLICaptureSourceMetadata() bool {
+	if liSelectionSettingsCommand != nil && liSelectionSettingsCommand.PersistentFlags().Changed("li-delivery-capture-source-metadata") {
+		return liDeliveryCaptureSourceMetadata
+	}
+	return viper.GetBool("li.delivery.capture_source_metadata")
 }

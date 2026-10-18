@@ -71,15 +71,20 @@ var (
 // The encoder is safe for concurrent use.
 type X3Encoder struct {
 	// attrBuilder is used to construct TLV attributes.
-	attrBuilder *AttributeBuilder
-	sequencer   *Sequencer
-	domainID    string
-	nfID        string
-	lastSeq     atomic.Uint32
+	attrBuilder           *AttributeBuilder
+	sequencer             *Sequencer
+	domainID              string
+	nfID                  string
+	lastSeq               atomic.Uint32
+	captureSourceMetadata atomic.Bool
 
 	// bufPool provides reusable buffers for PDU encoding.
 	bufPool sync.Pool
 }
+
+// SetCaptureSourceMetadata enables the private source extension for new products.
+// It defaults to false for wire compatibility.
+func (e *X3Encoder) SetCaptureSourceMetadata(enabled bool) { e.captureSourceMetadata.Store(enabled) }
 
 // NewX3Encoder creates a new X3 encoder.
 func NewX3Encoder() *X3Encoder {
@@ -223,6 +228,13 @@ func (e *X3Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) erro
 }
 
 func (e *X3Encoder) addCommonAttributesWithSequence(pdu *PDU, pkt *types.PacketDisplay, allocate bool) error {
+	if e.captureSourceMetadata.Load() {
+		attribute, err := packetCaptureSource(pkt)
+		if err != nil {
+			return err
+		}
+		pdu.AddAttribute(attribute)
+	}
 	// Timestamp from packet capture
 	pdu.AddAttribute(e.attrBuilder.Timestamp(pkt.Timestamp))
 

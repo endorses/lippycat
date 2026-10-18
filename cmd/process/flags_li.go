@@ -22,14 +22,18 @@ import (
 	"github.com/spf13/viper"
 )
 
+var liSelectionSettingsCommand *cobra.Command
+
 var (
 	// LI (Lawful Interception) flags - requires -tags li build
-	liEnabled       bool
-	liX1ListenAddr  string
-	liX1TLSCertFile string
-	liX1TLSKeyFile  string
-	liX1TLSCAFile   string
-	liADMFEndpoint  string
+	liTaskFilterDistributionScope   string
+	liDeliveryCaptureSourceMetadata bool
+	liEnabled                       bool
+	liX1ListenAddr                  string
+	liX1TLSCertFile                 string
+	liX1TLSKeyFile                  string
+	liX1TLSCAFile                   string
+	liADMFEndpoint                  string
 	// LI ADMF client (X1 notifications) TLS flags
 	liADMFTLSCertFile string
 	liADMFTLSKeyFile  string
@@ -84,14 +88,16 @@ var (
 
 // LIConfig holds all LI-related configuration.
 type LIConfig struct {
-	CallCorrelation      li.CallCorrelationConfig
-	callCorrelationError error
-	Enabled              bool
-	X1ListenAddr         string
-	X1TLSCertFile        string
-	X1TLSKeyFile         string
-	X1TLSCAFile          string
-	ADMFEndpoint         string
+	CallCorrelation               li.CallCorrelationConfig
+	callCorrelationError          error
+	TaskFilterDistributionScope   string
+	DeliveryCaptureSourceMetadata bool
+	Enabled                       bool
+	X1ListenAddr                  string
+	X1TLSCertFile                 string
+	X1TLSKeyFile                  string
+	X1TLSCAFile                   string
+	ADMFEndpoint                  string
 	// ADMF client (X1 notifications) TLS
 	ADMFTLSCertFile string
 	ADMFTLSKeyFile  string
@@ -152,9 +158,12 @@ type LIConfig struct {
 
 // RegisterLIFlags adds LI-related flags to the command.
 func RegisterLIFlags(cmd *cobra.Command) {
+	liSelectionSettingsCommand = cmd
 	radiusconfig.RegisterLIFlags(cmd)
 	// LI (Lawful Interception) flags - requires build with -tags li
 	cmd.Flags().BoolVar(&liEnabled, "li-enabled", false, "Enable ETSI LI (Lawful Interception) support (requires -tags li build)")
+	cmd.Flags().StringVar(&liTaskFilterDistributionScope, "li-task-filter-distribution-scope", "", "Task filter distribution: distributed (default) or local_only")
+	cmd.Flags().BoolVar(&liDeliveryCaptureSourceMetadata, "li-delivery-capture-source-metadata", false, "Include versioned lippycat capture-source metadata in LI output")
 	cmd.Flags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
 	cmd.Flags().StringVar(&liX1TLSCertFile, "li-x1-tls-cert", "", "Path to X1 server TLS certificate")
 	cmd.Flags().StringVar(&liX1TLSKeyFile, "li-x1-tls-key", "", "Path to X1 server TLS key")
@@ -217,6 +226,8 @@ func RegisterLIFlags(cmd *cobra.Command) {
 func BindLIViperFlags(cmd *cobra.Command) {
 	bindLICallCorrelationEnvironment()
 	_ = viper.BindPFlag("processor.li.enabled", cmd.Flags().Lookup("li-enabled"))
+	_ = viper.BindEnv("li.task_filter_distribution_scope", "LIPPYCAT_LI_TASK_FILTER_DISTRIBUTION_SCOPE")
+	_ = viper.BindEnv("li.delivery.capture_source_metadata", "LIPPYCAT_LI_DELIVERY_CAPTURE_SOURCE_METADATA")
 	_ = viper.BindPFlag("processor.li.x1_listen_addr", cmd.Flags().Lookup("li-x1-listen"))
 	_ = viper.BindPFlag("processor.li.x1_tls_cert", cmd.Flags().Lookup("li-x1-tls-cert"))
 	_ = viper.BindPFlag("processor.li.x1_tls_key", cmd.Flags().Lookup("li-x1-tls-key"))
@@ -300,6 +311,8 @@ func GetLIConfig() *LIConfig {
 	return &LIConfig{
 		CallCorrelation:                       correlation,
 		callCorrelationError:                  correlationErr,
+		TaskFilterDistributionScope:           cmdutil.GetStringConfig("li.task_filter_distribution_scope", liTaskFilterDistributionScope),
+		DeliveryCaptureSourceMetadata:         getLICaptureSourceMetadata(),
 		Enabled:                               cmdutil.GetBoolConfig("processor.li.enabled", liEnabled),
 		X1ListenAddr:                          cmdutil.GetStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
 		X1TLSCertFile:                         cmdutil.GetStringConfig("processor.li.x1_tls_cert", liX1TLSCertFile),
@@ -534,4 +547,13 @@ func readLICorrelationKeys(raw any) ([]securestore.KeyRef, error) {
 		keys = append(keys, key)
 	}
 	return keys, nil
+}
+
+// getLICaptureSourceMetadata preserves explicit false CLI overrides while the
+// shared configuration key stays independent of another command's flags.
+func getLICaptureSourceMetadata() bool {
+	if liSelectionSettingsCommand != nil && liSelectionSettingsCommand.Flags().Changed("li-delivery-capture-source-metadata") {
+		return liDeliveryCaptureSourceMetadata
+	}
+	return viper.GetBool("li.delivery.capture_source_metadata")
 }

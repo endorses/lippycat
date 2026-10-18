@@ -180,15 +180,16 @@ func (p *Processor) initLIManager() {
 
 	// Create LI manager config
 	config := li.ManagerConfig{
-		RADIUSScope:      p.config.LIRADIUSScope,
-		RADIUSMACProfile: p.config.LIRADIUSMACProfile,
-		Enabled:          true,
-		X1ListenAddr:     p.config.LIX1ListenAddr,
-		X1TLSCertFile:    p.config.LIX1TLSCertFile,
-		X1TLSKeyFile:     p.config.LIX1TLSKeyFile,
-		X1TLSCAFile:      p.config.LIX1TLSCAFile,
-		ADMFEndpoint:     p.config.LIADMFEndpoint,
-		NEIdentifier:     p.config.ProcessorID,
+		TaskFilterDistributionScope: p.config.LITaskFilterDistributionScope,
+		RADIUSScope:                 p.config.LIRADIUSScope,
+		RADIUSMACProfile:            p.config.LIRADIUSMACProfile,
+		Enabled:                     true,
+		X1ListenAddr:                p.config.LIX1ListenAddr,
+		X1TLSCertFile:               p.config.LIX1TLSCertFile,
+		X1TLSKeyFile:                p.config.LIX1TLSKeyFile,
+		X1TLSCAFile:                 p.config.LIX1TLSCAFile,
+		ADMFEndpoint:                p.config.LIADMFEndpoint,
+		NEIdentifier:                p.config.ProcessorID,
 		X1Client: li.X1ClientConfig{
 			TLSCertFile:       p.config.LIADMFTLSCertFile,
 			TLSKeyFile:        p.config.LIADMFTLSKeyFile,
@@ -285,6 +286,9 @@ func (p *Processor) initLIRuntime() {
 	liX2Encoder = x2x3.NewX2EncoderWithSequencer(liSequencer, "", p.config.ProcessorID)
 	liX3Encoder = x2x3.NewX3EncoderWithSequencer(liSequencer, "", p.config.ProcessorID)
 	liRADIUSEncoder = x2x3.NewRADIUSEncoder(liSequencer, "", p.config.ProcessorID, p.config.ProcessorID)
+	liX2Encoder.SetCaptureSourceMetadata(p.config.LIDeliveryCaptureSourceMetadata)
+	liX3Encoder.SetCaptureSourceMetadata(p.config.LIDeliveryCaptureSourceMetadata)
+	liRADIUSEncoder.SetCaptureSourceMetadata(p.config.LIDeliveryCaptureSourceMetadata)
 	p.liManager.SetRADIUSPacketProcessor(p.deliverLIRADIUS)
 	logger.Info("LI X2/X3 encoders initialized")
 
@@ -986,6 +990,11 @@ func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, direc
 }
 
 func (p *Processor) processLIPacketWithAdmissionAndDedup(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string, admission *CallAdmission, observation *packetdedup.Observation, capturePolicy ...[]byte) {
+	p.processLIPacketWithCaptureOrigin(pkt, directFilterIDs, inheritedFilterIDs, admission, observation, false, capturePolicy...)
+}
+
+// localObservation may only be set by the private trusted local-capture adapter.
+func (p *Processor) processLIPacketWithCaptureOrigin(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string, admission *CallAdmission, observation *packetdedup.Observation, localObservation bool, capturePolicy ...[]byte) {
 	if p.filterProcessingBlocked() {
 		return
 	}
@@ -1022,17 +1031,31 @@ func (p *Processor) processLIPacketWithAdmissionAndDedup(pkt *types.PacketDispla
 		}
 		probeAdmission.Release()
 	}
+	var localAuthority *li.HandoverAuthority
+	if localObservation {
+		selected, authority, ok := p.localSIPSelection(pkt)
+		if !ok {
+			return
+		}
+		directFilterIDs, inheritedFilterIDs = selected, nil
+		localAuthority = authority
+	}
 	provenance := li.PacketFilterProvenance{
+		CaptureAuthority:   localAuthority,
 		DirectFilterIDs:    directFilterIDs,
 		InheritedFilterIDs: inheritedFilterIDs,
 	}
 	if len(capturePolicy) > 0 && len(capturePolicy[0]) > 0 {
-		authority, err := p.liPacketCaptureAuthority(pkt, directFilterIDs, inheritedFilterIDs, capturePolicy[0])
+		var selectionProof []byte
+		if len(capturePolicy) > 1 {
+			selectionProof = capturePolicy[1]
+		}
+		authority, err := p.liSelectionCaptureAuthority(pkt, directFilterIDs, inheritedFilterIDs, capturePolicy[0], selectionProof)
 		if err != nil {
 			return
 		}
 		provenance.CaptureAuthority = authority
-	} else if p.config.LIHandover.Enabled {
+	} else if p.config.LIHandover.Enabled && !localObservation {
 		// An explicitly enabled LI owner never falls back to unsigned old IDs.
 		return
 	}

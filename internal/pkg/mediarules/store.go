@@ -271,7 +271,7 @@ func (s *Store) validateRule(rule Rule, revision Revision, now time.Time) error 
 	if rule.ID == "" || rule.Session != s.control.session || rule.Revision == 0 || rule.Revision > revision || rule.Call.CallID == "" || rule.Call.Lifetime.Session == 0 || rule.Call.Lifetime.Generation == 0 || rule.Call.SelectionRevision == 0 || len(rule.Scope) == 0 || len(rule.Endpoints) == 0 || rule.NotBefore.IsZero() || !rule.ExpiresAt.After(rule.NotBefore) {
 		return ErrInvalid
 	}
-	if len(rule.Endpoints) > s.config.MaxEndpointsPerRule || len(rule.Scope) > s.config.MaxEndpoints || len(rule.Call.FilterIDs) > s.config.MaxRules || ruleBytes(rule) > s.config.MaxBytes {
+	if len(rule.Endpoints) > s.config.MaxEndpointsPerRule || len(rule.Scope) > s.config.MaxEndpoints || len(rule.Call.FilterIDs) > s.config.MaxRules || len(rule.Call.SelectionGrants) > s.config.MaxRules || ruleBytes(rule) > s.config.MaxBytes {
 		return ErrCapacity
 	}
 	if rule.ExpiresAt.Sub(rule.NotBefore) > s.config.MaxLifetime || rule.NotBefore.Sub(now) > s.config.MaxLifetime {
@@ -283,6 +283,20 @@ func (s *Store) validateRule(rule Rule, revision Revision, now time.Time) error 
 		if _, exists := s.rules[rule.ID]; !exists {
 			return fmt.Errorf("rule already expired: %w", ErrInvalid)
 		}
+	}
+	if len(rule.Call.SelectionGrants) > 0 {
+		if len(rule.CaptureSignature) == 0 || len(rule.CaptureSignature) > 16384 || rule.Call.CapturePolicyRevision == 0 {
+			return ErrInvalid
+		}
+		previous := ""
+		for _, ref := range rule.Call.SelectionGrants {
+			if ref.ID == "" || len(ref.ID) > 1024 || ref.ID <= previous || ref.Revision == 0 {
+				return ErrInvalid
+			}
+			previous = ref.ID
+		}
+	} else if len(rule.CaptureSignature) > 0 {
+		return ErrInvalid
 	}
 	applicable := s.config.HunterID == ""
 	for _, scope := range rule.Scope {
@@ -339,11 +353,13 @@ func equalRule(a, b Rule) bool {
 		a.Call.Lifetime == b.Call.Lifetime && a.Call.CallID == b.Call.CallID &&
 		a.Call.FromTag == b.Call.FromTag && a.Call.ToTag == b.Call.ToTag &&
 		a.Call.SelectionRevision == b.Call.SelectionRevision && a.Call.CapturePolicyRevision == b.Call.CapturePolicyRevision &&
-		slices.Equal(a.Call.FilterIDs, b.Call.FilterIDs) && slices.Equal(a.Scope, b.Scope) &&
+		slices.Equal(a.Call.SelectionGrants, b.Call.SelectionGrants) && slices.Equal(a.CaptureSignature, b.CaptureSignature) && slices.Equal(a.Call.FilterIDs, b.Call.FilterIDs) && slices.Equal(a.Scope, b.Scope) &&
 		slices.Equal(a.Endpoints, b.Endpoints) && a.NotBefore.Equal(b.NotBefore) && a.ExpiresAt.Equal(b.ExpiresAt)
 }
 
 func cloneRule(rule Rule) Rule {
+	rule.CaptureSignature = append([]byte(nil), rule.CaptureSignature...)
+	rule.Call.SelectionGrants = append([]SelectionRef(nil), rule.Call.SelectionGrants...)
 	rule.Scope = append([]Scope(nil), rule.Scope...)
 	rule.Endpoints = append([]Endpoint(nil), rule.Endpoints...)
 	rule.Call.FilterIDs = append([]string(nil), rule.Call.FilterIDs...)
@@ -353,12 +369,15 @@ func cloneRule(rule Rule) Rule {
 // ruleBytes charges fixed bookkeeping and all variable-sized retained fields,
 // including references, rather than only the wire payload length.
 func ruleBytes(rule Rule) int {
-	bytes := 256 + len(rule.ID) + len(rule.Session.ProcessorID) + len(rule.Call.CallID) + len(rule.Call.FromTag) + len(rule.Call.ToTag) + len(rule.Endpoints)*64
+	bytes := len(rule.CaptureSignature) + 304 + len(rule.ID) + len(rule.Session.ProcessorID) + len(rule.Call.CallID) + len(rule.Call.FromTag) + len(rule.Call.ToTag) + len(rule.Endpoints)*64
 	for _, scope := range rule.Scope {
 		bytes += 32 + len(scope.HunterID)
 	}
 	for _, id := range rule.Call.FilterIDs {
 		bytes += 16 + len(id)
+	}
+	for _, ref := range rule.Call.SelectionGrants {
+		bytes += 24 + len(ref.ID)
 	}
 	return bytes
 }
@@ -598,12 +617,53 @@ func (s *Store) Resolve(source, destination mediaadmission.EndpointKey) Resoluti
 		if len(intersection) == 0 {
 			return Resolution{Ambiguous: true}
 		}
-		return resolveOwners(intersection)
+		return s.resolveMediaOwnersLocked(intersection, source, destination)
 	}
 	if len(left) != 0 {
-		return resolveOwners(left)
+		return s.resolveMediaOwnersLocked(left, source, destination)
 	}
-	return resolveOwners(right)
+	return s.resolveMediaOwnersLocked(right, source, destination)
+}
+
+// resolveMediaOwnersLocked retains exact immutable proof. Multiple rules for the
+// same call may share endpoints, but differing selection authority cannot be
+// chosen by iteration order. Equivalent rules choose a stable public rule ID.
+func (s *Store) resolveMediaOwnersLocked(owners map[owner]CallAssociation, source, destination mediaadmission.EndpointKey) Resolution {
+	result := resolveOwners(owners)
+	if !result.Resolved {
+		return result
+	}
+	var selected *Rule
+	for _, rule := range s.activeLocked() {
+		if rule.Call.Lifetime != result.Call.Lifetime || rule.Call.CallID != result.Call.CallID {
+			continue
+		}
+		matches := false
+		for _, endpoint := range rule.Endpoints {
+			if endpoint.Key == source || endpoint.Key == destination {
+				matches = true
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		if selected != nil && (len(selected.Call.SelectionGrants) > 0 || len(rule.Call.SelectionGrants) > 0) {
+			a, b := selected.Call, rule.Call
+			if a.SelectionRevision != b.SelectionRevision || a.CapturePolicyRevision != b.CapturePolicyRevision || a.FromTag != b.FromTag || a.ToTag != b.ToTag || !slices.Equal(a.SelectionGrants, b.SelectionGrants) || !slices.Equal(a.FilterIDs, b.FilterIDs) {
+				return Resolution{Ambiguous: true}
+			}
+		}
+		if selected == nil || rule.ID < selected.ID {
+			owned := cloneRule(rule)
+			selected = &owned
+		}
+	}
+	if selected != nil {
+		result.Rule = selected
+		result.Call = selected.Call
+	}
+	return result
 }
 
 func resolveOwners(owners map[owner]CallAssociation) Resolution {
@@ -637,6 +697,9 @@ func (s *Store) resolveDialog(domain *mediaadmission.DomainID, callID, fromTag, 
 	defer s.mu.Unlock()
 	owners := make(map[owner]CallAssociation)
 	for _, rule := range s.activeLocked() {
+		if len(rule.Call.SelectionGrants) > 0 {
+			continue
+		}
 		if domain != nil {
 			scoped := false
 			for _, scope := range rule.Scope {

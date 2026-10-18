@@ -51,6 +51,11 @@ type Endpoint struct {
 // opaque registry lifetime prevents a reused SIP Call-ID inheriting selection.
 // ResolveDialog assists forwarding only; its result does not validate a SIP
 // transaction or authorize ending/changing a call.
+type SelectionRef struct {
+	ID       string
+	Revision uint64
+}
+
 type CallAssociation struct {
 	Lifetime              callregistry.Lifetime
 	CallID                string
@@ -59,17 +64,19 @@ type CallAssociation struct {
 	SelectionRevision     uint64
 	CapturePolicyRevision uint64
 	FilterIDs             []string
+	SelectionGrants       []SelectionRef
 }
 
 type Rule struct {
-	ID        string
-	Session   Session
-	Revision  Revision
-	Call      CallAssociation
-	Scope     []Scope
-	Endpoints []Endpoint
-	NotBefore time.Time
-	ExpiresAt time.Time
+	ID               string
+	Session          Session
+	Revision         Revision
+	Call             CallAssociation
+	Scope            []Scope
+	Endpoints        []Endpoint
+	NotBefore        time.Time
+	ExpiresAt        time.Time
+	CaptureSignature []byte
 }
 
 // Clock separates wall time used to validate remote timestamps from monotonic
@@ -168,6 +175,8 @@ type Change struct {
 type Observer interface{ OnMediaRulesChanged(Change) }
 
 type Resolution struct {
+	// Rule is an owned exact media rule for the unambiguous resolved owner.
+	Rule      *Rule
 	Call      CallAssociation
 	Resolved  bool
 	Ambiguous bool

@@ -173,6 +173,8 @@ message CapturedPacket {
     // processor domain. This claim is never source authentication by itself.
     uint32 observation_domain = 14;
     bool observation_domain_known = 15;
+    // Complete signed public MediaRule for centrally selected media.
+    bytes capture_selection_proof = 16;
 }
 
 // PacketMetadata contains hunter-side analysis results

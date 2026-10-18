@@ -374,7 +374,11 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			if pkt.Radius != nil {
 				p.processLIRADIUSPacket(&display, pkt, batch)
 			} else {
-				p.processLIPacketWithAdmissionAndDedup(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index], p.packetDuplicateObservation(batch, index, "li"), batch.SignedCapturePolicy)
+				if p.config.LIHandover.Enabled && p.config.LITaskFilterDistributionScope == "local_only" && batch.MediaSourceTrusted && batch.Envelopes[index].Source.Kind == pipeline.SourceLiveCapture && display.VoIPData != nil && !display.VoIPData.IsRTP {
+					p.processLocalLIPacketWithAdmissionAndDedup(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index], p.packetDuplicateObservation(batch, index, "li"))
+				} else {
+					p.processLIPacketWithAdmissionAndDedup(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index], p.packetDuplicateObservation(batch, index, "li"), batch.SignedCapturePolicy, pkt.CaptureSelectionProof)
+				}
 			}
 			if p.afterLIPacket != nil {
 				p.afterLIPacket()

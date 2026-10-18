@@ -1070,3 +1070,20 @@ apply locally. Existing BPF/port restrictions and eBPF failure policy remain in
 force. Optional `tap.packet_dedup.enabled` uses independent consumer decisions;
 its default is disabled. See [distributed media selection](../../docs/DISTRIBUTED_MEDIA.md)
 for a complete tap configuration, policy combinations, bounds and LI integration.
+
+### Central LI task selection and source metadata
+
+LI builds accept `--li-task-filter-distribution-scope local_only` (default
+`distributed`) or root-level `li.task_filter_distribution_scope`. This keeps task
+selectors central and exports scoped media grants instead of target patterns.
+Grant-based capture needs compatible peers, current signed grants plus exact
+media rules, verified mTLS and the LI-owned reliable encrypted capture profile.
+Initial SIP needs an independently authorized source, such as trusted tap-local
+capture; a media-only grant does not authorize SIP and LI rejects `all` signalling.
+
+`--li-delivery-capture-source-metadata` or root-level
+`li.delivery.capture_source_metadata: true` enables the private capture node,
+interface and domain extension for compatible MDFs. It defaults to `false`.
+Processor delivery identity and sequencing remain stable across source changes;
+legacy journal bytes replay unchanged. See [central LI selection and the receiver
+contract](../../docs/DISTRIBUTED_MEDIA.md#li-central-task-selection).

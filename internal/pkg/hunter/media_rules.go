@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
@@ -21,19 +22,23 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 type hunterMediaRules struct {
-	store                *mediarules.Store
-	settings             mediarules.Settings
-	hunterID             string
-	domains              mediaadmission.Config
-	projection           *admissionadapter.Projection
-	mu                   sync.Mutex
-	receiver             *wire.Receiver
-	capturePolicyCurrent func(uint64) bool
+	store                   *mediarules.Store
+	settings                mediarules.Settings
+	hunterID                string
+	domains                 mediaadmission.Config
+	projection              *admissionadapter.Projection
+	mu                      sync.Mutex
+	receiver                *wire.Receiver
+	capturePolicyCurrent    func(uint64) bool
+	captureMediaRuleAllowed func(*management.MediaRule, gopacket.Packet, uint32, time.Time) bool
 }
 
 func (h *Hunter) configureMediaRules() error {
@@ -95,6 +100,9 @@ func (h *Hunter) configureMediaRules() error {
 		runtime.capturePolicyCurrent = func(revision uint64) bool {
 			return revision != 0 && h.filterManager != nil && h.filterManager.CaptureAllowed(time.Now()) && h.filterManager.EffectiveCapturePolicyRevision() == revision
 		}
+	}
+	runtime.captureMediaRuleAllowed = func(rule *management.MediaRule, packet gopacket.Packet, domain uint32, at time.Time) bool {
+		return h.filterManager != nil && h.filterManager.CaptureMediaRuleAllowed(rule, packet, domain, at)
 	}
 	h.mediaRules = runtime
 	return nil
@@ -163,24 +171,59 @@ func (r *hunterMediaRules) ResolveMedia(packet gopacket.Packet, iface string) (v
 	if !resolution.Resolved || r.capturePolicyCurrent != nil && !r.capturePolicyCurrent(resolution.Call.CapturePolicyRevision) {
 		return voip.RemoteCallAssociation{}, false
 	}
-	// Endpoint kind is an independent rule constraint, not just a version-bit
-	// signature. Resolve also checks both known endpoint owners intersect.
-	for _, rule := range r.store.ActiveRules() {
-		if rule.Call.CallID != resolution.Call.CallID || rule.Call.Lifetime != resolution.Call.Lifetime {
-			continue
-		}
-		for _, endpoint := range rule.Endpoints {
-			if endpoint.Key != left && endpoint.Key != right {
+
+	if resolution.Rule == nil {
+		return voip.RemoteCallAssociation{}, false
+	}
+	rule := resolution.Rule
+	// Ordinary rules can describe separate RTP and RTCP associations for the same
+	// call. Keep that compatibility while signed rules use their exact proof.
+	if len(rule.Call.SelectionGrants) == 0 {
+		for _, candidate := range r.store.ActiveRules() {
+			if candidate.Call.CallID != resolution.Call.CallID || candidate.Call.Lifetime != resolution.Call.Lifetime {
 				continue
 			}
-			if endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP) {
-				if r.store.Status().Sequence != sequence || !r.ready() {
-					return voip.RemoteCallAssociation{}, false
+			matched := false
+			for _, endpoint := range candidate.Endpoints {
+				if (endpoint.Key == left || endpoint.Key == right) && (endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP)) {
+					matched = true
+					break
 				}
-				return remoteAssociation(rule.Call, rule.Session), true
+			}
+			if matched {
+				owned := candidate
+				rule = &owned
+				break
 			}
 		}
 	}
+	association := remoteAssociation(rule.Call, rule.Session)
+	if len(rule.Call.SelectionGrants) > 0 {
+		encoded := wire.EncodeRule(*rule)
+		if r.captureMediaRuleAllowed == nil || !r.captureMediaRuleAllowed(encoded, packet, uint32(left.Domain), time.Now()) {
+			return voip.RemoteCallAssociation{}, false
+		}
+		proof, err := (proto.MarshalOptions{Deterministic: true}).Marshal(encoded)
+		if err != nil {
+			return voip.RemoteCallAssociation{}, false
+		}
+		association.CaptureSelectionProof = proof
+		for _, ref := range rule.Call.SelectionGrants {
+			association.InheritedFilterIDs = append(association.InheritedFilterIDs, ref.ID)
+		}
+	}
+	for _, endpoint := range rule.Endpoints {
+		if endpoint.Key != left && endpoint.Key != right {
+			continue
+		}
+		if endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP) {
+			if r.store.Status().Sequence != sequence || !r.ready() {
+				return voip.RemoteCallAssociation{}, false
+			}
+			return association, true
+		}
+	}
+
 	return voip.RemoteCallAssociation{}, false
 }
 
@@ -259,11 +302,19 @@ func (r *hunterMediaRules) open(lifetime, setup context.Context, conn grpc.Clien
 		}
 	}()
 	client := management.NewMediaControlServiceClient(conn)
-	stream, err := client.SubscribeMediaRules(ctx, &management.MediaRuleRequest{ProtocolVersion: wire.Version, HunterId: r.hunterID, ProcessorId: r.settings.ProcessorID}, grpc.MaxCallRecvMsgSize(r.settings.MaxMessageBytes))
+	stream, err := client.SubscribeMediaRules(ctx, &management.MediaRuleRequest{ProtocolVersion: wire.GrantVersion, HunterId: r.hunterID, ProcessorId: r.settings.ProcessorID}, grpc.MaxCallRecvMsgSize(r.settings.MaxMessageBytes))
 	if err != nil {
 		return nil, err
 	}
 	first, err := stream.Recv()
+	// Ordinary capture can use legacy media control. Explicit LI-owned capture
+	// requires the grant-capable contract and never retries with private filters.
+	if err != nil && r.capturePolicyCurrent == nil && (status.Code(err) == codes.InvalidArgument || status.Code(err) == codes.Unimplemented) {
+		stream, err = client.SubscribeMediaRules(ctx, &management.MediaRuleRequest{ProtocolVersion: wire.Version, HunterId: r.hunterID, ProcessorId: r.settings.ProcessorID}, grpc.MaxCallRecvMsgSize(r.settings.MaxMessageBytes))
+		if err == nil {
+			first, err = stream.Recv()
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -386,3 +437,11 @@ func validateProcessorMediaFilters(filters []*management.Filter) error {
 }
 
 var _ voip.RemoteMediaResolver = (*hunterMediaRules)(nil)
+
+func (r *hunterMediaRules) ValidateMediaProof(packet gopacket.Packet, iface string, proof []byte, at time.Time) bool {
+	if r.captureMediaRuleAllowed == nil || len(proof) == 0 || len(proof) > filterpolicy.MaxMediaRuleBytes {
+		return false
+	}
+	rule := &management.MediaRule{}
+	return proto.Unmarshal(proof, rule) == nil && r.captureMediaRuleAllowed(rule, packet, uint32(r.domains.DomainForInterface(iface)), at)
+}

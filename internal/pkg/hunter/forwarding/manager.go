@@ -84,6 +84,8 @@ type PacketBufferProvider interface {
 
 // Config contains forwarding configuration
 type Config struct {
+	// ValidateCaptureSelection is mandatory for proof-bearing packets at both
+	// admission and sealing, independently of the ordinary capture lease mode.
 	ValidateCaptureSelection func(*pipeline.PacketEnvelope) bool
 	ObservationDomain        func(string) (uint32, bool)
 	// BatchSink makes this manager a lifetime producer. It uses the same packet
@@ -500,7 +502,7 @@ func (m *Manager) SendBatch() {
 			m.statsCollector.IncrementDropped(1)
 			continue
 		}
-		if m.config.RequireCaptureProvenance && (m.config.ValidateCaptureSelection == nil || !m.config.ValidateCaptureSelection(envelope)) {
+		if (m.config.RequireCaptureProvenance || len(envelope.CaptureSelectionProof) > 0) && (m.config.ValidateCaptureSelection == nil || !m.config.ValidateCaptureSelection(envelope)) {
 			m.statsCollector.IncrementDropped(1)
 			continue
 		}
@@ -886,7 +888,7 @@ func (m *Manager) AddObservedPacket(envelope *pipeline.PacketEnvelope) (bool, er
 		m.statsCollector.IncrementDropped(1)
 		return false, ErrCaptureProvenance
 	}
-	if m.config.RequireCaptureProvenance && (m.config.ValidateCaptureSelection == nil || !m.config.ValidateCaptureSelection(envelope)) {
+	if (m.config.RequireCaptureProvenance || len(envelope.CaptureSelectionProof) > 0) && (m.config.ValidateCaptureSelection == nil || !m.config.ValidateCaptureSelection(envelope)) {
 		m.statsCollector.IncrementDropped(1)
 		return false, ErrCaptureProvenance
 	}

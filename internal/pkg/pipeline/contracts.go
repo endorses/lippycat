@@ -3,11 +3,11 @@ package pipeline
 
 import (
 	"sync"
-
-	"github.com/endorses/lippycat/internal/pkg/radius"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/learnedevidence"
 	"github.com/endorses/lippycat/internal/pkg/offline"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -98,9 +98,13 @@ type PacketEnvelope struct {
 	// CallLifecycleRejected is a local central-validation verdict. Raw forensic
 	// outputs can retain the packet, but it cannot mutate selected call owners.
 	CallLifecycleRejected bool
+	// CaptureSelectionProof owns an original legacy signed-media artifact.
+	CaptureSelectionProof []byte
+	// LearnedCaptureEvidence owns typed candidate references and original proofs.
+	// It is mutually exclusive with CaptureSelectionProof.
+	LearnedCaptureEvidence *learnedevidence.LearnedCaptureEvidence
 	// CurrentCaptureSelection rechecks ephemeral selection at producer acceptance.
 	// It is local-only and is never decoded from a transport metadata claim.
-	CaptureSelectionProof     []byte
 	CurrentCaptureSelection   func() bool
 	Data                      []byte
 	LinkType                  layers.LinkType

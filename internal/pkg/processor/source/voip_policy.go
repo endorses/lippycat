@@ -45,8 +45,9 @@ func policySIPMetadata(event sharedsip.Event) *data.PacketMetadata {
 // policyPacket consumes non-default VoIP policies before legacy local ownership
 // and packet-level selectors can create an independent media allowance.
 type policyCapture struct {
-	packet *data.CapturedPacket
-	check  func(*pipeline.PacketEnvelope) bool
+	signedCapturePolicy []byte
+	packet              *data.CapturedPacket
+	check               func(*pipeline.PacketEnvelope) bool
 }
 
 func (s *LocalSource) policyPacket(info capture.PacketInfo, injected *InjectedPacket) (bool, *policyCapture) {
@@ -169,22 +170,7 @@ func (s *LocalSource) appendPolicyPacket(accepted *policyCapture, after func()) 
 		return
 	}
 	s.stats.AddForwarded(uint64(len(packet.Data)))
-	s.batchMu.Lock()
-	s.currentBatch = append(s.currentBatch, envelope)
-	if accepted.check != nil {
-		if s.currentBatchPolicyChecks == nil {
-			s.currentBatchPolicyChecks = make(map[*pipeline.PacketEnvelope]func(*pipeline.PacketEnvelope) bool)
-		}
-		s.currentBatchPolicyChecks[envelope] = accepted.check
-	}
-	if after != nil {
-		s.currentBatchAfterProcess = append(s.currentBatchAfterProcess, after)
-	}
-	count := len(s.currentBatch)
-	s.batchMu.Unlock()
-	if count >= s.config.BatchSize {
-		s.sendBatch()
-	}
+	s.appendEnvelope(envelope, accepted.signedCapturePolicy, after, accepted.check)
 }
 
 // Each check lives only as long as its queued packet. A replacement rule for the

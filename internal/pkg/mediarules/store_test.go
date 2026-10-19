@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/stretchr/testify/require"
 )
@@ -437,4 +438,34 @@ func TestGrantResolutionRetainsImmutableExactProofAndRejectsConflictingSelection
 	second.Call.SelectionGrants[0].Revision++
 	require.NoError(t, store.ApplyDelta(control, 2, []Rule{second}, nil))
 	require.True(t, store.Resolve(first.Endpoints[0].Key, first.Endpoints[1].Key).Ambiguous)
+}
+
+func TestCompatibilityFacadeUsesOnlySharedCommittedState(t *testing.T) {
+	store, control, clock := newTestStore(t)
+	rule := testRule(clock, "shared")
+	require.NoError(t, store.ApplySnapshot(control, 1, []Rule{rule}))
+	binding := store.Core().ActiveRules()[0]
+	require.Equal(t, rule.Call.CallID, binding.Subject.ID)
+	// A generic publication is immediately visible through the compatibility
+	// facade; there is no independently renewed legacy lifecycle registry.
+	binding.Revision = 2
+	require.NoError(t, store.Core().ApplyDelta(control, 2, []core.Binding{binding}, nil))
+	require.Equal(t, Revision(2), store.ActiveRules()[0].Revision)
+	require.NoError(t, store.Core().ApplyDelta(control, 3, nil, []string{rule.ID}))
+	require.Empty(t, store.ActiveRules())
+	require.False(t, store.Resolve(rule.Endpoints[0].Key, rule.Endpoints[1].Key).Resolved)
+}
+
+func TestGenericCompleteBindingCannotExposeForeignSourceDomainThroughFacade(t *testing.T) {
+	store, control, clock := newTestStore(t)
+	rule := testRule(clock, "full")
+	rule.Scope = append(rule.Scope, Scope{HunterID: "other", Domain: 2})
+	remote := rule.Endpoints[0]
+	remote.Key.Domain = 2
+	rule.Endpoints = append(rule.Endpoints, remote)
+	require.NoError(t, store.Core().ApplySnapshot(control, 1, []core.Binding{ToBinding(rule)}))
+	unknown := endpoint("192.0.2.99", 1111).Key
+	require.True(t, store.Resolve(rule.Endpoints[0].Key, unknown).Resolved)
+	unknown.Domain = 2
+	require.False(t, store.Resolve(remote.Key, unknown).Resolved)
 }

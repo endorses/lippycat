@@ -1,0 +1,26 @@
+syntax = "proto3";
+package lippycat.learnedevidence;
+option go_package = "github.com/endorses/lippycat/api/gen/learnedevidence";
+
+// Shared, message-only schema. Proof bytes retain their original signed format.
+message LearnedCaptureEvidence {
+    uint32 version = 1;
+    repeated LearnedCandidate candidates = 2;
+    // A truncated set must never be treated as unique attribution.
+    bool overflow = 3;
+}
+message LearnedCandidate {
+    string binding_id = 1;
+    uint64 binding_revision = 2;
+    string adapter_id = 3;
+    uint32 context_version = 4;
+    string subject_id = 5;
+    string subject_incarnation = 6;
+    string authority_id = 7;
+    uint64 authority_generation = 8;
+    string attribution_context = 9;
+    oneof proof {
+        bool reference_only = 10;
+        bytes legacy_media_rule = 11;
+    }
+}

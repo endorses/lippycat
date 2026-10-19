@@ -27,6 +27,33 @@ func (p *Processor) validateLICaptureSelectionProof(snapshot *management.PolicyS
 	if packet == nil || snapshot == nil || p.liManager == nil {
 		return nil, li.ErrCaptureAuthority
 	}
+	if packet.LearnedCaptureEvidence != nil {
+		proofs, err := capturedMediaProofs(packet)
+		if err != nil {
+			return nil, li.ErrCaptureAuthority
+		}
+		if len(proofs) == 0 {
+			proofs = [][]byte{nil}
+		}
+		var verified []string
+		seen := make(map[string]bool)
+		for _, proof := range proofs {
+			legacy := proto.Clone(packet).(*data.CapturedPacket)
+			legacy.LearnedCaptureEvidence = nil
+			legacy.CaptureSelectionProof = proof
+			ids, err := p.validateLICaptureSelectionProof(snapshot, legacy, hunterID)
+			if err != nil {
+				return nil, err
+			}
+			for _, id := range ids {
+				if !seen[id] {
+					verified = append(verified, id)
+					seen[id] = true
+				}
+			}
+		}
+		return verified, nil
+	}
 	authority, err := li.DecodeHandoverAuthority(snapshot.CaptureAuthority)
 	if err != nil {
 		return nil, err

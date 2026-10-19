@@ -9,9 +9,9 @@ import (
 func TestMissingMediaDiagnosticsRemainBoundedAndInformational(t *testing.T) {
 	now := time.Now()
 	d := NewDiagnostics(2, time.Second)
-	a := OwnerID{Session: 1, Generation: 1, CallID: "a"}
-	b := OwnerID{Session: 1, Generation: 2, CallID: "b"}
-	c := OwnerID{Session: 1, Generation: 3, CallID: "c"}
+	a := OwnerID{Session: 1, Generation: 1, Label: "a"}
+	b := OwnerID{Session: 1, Generation: 2, Label: "b"}
+	c := OwnerID{Session: 1, Generation: 3, Label: "c"}
 	d.Selection(a, 0, true, true, now)
 	d.Selection(b, 0, true, false, now)
 	d.Selection(c, 0, true, true, now)
@@ -30,7 +30,7 @@ func TestMissingMediaDiagnosticsRemainBoundedAndInformational(t *testing.T) {
 func TestMissingMediaExpectationRevisionAndAlertPrivacy(t *testing.T) {
 	now := time.Now()
 	d := NewDiagnostics(2, time.Second)
-	owner := OwnerID{Session: 9, Generation: 8, CallID: "synthetic-secret-identity"}
+	owner := OwnerID{Session: 9, Generation: 8, Label: "synthetic-secret-identity"}
 	d.Selection(owner, 0, true, true, now)
 	d.Expectation(owner, 0, true, true, 1, now)
 	d.Attributed(owner)

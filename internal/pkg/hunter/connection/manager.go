@@ -22,6 +22,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/failover"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventforwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"github.com/endorses/lippycat/internal/pkg/version"
@@ -824,12 +825,17 @@ func (m *Manager) startStreaming() error {
 		m.streamMu.Lock()
 		m.stream = stream
 		m.streamMu.Unlock()
-		if err := stream.Send(&data.PacketBatch{HunterId: m.config.HunterID, TimestampNs: time.Now().UnixNano()}); err != nil {
+		if err := stream.Send(&data.PacketBatch{HunterId: m.config.HunterID, TimestampNs: time.Now().UnixNano(), LearnedEvidenceVersions: []uint32{learnedwire.EvidenceVersion}}); err != nil {
 			return fmt.Errorf("probe packet ingress: %w", err)
 		}
 		control, err := stream.Recv()
 		if err != nil {
 			return fmt.Errorf("packet ingress readiness: %w", err)
+		}
+		if m.config.OpenPacketStream == nil {
+			m.streamMu.Lock()
+			m.stream = learnedwire.NewPacketStream(stream, control.GetLearnedEvidenceVersions())
+			m.streamMu.Unlock()
 		}
 		m.firstControl = control
 		return nil

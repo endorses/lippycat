@@ -66,7 +66,7 @@ type SelectorBackend interface {
 type OwnerID struct {
 	Session    uint64
 	Generation uint64
-	CallID     string
+	Label      string // opaque diagnostic label; authority comes from minted tokens
 }
 
 type State string

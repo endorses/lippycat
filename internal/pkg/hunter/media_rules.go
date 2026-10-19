@@ -6,12 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/netip"
 	"sync"
 	"time"
 
+	learnedpb "github.com/endorses/lippycat/api/gen/learnedrules"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
@@ -19,8 +21,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/mediarules/wire"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	voiprules "github.com/endorses/lippycat/internal/pkg/voip/learnedrules"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -31,6 +33,8 @@ import (
 
 type hunterMediaRules struct {
 	store                   *mediarules.Store
+	runtime                 *core.Runtime
+	genericReceiver         *learnedwire.Receiver
 	settings                mediarules.Settings
 	hunterID                string
 	domains                 mediaadmission.Config
@@ -85,13 +89,32 @@ func (h *Hunter) configureMediaRules() error {
 	runtime := &hunterMediaRules{settings: settings, hunterID: h.config.HunterID, domains: domainConfig}
 	var observer mediarules.Observer
 	if h.config.MediaAdmission != nil {
-		runtime.projection, err = admissionadapter.New(context.Background(), h.config.MediaAdmission.Controller, domainConfig.Domains(), func(err error) { logger.Error("Remote media admission is incomplete", "error", err) })
+		runtime.projection, err = admissionadapter.NewForSource(context.Background(), h.config.MediaAdmission.Controller, h.config.HunterID, domainConfig.Domains(), func(err error) { logger.Error("Remote media admission is incomplete", "error", err) })
 		if err != nil {
 			return err
 		}
 		observer = runtime.projection
 	}
-	runtime.store, err = mediarules.New(settings.StoreConfig(settings.ProcessorID, h.config.HunterID, domainConfig.Domains(), observer))
+	legacyConfig := settings.StoreConfig(settings.ProcessorID, h.config.HunterID, domainConfig.Domains(), observer)
+	engineConfig, err := mediarules.EngineConfig(legacyConfig, h.config.LearnedAdapters...)
+	engineConfig.SupportedProtocols = []core.Protocol{core.UDP}
+	if err != nil {
+		return err
+	}
+	interfaces := make(map[string]core.DomainID)
+	for iface, domain := range domainConfig.InterfaceDomains {
+		interfaces[iface] = core.DomainID(domain)
+	}
+	for _, iface := range h.config.Interfaces {
+		interfaces[iface] = core.DomainID(domainConfig.DomainForInterface(iface))
+	}
+	if len(interfaces) == 0 {
+		interfaces["any"] = 0
+	}
+	runtime.runtime, err = core.NewRuntime(engineConfig, interfaces, min(settings.MaxRules, learnedwire.DefaultEvidenceLimits.MaxCandidates), nil)
+	if err == nil {
+		runtime.store = mediarules.Wrap(runtime.runtime.Store, legacyConfig)
+	}
 	if err != nil {
 		return err
 	}
@@ -122,30 +145,6 @@ func (r *hunterMediaRules) ready() bool {
 	return state.Ready
 }
 
-func mediaRulePacketEndpoints(packet gopacket.Packet, domain mediaadmission.DomainID) (mediaadmission.EndpointKey, mediaadmission.EndpointKey, bool) {
-	if packet == nil || packet.NetworkLayer() == nil {
-		return mediaadmission.EndpointKey{}, mediaadmission.EndpointKey{}, false
-	}
-	udp, ok := packet.TransportLayer().(*layers.UDP)
-	if !ok {
-		return mediaadmission.EndpointKey{}, mediaadmission.EndpointKey{}, false
-	}
-	source, err := netip.ParseAddr(packet.NetworkLayer().NetworkFlow().Src().String())
-	if err != nil {
-		return mediaadmission.EndpointKey{}, mediaadmission.EndpointKey{}, false
-	}
-	destination, err := netip.ParseAddr(packet.NetworkLayer().NetworkFlow().Dst().String())
-	if err != nil {
-		return mediaadmission.EndpointKey{}, mediaadmission.EndpointKey{}, false
-	}
-	left, err := mediaadmission.NewEndpoint(domain, source, uint16(udp.SrcPort))
-	if err != nil {
-		return left, mediaadmission.EndpointKey{}, false
-	}
-	right, err := mediaadmission.NewEndpoint(domain, destination, uint16(udp.DstPort))
-	return left, right, err == nil
-}
-
 func remoteAssociation(call mediarules.CallAssociation, session mediarules.Session) voip.RemoteCallAssociation {
 	return voip.RemoteCallAssociation{CallID: call.CallID, Lifetime: call.Lifetime, SelectionRevision: call.SelectionRevision, CapturePolicyRevision: call.CapturePolicyRevision, ProcessorID: session.ProcessorID, ControlGeneration: session.Generation, InheritedFilterIDs: append([]string(nil), call.FilterIDs...)}
 }
@@ -155,52 +154,20 @@ func (r *hunterMediaRules) ResolveMedia(packet gopacket.Packet, iface string) (v
 	if !r.ready() {
 		return voip.RemoteCallAssociation{}, false
 	}
-	left, right, ok := mediaRulePacketEndpoints(packet, r.domains.DomainForInterface(iface))
+	domain := r.domains.DomainForInterface(iface)
+	facts, ok := core.PacketFacts(packet, core.DomainID(domain))
 	if !ok {
 		return voip.RemoteCallAssociation{}, false
 	}
-	payload := packet.TransportLayer().(*layers.UDP).Payload
-	if len(payload) < 8 || payload[0]>>6 != 2 {
-		return voip.RemoteCallAssociation{}, false
-	}
-	rtcp := payload[1] >= 192 && payload[1] <= 223
-	if !rtcp && len(payload) < 12 {
-		return voip.RemoteCallAssociation{}, false
-	}
-	resolution := r.store.Resolve(left, right)
-	if !resolution.Resolved || r.capturePolicyCurrent != nil && !r.capturePolicyCurrent(resolution.Call.CapturePolicyRevision) {
-		return voip.RemoteCallAssociation{}, false
-	}
-
-	if resolution.Rule == nil {
+	resolution := voiprules.ResolvePacket(r.store.Core(), facts, min(max(1, r.settings.MaxRules), learnedwire.DefaultEvidenceLimits.MaxCandidates))
+	if !resolution.Resolved || resolution.Rule == nil || r.capturePolicyCurrent != nil && !r.capturePolicyCurrent(resolution.Call.CapturePolicyRevision) {
 		return voip.RemoteCallAssociation{}, false
 	}
 	rule := resolution.Rule
-	// Ordinary rules can describe separate RTP and RTCP associations for the same
-	// call. Keep that compatibility while signed rules use their exact proof.
-	if len(rule.Call.SelectionGrants) == 0 {
-		for _, candidate := range r.store.ActiveRules() {
-			if candidate.Call.CallID != resolution.Call.CallID || candidate.Call.Lifetime != resolution.Call.Lifetime {
-				continue
-			}
-			matched := false
-			for _, endpoint := range candidate.Endpoints {
-				if (endpoint.Key == left || endpoint.Key == right) && (endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP)) {
-					matched = true
-					break
-				}
-			}
-			if matched {
-				owned := candidate
-				rule = &owned
-				break
-			}
-		}
-	}
 	association := remoteAssociation(rule.Call, rule.Session)
 	if len(rule.Call.SelectionGrants) > 0 {
 		encoded := wire.EncodeRule(*rule)
-		if r.captureMediaRuleAllowed == nil || !r.captureMediaRuleAllowed(encoded, packet, uint32(left.Domain), time.Now()) {
+		if r.captureMediaRuleAllowed == nil || !r.captureMediaRuleAllowed(encoded, packet, uint32(domain), time.Now()) {
 			return voip.RemoteCallAssociation{}, false
 		}
 		proof, err := (proto.MarshalOptions{Deterministic: true}).Marshal(encoded)
@@ -212,19 +179,10 @@ func (r *hunterMediaRules) ResolveMedia(packet gopacket.Packet, iface string) (v
 			association.InheritedFilterIDs = append(association.InheritedFilterIDs, ref.ID)
 		}
 	}
-	for _, endpoint := range rule.Endpoints {
-		if endpoint.Key != left && endpoint.Key != right {
-			continue
-		}
-		if endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP) {
-			if r.store.Status().Sequence != sequence || !r.ready() {
-				return voip.RemoteCallAssociation{}, false
-			}
-			return association, true
-		}
+	if r.store.Status().Sequence != sequence || !r.ready() {
+		return voip.RemoteCallAssociation{}, false
 	}
-
-	return voip.RemoteCallAssociation{}, false
+	return association, true
 }
 
 func (r *hunterMediaRules) ResolveSignalling(event sharedsip.Event, packet gopacket.Packet, iface string) (voip.RemoteCallAssociation, bool) {
@@ -263,6 +221,7 @@ func (r *hunterMediaRules) invalidate() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.receiver = nil
+	r.genericReceiver = nil
 	known := r.store.Status().Session
 	if known.Generation == 0 {
 		return nil
@@ -286,6 +245,19 @@ func (r *hunterMediaRules) application() *management.MediaRuleApplication {
 }
 
 func (r *hunterMediaRules) open(lifetime, setup context.Context, conn grpc.ClientConnInterface) (func() error, error) {
+	run, err := r.openGeneric(lifetime, setup, conn)
+	if err == nil {
+		return run, nil
+	}
+	adapters := r.store.Core().Configuration().Registry.Adapters()
+	exactlyVoIP := len(adapters) == 1 && adapters[0].ID == voiprules.AdapterID && adapters[0].Version == voiprules.ContextVersion
+	if !learnedwire.LegacyFallbackAllowed(err, exactlyVoIP) {
+		return nil, err
+	}
+	return r.openLegacy(lifetime, setup, conn)
+}
+
+func (r *hunterMediaRules) openLegacy(lifetime, setup context.Context, conn grpc.ClientConnInterface) (func() error, error) {
 	if err := r.invalidate(); err != nil {
 		return nil, err
 	}
@@ -309,7 +281,7 @@ func (r *hunterMediaRules) open(lifetime, setup context.Context, conn grpc.Clien
 	first, err := stream.Recv()
 	// Ordinary capture can use legacy media control. Explicit LI-owned capture
 	// requires the grant-capable contract and never retries with private filters.
-	if err != nil && r.capturePolicyCurrent == nil && (status.Code(err) == codes.InvalidArgument || status.Code(err) == codes.Unimplemented) {
+	if err != nil && r.capturePolicyCurrent == nil && legacyMediaVersionUnsupported(err) {
 		stream, err = client.SubscribeMediaRules(ctx, &management.MediaRuleRequest{ProtocolVersion: wire.Version, HunterId: r.hunterID, ProcessorId: r.settings.ProcessorID}, grpc.MaxCallRecvMsgSize(r.settings.MaxMessageBytes))
 		if err == nil {
 			first, err = stream.Recv()
@@ -375,6 +347,13 @@ func (r *hunterMediaRules) open(lifetime, setup context.Context, conn grpc.Clien
 			}
 		}
 	}, nil
+}
+
+// Legacy v1 servers used this exact status for an unsupported protocol
+// version. Arbitrary InvalidArgument errors may describe malformed data and
+// never authorize downgrade. Grant-required capture never calls this fallback.
+func legacyMediaVersionUnsupported(err error) bool {
+	return status.Code(err) == codes.Unimplemented || status.Code(err) == codes.InvalidArgument && status.Convert(err).Message() == "unsupported media-rule subscription"
 }
 
 func (r *hunterMediaRules) report(ctx context.Context, client management.MediaControlServiceClient) error {
@@ -444,4 +423,165 @@ func (r *hunterMediaRules) ValidateMediaProof(packet gopacket.Packet, iface stri
 	}
 	rule := &management.MediaRule{}
 	return proto.Unmarshal(proof, rule) == nil && r.captureMediaRuleAllowed(rule, packet, uint32(r.domains.DomainForInterface(iface)), at)
+}
+
+func voipLearnedCapabilities() []*learnedpb.LearnedCapability {
+	return []*learnedpb.LearnedCapability{learnedCapabilities(voiprules.Adapter())}
+}
+func learnedCapabilities(adapter core.Adapter) *learnedpb.LearnedCapability {
+	capability := &learnedpb.LearnedCapability{SupportedProtocols: []uint32{uint32(core.TCP), uint32(core.UDP)}, AdapterId: adapter.ID, ContextVersion: adapter.Version, EndpointSelectorVersions: []uint32{learnedwire.EndpointSelectorVersion}, EvidenceVersions: []uint32{learnedwire.EvidenceVersion}}
+	if adapter.ID == voiprules.AdapterID {
+		capability.SupportedProtocols = []uint32{uint32(core.UDP)}
+	}
+	for _, q := range adapter.Qualifiers {
+		capability.Qualifiers = append(capability.Qualifiers, &learnedpb.LearnedQualifier{Id: q.ID, Version: q.Version})
+	}
+	return capability
+}
+
+func (r *hunterMediaRules) openGeneric(lifetime, setup context.Context, conn grpc.ClientConnInterface) (func() error, error) {
+	if err := r.invalidate(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(lifetime)
+	stopSetup := context.AfterFunc(setup, cancel)
+	completed := false
+	defer func() {
+		stopSetup()
+		if !completed {
+			cancel()
+			if err := r.invalidate(); err != nil {
+				logger.Error("Invalidate failed learned-rule setup", "error", err)
+			}
+		}
+	}()
+	client := learnedpb.NewLearnedControlServiceClient(conn)
+	var caps []*learnedpb.LearnedCapability
+	for _, adapter := range r.store.Core().Configuration().Registry.Adapters() {
+		capability := learnedCapabilities(adapter)
+		if supported := r.store.Core().Configuration().SupportedProtocols; len(supported) > 0 {
+			capability.SupportedProtocols = nil
+			for _, protocol := range supported {
+				if adapter.ID != voiprules.AdapterID || protocol == core.UDP {
+					capability.SupportedProtocols = append(capability.SupportedProtocols, uint32(protocol))
+				}
+			}
+		}
+		caps = append(caps, capability)
+	}
+	stream, err := client.SubscribeLearnedRules(ctx, &learnedpb.LearnedRuleRequest{ProtocolVersion: learnedwire.Version, HunterId: r.hunterID, ProcessorId: r.settings.ProcessorID, Capabilities: caps}, grpc.MaxCallRecvMsgSize(r.settings.MaxMessageBytes))
+	if err != nil {
+		return nil, err
+	}
+	first, err := stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	remote, _ := peer.FromContext(stream.Context())
+	if err := verifiedMediaIssuer(remote, r.settings.ProcessorID); err != nil {
+		return nil, err
+	}
+	receiver, err := learnedwire.NewReceiver(r.store.Core(), r.settings.ProcessorID, learnedwire.Limits{MaxMessageBytes: r.settings.MaxMessageBytes, MaxSnapshotBytes: r.settings.MaxSnapshotBytes, MaxRules: r.settings.MaxRules}, caps)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		if err := receiver.Apply(first); err != nil {
+			return nil, err
+		}
+		if r.store.Status().Ready {
+			break
+		}
+		first, err = stream.Recv()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := setup.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.reportGeneric(setup, client, receiver.SubscriptionID()); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	r.genericReceiver = receiver
+	r.mu.Unlock()
+	completed = true
+	return func() error {
+		defer cancel()
+		for {
+			update, err := stream.Recv()
+			if err != nil {
+				return err
+			}
+			r.mu.Lock()
+			current := r.genericReceiver == receiver
+			r.mu.Unlock()
+			if !current {
+				return mediarules.ErrSession
+			}
+			if err := receiver.Apply(update); err != nil {
+				return errors.Join(err, r.invalidate())
+			}
+			reportCtx, stop := context.WithTimeout(ctx, 10*time.Second)
+			err = r.reportGeneric(reportCtx, client, receiver.SubscriptionID())
+			stop()
+			if err != nil {
+				return err
+			}
+		}
+	}, nil
+}
+func (r *hunterMediaRules) reportGeneric(ctx context.Context, client learnedpb.LearnedControlServiceClient, subscriptionID string) error {
+	legacy := r.application()
+	application := &learnedpb.LearnedRuleApplication{HunterId: r.hunterID, SubscriptionId: subscriptionID, Session: learnedwire.EncodeSession(r.store.Status().Session), AppliedRevision: legacy.AppliedRevision, Synchronized: legacy.Synchronized, Error: legacy.Error}
+	populateLearnedApplication(application, r.store.Core())
+	receipt, err := client.ReportLearnedRuleStatus(ctx, application)
+	if err != nil {
+		return err
+	}
+	if receipt == nil || !receipt.Accepted {
+		return errors.New("processor rejected scoped learned-rule application status")
+	}
+	return nil
+}
+
+// learnedApplicationCounts uses only bounded registered adapter metadata. Source
+// scope is checked without altering immutable binding definitions.
+func learnedApplicationCounts(store *core.Store) []*learnedpb.LearnedAdapterApplication {
+	adapters := store.Configuration().Registry.Adapters()
+	bindings := store.ActiveRules()
+	result := make([]*learnedpb.LearnedAdapterApplication, 0, len(adapters))
+	for _, adapter := range adapters {
+		counts := &learnedpb.LearnedAdapterApplication{AdapterId: adapter.ID, ContextVersion: adapter.Version}
+		for _, binding := range bindings {
+			if binding.AdapterID != adapter.ID || binding.ContextVersion != adapter.Version {
+				continue
+			}
+			counts.ActiveBindings++
+			for _, selector := range binding.Selectors {
+				if store.InScope(binding, selector.Domain) {
+					counts.ActiveSelectors++
+				}
+			}
+		}
+		result = append(result, counts)
+	}
+	return result
+}
+
+func populateLearnedApplication(application *learnedpb.LearnedRuleApplication, store *core.Store) {
+	state := store.Status()
+	application.CandidateOverflows = state.CandidateOverflows
+	application.RetainedBytes = uint64(state.Bytes)
+	application.Expired = state.Expired
+	application.StaleUpdates = state.StaleUpdates
+	application.Resyncs = state.Resyncs
+	application.CapacityRejections = state.CapacityRejections
+	application.AdapterApplications = learnedApplicationCounts(store)
+	application.ActiveBindings, application.ActiveSelectors = 0, 0
+	for _, counts := range application.AdapterApplications {
+		application.ActiveBindings += counts.ActiveBindings
+		application.ActiveSelectors += counts.ActiveSelectors
+	}
 }

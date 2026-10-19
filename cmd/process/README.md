@@ -1020,6 +1020,16 @@ for lifecycle completeness, replay, and the lack of authoritative pull freshness
 
 ## Central call selection and overlap suppression
 
+VoIP selection uses the shared learned-rule engine for bounded bindings, expiry,
+source scope and installation. SIP interpretation and RTP/RTCP qualification stay
+in the VoIP adapter, the only production adapter. Existing configuration stays
+valid; there is no public generic-rule syntax or RADIUS subscriber-rule adapter.
+New peers prefer generic control, with exact legacy VoIP compatibility for
+explicitly unsupported peers. Typed packet evidence is negotiated separately:
+upgrade receivers and every relay before producers, and check effective
+installation rather than treating a kernel endpoint hit as capture authority.
+See [control and evidence compatibility](../../docs/DISTRIBUTED_MEDIA.md#control-compatibility-and-packet-evidence).
+
 Enable `processor.voip.media_rules.enabled` with explicit hunter/interface/domain
 mappings to select calls centrally and publish temporary RTP/RTCP rules. A new
 hunter can capture an existing selected call without observing its INVITE or

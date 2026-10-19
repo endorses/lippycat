@@ -49,6 +49,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
@@ -67,6 +68,7 @@ import (
 func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) error {
 	var hunterID string // Track which hunter this stream belongs to
 	var forwardingContract *hunter.PacketStreamContract
+	var learnedEvidenceVersions []uint32
 
 	defer func() {
 		if hunterID != "" {
@@ -95,11 +97,18 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 			if !ok {
 				return status.Error(codes.FailedPrecondition, "packet stream requires a current packet-mode hunter registration")
 			}
+			if radiusStreamSourceTrusted(stream.Context(), hunterID) {
+				learnedEvidenceVersions = p.acceptLearnedEvidenceVersions(batch.LearnedEvidenceVersions)
+			}
 			logger.Info("Packet stream started", "hunter_id", hunterID)
 		} else if batch.HunterId != hunterID {
 			return status.Error(codes.InvalidArgument, "packet stream hunter ID changed")
 		} else if !p.hunterManager.ValidatePacketStream(hunterID, forwardingContract) {
 			return status.Error(codes.FailedPrecondition, "packet stream registration was replaced")
+		}
+
+		if err := learnedwire.ValidateBatchEvidence(batch, p.acceptLearnedEvidenceVersions(learnedEvidenceVersions)); err != nil {
+			return status.Errorf(codes.FailedPrecondition, "packet evidence contract: %v", err)
 		}
 
 		// Convert protobuf batch to internal format and process
@@ -119,8 +128,9 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 
 		// Send acknowledgment with flow control signal
 		ack := &data.StreamControl{
-			AckSequence: batch.Sequence,
-			FlowControl: flowControl,
+			AckSequence:             batch.Sequence,
+			FlowControl:             flowControl,
+			LearnedEvidenceVersions: append([]uint32(nil), learnedEvidenceVersions...),
 		}
 
 		if err := stream.Send(ack); err != nil {
@@ -486,6 +496,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
 				MediaRules:                    p.remoteMediaRuleStatus(h.ID),
+				LearnedRules:                  p.remoteLearnedRuleStatus(h.ID),
 				RtpEbpf:                       p.hunterManager.AdmissionStatus(h.ID),
 				PacketsCaptured:               h.PacketsCaptured, // From hunter's heartbeat stats
 				PacketsMatched:                h.PacketsMatched,
@@ -762,6 +773,7 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
 				MediaRules:                    p.remoteMediaRuleStatus(h.ID),
+				LearnedRules:                  p.remoteLearnedRuleStatus(h.ID),
 				RtpEbpf:                       p.hunterManager.AdmissionStatus(h.ID),
 				PacketsCaptured:               h.PacketsCaptured,
 				PacketsMatched:                h.PacketsMatched,

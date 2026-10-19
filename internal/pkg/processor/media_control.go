@@ -15,9 +15,12 @@ import (
 	"sync"
 	"time"
 
+	learnedpb "github.com/endorses/lippycat/api/gen/learnedrules"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/callselection"
 	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
@@ -37,6 +40,7 @@ type processorMediaControl struct {
 	mu                sync.Mutex
 	store             *mediarules.Store
 	service           *wire.Service
+	genericService    *learnedwire.Service
 	tracker           *callselection.Tracker
 	control           mediarules.Control
 	session           mediarules.Session
@@ -83,7 +87,7 @@ func (p *Processor) initMediaControl() error {
 		generation = 1
 	}
 	r := &processorMediaControl{session: mediarules.Session{ProcessorID: cfg.ProcessorID, Generation: generation}, started: time.Now()}
-	r.store, err = mediarules.New(cfg.StoreConfig(cfg.ProcessorID, "", nil, nil))
+	r.store, err = mediarules.NewWithAdapters(cfg.StoreConfig(cfg.ProcessorID, "", nil, nil), p.config.LearnedAdapters...)
 	if err != nil {
 		return err
 	}
@@ -93,7 +97,7 @@ func (p *Processor) initMediaControl() error {
 		return err
 	}
 	r.revision = 1
-	if err = r.store.ApplySnapshot(r.control, r.revision, nil); err != nil {
+	if err = r.replaceVoIPLocked(nil); err != nil {
 		return err
 	}
 	domainSet := make(map[mediaadmission.DomainID]bool)
@@ -130,7 +134,7 @@ func (p *Processor) initMediaControl() error {
 	if err != nil {
 		return err
 	}
-	r.service, err = wire.NewService(r.store, wire.Limits{MaxMessageBytes: cfg.MaxMessageBytes, MaxSnapshotBytes: cfg.MaxSnapshotBytes, MaxRules: cfg.MaxRules}, cfg.MaxSubscribers, func(ctx context.Context, id string) error {
+	authorize := func(ctx context.Context, id string) error {
 		if !p.config.TLSEnabled || !p.config.TLSClientAuth || !radiusStreamSourceTrusted(ctx, id) {
 			return status.Error(codes.PermissionDenied, "media control requires a verified hunter certificate")
 		}
@@ -146,7 +150,12 @@ func (p *Processor) initMediaControl() error {
 			}
 		}
 		return status.Error(codes.PermissionDenied, "hunter has no media source mapping")
-	})
+	}
+	r.service, err = wire.NewService(r.store, wire.Limits{MaxMessageBytes: cfg.MaxMessageBytes, MaxSnapshotBytes: cfg.MaxSnapshotBytes, MaxRules: cfg.MaxRules}, cfg.MaxSubscribers, authorize)
+	if err != nil {
+		return err
+	}
+	r.genericService, err = learnedwire.NewService(r.store.Core(), learnedwire.Limits{MaxMessageBytes: cfg.MaxMessageBytes, MaxSnapshotBytes: cfg.MaxSnapshotBytes, MaxRules: cfg.MaxRules}, cfg.MaxSubscribers, authorize)
 	return err
 }
 
@@ -222,7 +231,7 @@ func (p *Processor) processMediaControl(batch *source.PacketBatch) {
 		return
 	}
 	for _, envelope := range batch.Envelopes {
-		if envelope == nil {
+		if envelope == nil || envelope.CallLifecycleRejected {
 			continue
 		}
 		domain, ok := p.mediaSourceDomain(envelope)
@@ -389,10 +398,10 @@ func (r *processorMediaControl) publishLocked(p *Processor, renew bool) error {
 			return errors.Join(err, r.withdrawLocked())
 		}
 	}
-	if err := r.store.ApplySnapshot(r.control, r.revision, rules); err != nil {
+	if err := r.replaceVoIPLocked(rules); err != nil {
 		// A partial new selection cannot leave an old, broader snapshot live.
 		r.revision++
-		clearErr := r.store.ApplySnapshot(r.control, r.revision, nil)
+		clearErr := r.replaceVoIPLocked(nil)
 		r.rules = nil
 		return errors.Join(err, clearErr)
 	}
@@ -404,7 +413,7 @@ func (r *processorMediaControl) publishLocked(p *Processor, renew bool) error {
 func (r *processorMediaControl) withdrawLocked() error {
 	r.revision++
 	r.rules = nil
-	return r.store.ApplySnapshot(r.control, r.revision, nil)
+	return r.replaceVoIPLocked(nil)
 }
 
 func (p *Processor) reconcileMediaSelection() error {
@@ -440,7 +449,7 @@ func (p *Processor) startMediaControl(ctx context.Context) {
 				return
 			case <-ticker.C:
 				r.mu.Lock()
-				err := r.refreshMatcherLocked(p)
+				err := errors.Join(r.store.Core().Sweep(), r.refreshMatcherLocked(p))
 				if p.filterProcessingBlocked() {
 					err = errors.Join(err, r.withdrawLocked())
 				} else if err == nil {
@@ -494,5 +503,63 @@ func (p *Processor) MediaRuleApplication(hunterID string) *management.MediaRuleA
 	if p.mediaControl == nil {
 		return nil
 	}
+	if generic := p.mediaControl.genericService.Application(hunterID); generic != nil {
+		result := &management.MediaRuleApplication{HunterId: generic.HunterId, Session: wire.EncodeSession(p.mediaControl.store.Status().Session), AppliedRevision: generic.AppliedRevision, Synchronized: generic.Synchronized, Error: generic.Error}
+		for _, adapter := range generic.AdapterApplications {
+			if adapter.AdapterId == "voip" && adapter.ContextVersion == 1 {
+				result.ActiveRules = adapter.ActiveBindings
+				result.ActiveEndpoints = adapter.ActiveSelectors
+			}
+		}
+		return result
+	}
 	return p.mediaControl.service.Application(hunterID)
+}
+
+// LearnedRuleApplication exposes the current authenticated generic subscription
+// report. Legacy status remains available for older sources.
+func (p *Processor) LearnedRuleApplication(hunterID string) *learnedpb.LearnedRuleApplication {
+	if p.mediaControl == nil || p.mediaControl.genericService == nil {
+		if p.learnedControl != nil {
+			return p.learnedControl.service.Application(hunterID)
+		}
+		return nil
+	}
+	return p.mediaControl.genericService.Application(hunterID)
+}
+
+// SubscribeLocalLearnedRules is the generic in-process subscription boundary.
+// Its snapshots are identical to those seen by authenticated remote sources.
+func (p *Processor) SubscribeLocalLearnedRules() (*core.Subscription, error) {
+	if p.learnedControl != nil {
+		return p.learnedControl.store.Subscribe()
+	}
+	if p.mediaControl == nil {
+		return nil, errors.New("processor learned rules are disabled")
+	}
+	return p.mediaControl.store.Core().Subscribe()
+}
+
+// replaceVoIPLocked changes this adapter's relationships while retaining other
+// registered adapters. Publication revisions belong to the common store; signed
+// VoIP rule revisions remain immutable independent artifacts.
+func (r *processorMediaControl) replaceVoIPLocked(rules []mediarules.Rule) error {
+	var bindings []core.Binding
+	for _, binding := range r.store.Core().Snapshot().Rules {
+		if binding.AdapterID != "voip" {
+			bindings = append(bindings, binding)
+		}
+	}
+	for _, rule := range rules {
+		bindings = append(bindings, mediarules.ToBinding(rule))
+	}
+	revision := r.store.Core().Status().Revision
+	if revision == ^core.Revision(0) {
+		return core.ErrRevision
+	}
+	return r.store.Core().ApplySnapshot(r.control, revision+1, bindings)
+}
+
+func (p *Processor) LearnedRuleAdapters() []core.Adapter {
+	return append([]core.Adapter(nil), p.config.LearnedAdapters...)
 }

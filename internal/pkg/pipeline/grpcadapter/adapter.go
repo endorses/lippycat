@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/api/gen/learnedevidence"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/google/gopacket/layers"
 	"google.golang.org/protobuf/proto"
@@ -15,10 +16,16 @@ func FromCapturedPacket(p *data.CapturedPacket, source pipeline.SourceProvenance
 	if p == nil {
 		return nil, fmt.Errorf("convert captured packet: nil packet")
 	}
+	if err := pipeline.ValidateCaptureEvidence(&pipeline.PacketEnvelope{CaptureSelectionProof: p.CaptureSelectionProof, LearnedCaptureEvidence: p.LearnedCaptureEvidence}); err != nil {
+		return nil, fmt.Errorf("decode capture evidence: %w", err)
+	}
 	source.InterfaceName, source.InterfaceIndex = p.InterfaceName, p.InterfaceIndex
 	source.ObservationDomain, source.ObservationDomainKnown = p.ObservationDomain, p.ObservationDomainKnown
 	e := &pipeline.PacketEnvelope{Data: append([]byte(nil), p.Data...), LinkType: layers.LinkType(p.LinkType), CaptureTime: time.Unix(0, p.TimestampNs), CaptureLength: int(p.CaptureLength), OriginalLength: int(p.OriginalLength), Source: source, MatchedFilterIDs: append([]string(nil), p.MatchedFilterIds...), DirectMatchedFilterIDs: append([]string(nil), p.DirectMatchedFilterIds...), InheritedMatchedFilterIDs: append([]string(nil), p.InheritedMatchedFilterIds...), TLSKeys: fromTLSKeys(p.TlsKeys)}
 	e.CaptureSelectionProof = append([]byte(nil), p.CaptureSelectionProof...)
+	if p.LearnedCaptureEvidence != nil {
+		e.LearnedCaptureEvidence = proto.Clone(p.LearnedCaptureEvidence).(*learnedevidence.LearnedCaptureEvidence)
+	}
 	e.RADIUS, e.RADIUSValidationError = RADIUSFromProto(p)
 	if p.Radius != nil {
 		// RADIUS claims never authorize through the generic SIP/RTP ID path,
@@ -102,8 +109,14 @@ func ToCapturedPacket(e *pipeline.PacketEnvelope) (*data.CapturedPacket, error) 
 	if e == nil {
 		return nil, fmt.Errorf("convert packet envelope: nil envelope")
 	}
+	if err := pipeline.ValidateCaptureEvidence(e); err != nil {
+		return nil, fmt.Errorf("encode capture evidence: %w", err)
+	}
 	p := &data.CapturedPacket{Data: append([]byte(nil), e.Data...), TimestampNs: unixNano(e.CaptureTime), CaptureLength: uint32(e.CaptureLength), OriginalLength: uint32(e.OriginalLength), InterfaceIndex: e.Source.InterfaceIndex, LinkType: uint32(e.LinkType), InterfaceName: e.Source.InterfaceName, MatchedFilterIds: append([]string(nil), e.MatchedFilterIDs...), DirectMatchedFilterIds: append([]string(nil), e.DirectMatchedFilterIDs...), InheritedMatchedFilterIds: append([]string(nil), e.InheritedMatchedFilterIDs...), TlsKeys: toTLSKeys(e.TLSKeys)} // #nosec G115 -- pcap lengths and link type are wire fields
 	p.CaptureSelectionProof = append([]byte(nil), e.CaptureSelectionProof...)
+	if e.LearnedCaptureEvidence != nil {
+		p.LearnedCaptureEvidence = proto.Clone(e.LearnedCaptureEvidence).(*learnedevidence.LearnedCaptureEvidence)
+	}
 	p.ObservationDomain, p.ObservationDomainKnown = e.Source.ObservationDomain, e.Source.ObservationDomainKnown
 	if e.RADIUS != nil {
 		if !e.RADIUS.Capture.Timestamp.Equal(e.CaptureTime) || e.RADIUS.Capture.LinkType != e.LinkType || e.RADIUS.Capture.CapturedLength != e.CaptureLength || e.RADIUS.Capture.OriginalLength != e.OriginalLength {

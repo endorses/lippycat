@@ -588,6 +588,9 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	if err := localSource.SetCapturePolicies(policies, remoteRules); err != nil {
 		return err
 	}
+	if err := configureTapLearnedRuntime(runtime.processor, localSource, remoteRules); err != nil {
+		return err
+	}
 
 	// Create VoIPProcessor for SIP/RTP metadata extraction
 	// This enables per-call PCAP writing and RTP association in tap mode
@@ -715,4 +718,17 @@ func tapMediaDomains(config processor.MediaRulesConfig, interfaces []string, con
 		}
 	}
 	return result, nil
+}
+
+// configureTapLearnedRuntime attaches additional typed adapters to the same
+// capture path and store used by VoIP. Ordinary VoIP-only deployments retain
+// their existing evidence representation and release checks.
+func configureTapLearnedRuntime(p *processor.Processor, local *source.LocalSource, rules *tapMediaRules) error {
+	if rules == nil || len(p.LearnedRuleAdapters()) == 0 {
+		return nil
+	}
+	if err := local.SetLearnedRuntime(rules.runtime, rules.ValidateLearnedProof, p.LearnedCapturePolicySnapshot); err != nil {
+		return fmt.Errorf("configure local learned capture: %w", err)
+	}
+	return nil
 }

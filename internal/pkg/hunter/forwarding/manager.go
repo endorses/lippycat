@@ -84,8 +84,12 @@ type PacketBufferProvider interface {
 
 // Config contains forwarding configuration
 type Config struct {
+	// LearnedCapture proposes independently authorized selections before ordinary
+	// packet filters; nil results continue the ordinary path.
+	LearnedCapture func(capture.PacketInfo) (*pipeline.PacketEnvelope, error)
 	// ValidateCaptureSelection is mandatory for proof-bearing packets at both
 	// admission and sealing, independently of the ordinary capture lease mode.
+	// Both legacy proof and typed learned evidence require this authority check.
 	ValidateCaptureSelection func(*pipeline.PacketEnvelope) bool
 	ObservationDomain        func(string) (uint32, bool)
 	// BatchSink makes this manager a lifetime producer. It uses the same packet
@@ -395,6 +399,26 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 				// Increment captured counter
 				m.statsCollector.IncrementCaptured()
 
+				if m.config.LearnedCapture != nil {
+					envelope, err := m.config.LearnedCapture(pktInfo)
+					if err != nil {
+						m.statsCollector.IncrementDropped(1)
+						logger.Debug("Learned packet selection rejected", "error", err)
+						return
+					}
+					if envelope != nil {
+						full, err := m.AddObservedPacket(envelope)
+						if err != nil {
+							return
+						}
+						m.statsCollector.IncrementMatched()
+						if full {
+							m.SendBatch()
+						}
+						return
+					}
+				}
+
 				// Track matched filter IDs for LI correlation
 				var matchedFilterIDs []string
 
@@ -502,7 +526,7 @@ func (m *Manager) SendBatch() {
 			m.statsCollector.IncrementDropped(1)
 			continue
 		}
-		if (m.config.RequireCaptureProvenance || len(envelope.CaptureSelectionProof) > 0) && (m.config.ValidateCaptureSelection == nil || !m.config.ValidateCaptureSelection(envelope)) {
+		if !m.validCaptureEvidence(envelope) {
 			m.statsCollector.IncrementDropped(1)
 			continue
 		}
@@ -888,7 +912,7 @@ func (m *Manager) AddObservedPacket(envelope *pipeline.PacketEnvelope) (bool, er
 		m.statsCollector.IncrementDropped(1)
 		return false, ErrCaptureProvenance
 	}
-	if (m.config.RequireCaptureProvenance || len(envelope.CaptureSelectionProof) > 0) && (m.config.ValidateCaptureSelection == nil || !m.config.ValidateCaptureSelection(envelope)) {
+	if !m.validCaptureEvidence(envelope) {
 		m.statsCollector.IncrementDropped(1)
 		return false, ErrCaptureProvenance
 	}
@@ -996,4 +1020,16 @@ func (m *Manager) WithObservedCaptureBoundary(generation uint64, apply func() bo
 		return false
 	}
 	return apply()
+}
+
+// validCaptureEvidence separates schema validity from authoritative selection.
+// A permissive callback cannot admit malformed or contradictory wire evidence.
+func (m *Manager) validCaptureEvidence(envelope *pipeline.PacketEnvelope) bool {
+	if pipeline.ValidateCaptureEvidence(envelope) != nil {
+		return false
+	}
+	if !m.config.RequireCaptureProvenance && !envelope.HasCaptureEvidence() {
+		return true
+	}
+	return m.config.ValidateCaptureSelection != nil && m.config.ValidateCaptureSelection(envelope)
 }

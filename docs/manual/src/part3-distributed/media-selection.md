@@ -2,6 +2,16 @@
 
 A processor can select a call from SIP observed by one hunter and publish temporary media rules to other eligible hunters. A hunter that never saw the INVITE can then capture the existing RTP flow, even when the route changes without new SIP or a change to the media endpoints. A tap uses the same publisher and local subscription in process, without loopback gRPC.
 
+## Shared learned bindings {#media-learned-bindings}
+
+Distributed media selection uses a shared learned-rule engine for bounded bindings, snapshots, revision ordering, expiry and withdrawal. Each binding names an authenticated authority and epoch, a subject and incarnation, current intent references, source/domain scope, typed selectors and validated adapter context. The VoIP adapter owns SIP/SDP interpretation, RTP/RTCP qualification and call attribution. Legacy media views use the same committed state.
+
+VoIP is the only production adapter. Internally, exact IPv4/IPv6 UDP or TCP endpoint selectors support source, destination or either direction and registered qualifiers. VoIP emits qualified UDP media endpoints. RADIUS subscriber learning, prefix selectors and full-flow selectors are not enabled by this feature, and there is no public generic-rule CLI. Future adapters require their own evidence and authorization contracts.
+
+The advertised `supported_protocols` list describes the complete source path. The internal generic runtime supports UDP and TCP. Existing VoIP hunter/tap capture paths advertise UDP only for learned bindings; SIP over TCP remains independent. A TCP binding on such a path is refused before readiness, even if generic matching understands TCP, because the preceding capture filter might exclude it.
+
+Matching returns candidate references rather than ownership or output permission. Candidate overflow cannot establish unique attribution; independent ordinary filter evidence stays separate. VoIP retains its ambiguity checks. Kernel endpoint admission only finds candidates: userspace enforces transport, direction, domain, qualifier and current binding semantics. Shared physical entries remain installed while any valid binding still needs them.
+
 ## Choose signalling and media independently {#media-policy-choices}
 
 `hunt voip` and `tap voip` accept `--signalling-policy matched|all|none` and `--media-policy local|processor`. Defaults remain `matched` and `local`. SIP export can be disabled while SIP parsing still maintains local call state. Explicit `all` forwards eligible candidate SIP regardless of local identity matching; it does not select all media or bypass existing BPF, port or transport restrictions.
@@ -78,9 +88,21 @@ Each owner has an independent decision: unified PCAP, each call incarnation's PC
 
 `lc show status` exposes enabled processor publication under `media_rules`: readiness, generation/revision/sequence, rule/endpoint/byte/subscriber counts, `expired`, `stale_updates`, `resyncs`, `active_calls` and `application_failed`. `lc show hunter --id edge-a` exposes applied state under `stats.media_rules`; a pending report has `enabled: true` and false/omitted `ready`. Zero/false fields may be omitted. Summaries contain no call IDs, selectors or raw application error text.
 
+Generic state appears under `learned_rules` in `lc show status` and `stats.learned_rules` in `lc show hunter`. It includes readiness, generation/revision/sequence, binding/selector/byte/subscriber counts, lifecycle counters, `candidate_overflows`, `capacity_rejections` and `capabilities`. Capabilities identify `adapter_id`, `context_version`, `endpoint_selector_versions`, `supported_protocols`, qualifier `id`/`version` pairs and `evidence_versions`. Source status separates `desired_revision` from acknowledged `effective_revision`; `application_reported` distinguishes an actual installation report from pending state, and `application_failed` reports installation errors without raw text. Publisher status alone does not acknowledge source installation. Zero/false fields may be omitted. These summaries expose no subject IDs, intent IDs or packet addresses; existing `media_rules` remains the VoIP-only view.
+
 Optional `packet_duplicates` status exposes `attempts`, `committed`, `duplicates`, `in_flight`, `repeats_retained`, `unsupported_retained`, `ambiguous_retained`, `capacity_retained`, `outside_window_retained`, `aborted`, `entries`, `contributors` and `bytes`. Attempts count independent consumer decisions rather than raw packets; retention counters describe reduced suppression coverage, while entry/contributor/byte gauges describe bounded cache occupancy. Investigate capture/output queue drops separately: readiness and suppression do not prove lossless delivery.
 
 For missing media, verify certificate/node identity, concrete interfaces, domain mappings, candidate SIP forwarding, complete snapshot readiness, clock uncertainty, expiry and capture restrictions. Original capture node/interface/time and explicit observation-domain provenance survive forwarding/storage and are checked against configured mappings. Reliable-ingress current-capture proof is volatile; reconnect backlog and restart recovery cannot recreate authority to rearm current rules. Historical evidence remains separate from current capture permission.
+
+## Control, evidence and upgrades {#media-control-evidence-upgrades}
+
+New peers prefer `LearnedControlService` and negotiate adapter/context, selector, qualifier and evidence versions. The source must implement the complete advertised path. Complete bounded snapshots install atomically; stream publication revisions never rewrite immutable binding revisions. Application reports belong to the current authenticated subscription and distinguish applied revision, synchronization and installation errors. Kernel readiness alone does not establish effective installation.
+
+`MediaControlService` remains an exact VoIP compatibility view. Generic-to-legacy fallback requires an explicit `Unimplemented` result and exactly representable VoIP semantics. Authentication, signature, scope, malformed-message and installation failures never trigger fallback. Ordinary legacy v2 clients can retry v1 only after an explicit unsupported-version result; protected grant-bearing media cannot downgrade to ordinary v1.
+
+Packet evidence support is negotiated separately from control. Raw packet field 16, `capture_selection_proof`, keeps its signed `MediaRule` format. Typed field 17, `learned_capture_evidence`, carries a versioned candidate list with a binding reference or exact original signed-media bytes per candidate. Different adapters can retain independent associations in one packet. Unknown versions and simultaneous legacy/new representations are rejected. Missing authoritative state for reference-only evidence leaves attribution unresolved.
+
+Upgrade terminal receivers and all relays before enabling typed producers. Raw stream readiness must acknowledge evidence version 1 across the complete route, including reliable delivery; control-service support is insufficient. Unsupported paths reject typed packets before forwarding or custody, without silently dropping associations or converting evidence. Existing field-16 packets and retained proofs remain readable.
 
 ## LI compatibility {#media-li-compatibility}
 

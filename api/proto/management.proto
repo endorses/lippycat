@@ -328,6 +328,7 @@ message HunterStats {
     ProcessorSelectionStatus processor_selection = 40;
     RawPacketStatus raw_packets = 41;
     MediaRuleStatus media_rules = 42;
+    LearnedRuleStatus learned_rules = 43;
 }
 
 // ProcessorHeartbeat response from processor
@@ -731,6 +732,7 @@ message ProcessorStats {
     RawPacketStatus raw_packets = 21;
     MediaRuleStatus media_rules = 22;
     PacketDuplicateStatus packet_duplicates = 23;
+    LearnedRuleStatus learned_rules = 24;
 }
 
 // Fixed-cardinality current capture-control state. No selectors or call IDs.
@@ -749,6 +751,45 @@ message MediaRuleStatus {
     uint64 resyncs = 12;
     uint64 active_calls = 13;
     bool application_failed = 14;
+}
+
+// Generic capture-control state. Subject IDs, intents, addresses and arbitrary
+// error strings are intentionally absent. Capability names come from the bounded
+// immutable startup registry, never packet- or subject-derived labels.
+message LearnedRuleStatus {
+    bool enabled = 1;
+    bool ready = 2;
+    uint64 generation = 3;
+    uint64 revision = 4;
+    uint64 sequence = 5;
+    uint64 bindings = 6;
+    uint64 selectors = 7;
+    uint64 bytes = 8;
+    uint64 subscribers = 9;
+    uint64 expired = 10;
+    uint64 stale_updates = 11;
+    uint64 resyncs = 12;
+    bool application_failed = 13;
+    // Publisher sequence desired on a source; immutable binding revisions remain separate.
+    uint64 desired_revision = 14;
+    // Latest acknowledged source installation; zero until application_reported.
+    uint64 effective_revision = 15;
+    bool application_reported = 16;
+    uint64 candidate_overflows = 17;
+    repeated LearnedRuleCapabilityStatus capabilities = 18;
+    uint64 capacity_rejections = 19;
+}
+message LearnedRuleCapabilityStatus {
+    string adapter_id = 1;
+    uint32 context_version = 2;
+    repeated uint32 endpoint_selector_versions = 3;
+    repeated LearnedRuleQualifierStatus qualifiers = 4;
+    repeated uint32 evidence_versions = 5;
+    repeated uint32 supported_protocols = 6;
+}
+message LearnedRuleQualifierStatus {
+    string id = 1;
+    uint32 version = 2;
 }
 
 // Volatile overlap evidence is separate from durable transport retry receipts.

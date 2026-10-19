@@ -148,6 +148,8 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		return
 	}
 
+	p.validateLearnedBatch(batch)
+
 	sourceID := batch.SourceID
 	packetCount := uint64(len(batch.Envelopes))
 	if p.hunterManager != nil && sourceID != "" && sourceID != "local" {
@@ -377,7 +379,12 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				if p.config.LIHandover.Enabled && p.config.LITaskFilterDistributionScope == "local_only" && batch.MediaSourceTrusted && batch.Envelopes[index].Source.Kind == pipeline.SourceLiveCapture && display.VoIPData != nil && !display.VoIPData.IsRTP {
 					p.processLocalLIPacketWithAdmissionAndDedup(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index], p.packetDuplicateObservation(batch, index, "li"))
 				} else {
-					p.processLIPacketWithAdmissionAndDedup(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index], p.packetDuplicateObservation(batch, index, "li"), batch.SignedCapturePolicy, pkt.CaptureSelectionProof)
+					proof, err := capturedMediaProof(pkt)
+					if err == nil {
+						p.processLIPacketWithAdmissionAndDedup(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index], p.packetDuplicateObservation(batch, index, "li"), batch.SignedCapturePolicy, proof)
+					} else {
+						logger.Warn("LI capture evidence rejected", "error", err)
+					}
 				}
 			}
 			if p.afterLIPacket != nil {

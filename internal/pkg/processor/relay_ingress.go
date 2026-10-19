@@ -9,6 +9,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -62,7 +63,8 @@ func (p *Processor) StreamRelayPackets(stream data.RelayDataService_StreamRelayP
 	if contract.Mode != management.ForwardingMode_FORWARDING_MODE_PACKETS {
 		return status.Error(codes.FailedPrecondition, "relay registration is not packet mode")
 	}
-	if err := stream.Send(&data.StreamControl{FlowControl: p.flowController.Determine()}); err != nil {
+	learnedEvidenceVersions := p.acceptLearnedEvidenceVersions(open.LearnedEvidenceVersions)
+	if err := stream.Send(&data.StreamControl{LearnedEvidenceVersions: learnedEvidenceVersions, FlowControl: p.flowController.Determine()}); err != nil {
 		return err
 	}
 	for {
@@ -93,6 +95,9 @@ func (p *Processor) StreamRelayPackets(stream data.RelayDataService_StreamRelayP
 		}
 		if p.filterProcessingBlocked() {
 			return status.Error(codes.Unavailable, "filter policy is faulted")
+		}
+		if err := learnedwire.ValidateBatchEvidence(batch, p.acceptLearnedEvidenceVersions(learnedEvidenceVersions)); err != nil {
+			return status.Errorf(codes.FailedPrecondition, "relayed evidence contract: %v", err)
 		}
 		internal, err := source.FromProtoBatchE(batch)
 		if err != nil {

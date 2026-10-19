@@ -5,21 +5,23 @@ package tap
 import (
 	"context"
 	"errors"
-	"net/netip"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
 	"github.com/endorses/lippycat/internal/pkg/mediarules/admissionadapter"
 	"github.com/endorses/lippycat/internal/pkg/mediarules/wire"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	voiprules "github.com/endorses/lippycat/internal/pkg/voip/learnedrules"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -27,21 +29,24 @@ import (
 // loopback connection and never turns a remote registry lifetime into a local
 // admission-controller capability.
 type tapMediaRules struct {
-	store             *mediarules.Store
-	subscription      *mediarules.Subscription
-	projection        *admissionadapter.Projection
-	control           mediarules.Control
-	domains           map[string]mediaadmission.DomainID
-	hunterID          string
-	interval          time.Duration
-	validateMediaRule func(*management.MediaRule, string, uint32, gopacket.Packet, time.Time) bool
+	store               *mediarules.Store
+	runtime             *core.Runtime
+	maxCandidates       int
+	subscription        *mediarules.Subscription
+	genericSubscription *core.Subscription
+	projection          *admissionadapter.Projection
+	control             mediarules.Control
+	domains             map[string]mediaadmission.DomainID
+	hunterID            string
+	interval            time.Duration
+	validateMediaRule   func(*management.MediaRule, string, uint32, gopacket.Packet, time.Time) bool
 }
 
 func newTapMediaRules(p *processor.Processor, cfg processor.MediaRulesConfig, domains map[string]mediaadmission.DomainID, controller *mediaadmission.Controller) (_ *tapMediaRules, err error) {
 	if p == nil || !cfg.Enabled || len(domains) == 0 {
 		return nil, errors.New("tap processor media requires publication and explicit interface domains")
 	}
-	r := &tapMediaRules{validateMediaRule: p.ValidateLocalMediaRule, domains: make(map[string]mediaadmission.DomainID, len(domains)), hunterID: cfg.ProcessorID + "-local", interval: cfg.RuleTTL / 3}
+	r := &tapMediaRules{validateMediaRule: p.ValidateLocalMediaRule, domains: make(map[string]mediaadmission.DomainID, len(domains)), hunterID: cfg.ProcessorID + "-local", interval: cfg.RuleTTL / 3, maxCandidates: min(cfg.MaxRules, learnedwire.DefaultEvidenceLimits.MaxCandidates)}
 	set := make(map[mediaadmission.DomainID]bool)
 	for iface, domain := range domains {
 		if iface == "" {
@@ -56,13 +61,26 @@ func newTapMediaRules(p *processor.Processor, cfg processor.MediaRulesConfig, do
 	}
 	var observer mediarules.Observer
 	if controller != nil {
-		r.projection, err = admissionadapter.New(context.Background(), controller, ids, func(err error) { logger.Error("Tap remote media projection failed", "error", err) })
+		r.projection, err = admissionadapter.NewForSource(context.Background(), controller, r.hunterID, ids, func(err error) { logger.Error("Tap remote media projection failed", "error", err) })
 		if err != nil {
 			return nil, err
 		}
 		observer = r.projection
 	}
-	r.store, err = mediarules.New(cfg.StoreConfig(cfg.ProcessorID, r.hunterID, ids, observer))
+	legacyConfig := cfg.StoreConfig(cfg.ProcessorID, r.hunterID, ids, observer)
+	engineConfig, err := mediarules.EngineConfig(legacyConfig, p.LearnedRuleAdapters()...)
+	engineConfig.SupportedProtocols = []core.Protocol{core.UDP}
+	if err != nil {
+		return nil, err
+	}
+	interfaces := make(map[string]core.DomainID, len(r.domains))
+	for iface, domain := range r.domains {
+		interfaces[iface] = core.DomainID(domain)
+	}
+	r.runtime, err = core.NewRuntime(engineConfig, interfaces, min(cfg.MaxRules, learnedwire.DefaultEvidenceLimits.MaxCandidates), nil)
+	if err == nil {
+		r.store = mediarules.Wrap(r.runtime.Store, legacyConfig)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -71,19 +89,19 @@ func newTapMediaRules(p *processor.Processor, cfg processor.MediaRulesConfig, do
 			err = errors.Join(err, r.Close())
 		}
 	}()
-	r.subscription, err = p.SubscribeLocalMediaRules()
+	r.genericSubscription, err = p.SubscribeLocalLearnedRules()
 	if err != nil {
 		return nil, err
 	}
-	initial := r.subscription.Initial
+	initial := r.genericSubscription.Initial
 	if !initial.Ready {
-		return nil, errors.New("local media publisher is not ready")
+		return nil, errors.New("local learned publisher is not ready")
 	}
 	r.control, err = r.store.StartSession(cfg.ProcessorID, initial.Session)
 	if err != nil {
 		return nil, err
 	}
-	if err = r.apply(initial.Snapshot); err != nil {
+	if err = r.applyLearned(initial.Snapshot); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -127,6 +145,30 @@ func (r *tapMediaRules) apply(snapshot mediarules.Snapshot) error {
 	return r.store.ApplySnapshot(r.control, mediarules.Revision(snapshot.Sequence), rules)
 }
 
+// applyLearned retains the publisher's immutable revisions and complete proof.
+// Only placement membership is selected here; matching enforces local scope.
+func (r *tapMediaRules) applyLearned(snapshot core.Snapshot) error {
+	if !snapshot.Ready {
+		return errors.New("local learned publisher requires synchronization")
+	}
+	if snapshot.Session != r.store.Status().Session {
+		return mediarules.ErrAuthority
+	}
+	var bindings []core.Binding
+	for _, binding := range snapshot.Rules {
+		for _, scope := range binding.Scope {
+			if scope.HunterID == r.hunterID {
+				if !learnedwire.EvidenceRepresentable(binding) {
+					return core.ErrUnsupported
+				}
+				bindings = append(bindings, binding)
+				break
+			}
+		}
+	}
+	return r.store.Core().ApplySnapshot(r.control, core.Revision(snapshot.Sequence), bindings)
+}
+
 func (r *tapMediaRules) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -135,11 +177,26 @@ func (r *tapMediaRules) Run(ctx context.Context) error {
 			logger.Error("Close tap media rules", "error", err)
 		}
 	}()
+	var genericEvents <-chan core.Change
+	var legacyEvents <-chan mediarules.Change
+	if r.genericSubscription != nil {
+		genericEvents = r.genericSubscription.Events
+	}
+	if r.subscription != nil {
+		legacyEvents = r.subscription.Events
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case change, ok := <-r.subscription.Events:
+		case change, ok := <-genericEvents:
+			if !ok || change.ResyncRequired {
+				return errors.New("local media subscription requires resynchronization")
+			}
+			if err := r.applyLearned(change.Snapshot); err != nil {
+				return err
+			}
+		case change, ok := <-legacyEvents:
 			if !ok || change.ResyncRequired {
 				return errors.New("local media subscription requires resynchronization")
 			}
@@ -162,6 +219,9 @@ func (r *tapMediaRules) Run(ctx context.Context) error {
 func (r *tapMediaRules) Close() error {
 	if r == nil {
 		return nil
+	}
+	if r.genericSubscription != nil {
+		r.genericSubscription.Close()
 	}
 	if r.subscription != nil {
 		r.subscription.Close()
@@ -187,58 +247,15 @@ func (r *tapMediaRules) ResolveMedia(packet gopacket.Packet, iface string) (voip
 	if !mapped || !r.ready(sequence) || packet == nil || packet.NetworkLayer() == nil {
 		return voip.RemoteCallAssociation{}, false
 	}
-	udp, ok := packet.TransportLayer().(*layers.UDP)
-	if !ok || len(udp.Payload) < 8 || udp.Payload[0]>>6 != 2 {
+	facts, ok := core.PacketFacts(packet, core.DomainID(domain))
+	if !ok {
 		return voip.RemoteCallAssociation{}, false
 	}
-	rtcp := udp.Payload[1] >= 192 && udp.Payload[1] <= 223
-	if !rtcp && len(udp.Payload) < 12 {
-		return voip.RemoteCallAssociation{}, false
-	}
-	src, err := netip.ParseAddr(packet.NetworkLayer().NetworkFlow().Src().String())
-	if err != nil {
-		return voip.RemoteCallAssociation{}, false
-	}
-	dst, err := netip.ParseAddr(packet.NetworkLayer().NetworkFlow().Dst().String())
-	if err != nil {
-		return voip.RemoteCallAssociation{}, false
-	}
-	left, err := mediaadmission.NewEndpoint(domain, src, uint16(udp.SrcPort))
-	if err != nil {
-		return voip.RemoteCallAssociation{}, false
-	}
-	right, err := mediaadmission.NewEndpoint(domain, dst, uint16(udp.DstPort))
-	if err != nil {
-		return voip.RemoteCallAssociation{}, false
-	}
-	resolved := r.store.Resolve(left, right)
-	if !resolved.Resolved {
-		return voip.RemoteCallAssociation{}, false
-	}
-
-	if resolved.Rule == nil {
+	resolved := voiprules.ResolvePacket(r.store.Core(), facts, max(1, r.maxCandidates))
+	if !resolved.Resolved || resolved.Rule == nil {
 		return voip.RemoteCallAssociation{}, false
 	}
 	rule := resolved.Rule
-	if len(rule.Call.SelectionGrants) == 0 {
-		for _, candidate := range r.store.ActiveRules() {
-			if candidate.Call.CallID != resolved.Call.CallID || candidate.Call.Lifetime != resolved.Call.Lifetime {
-				continue
-			}
-			matched := false
-			for _, endpoint := range candidate.Endpoints {
-				if (endpoint.Key == left || endpoint.Key == right) && (endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP)) {
-					matched = true
-					break
-				}
-			}
-			if matched {
-				owned := candidate
-				rule = &owned
-				break
-			}
-		}
-	}
 	association := tapRemoteAssociation(rule.Call, rule.Session)
 	if len(rule.Call.SelectionGrants) > 0 {
 		encoded := wire.EncodeRule(*rule)
@@ -254,18 +271,10 @@ func (r *tapMediaRules) ResolveMedia(packet gopacket.Packet, iface string) (voip
 			association.InheritedFilterIDs = append(association.InheritedFilterIDs, ref.ID)
 		}
 	}
-	for _, endpoint := range rule.Endpoints {
-		if endpoint.Key != left && endpoint.Key != right {
-			continue
-		}
-		if endpoint.Kind == mediarules.RTPAndRTCP || (rtcp && endpoint.Kind == mediarules.RTCP) || (!rtcp && endpoint.Kind == mediarules.RTP) {
-			if r.ready(sequence) {
-				return association, true
-			}
-		}
+	if !r.ready(sequence) {
+		return voip.RemoteCallAssociation{}, false
 	}
-
-	return voip.RemoteCallAssociation{}, false
+	return association, true
 }
 
 func (r *tapMediaRules) ResolveSignalling(event sip.Event, packet gopacket.Packet, iface string) (voip.RemoteCallAssociation, bool) {
@@ -274,28 +283,9 @@ func (r *tapMediaRules) ResolveSignalling(event sip.Event, packet gopacket.Packe
 	if !mapped || !r.ready(sequence) || event.CallID == "" || event.FromTag == "" || event.ToTag == "" || event.CSeqMethod == "" || packet == nil || packet.NetworkLayer() == nil || (event.Method != "RESPONSE" && event.Method != event.CSeqMethod) {
 		return voip.RemoteCallAssociation{}, false
 	}
-	var found *mediarules.CallAssociation
-	for _, rule := range r.store.ActiveRules() {
-		if len(rule.Call.SelectionGrants) > 0 {
-			continue
-		}
-		call := rule.Call
-		if call.CallID != event.CallID || !((call.FromTag == event.FromTag && call.ToTag == event.ToTag) || (call.FromTag == event.ToTag && call.ToTag == event.FromTag)) {
-			continue
-		}
-		for _, scope := range rule.Scope {
-			if scope.HunterID != r.hunterID || scope.Domain != domain {
-				continue
-			}
-			if found != nil && (found.Lifetime != call.Lifetime || found.CallID != call.CallID) {
-				return voip.RemoteCallAssociation{}, false
-			}
-			copy := call
-			found = &copy
-		}
-	}
-	if found != nil && r.ready(sequence) {
-		return tapRemoteAssociation(*found, r.store.Status().Session), true
+	resolved := r.store.ResolveDialogInDomain(domain, event.CallID, event.FromTag, event.ToTag)
+	if resolved.Resolved && r.ready(sequence) {
+		return tapRemoteAssociation(resolved.Call, r.store.Status().Session), true
 	}
 	return voip.RemoteCallAssociation{}, false
 }
@@ -308,4 +298,26 @@ func (r *tapMediaRules) ValidateMediaProof(packet gopacket.Packet, iface string,
 	}
 	rule := &management.MediaRule{}
 	return proto.Unmarshal(proof, rule) == nil && r.validateMediaRule(rule, r.hunterID, uint32(domain), packet, at)
+}
+
+// ValidateLearnedProof checks each protected candidate's original artifact at
+// its immutable capture time. Generic reference checks remain with the runtime.
+func (r *tapMediaRules) ValidateLearnedProof(envelope *pipeline.PacketEnvelope) bool {
+	if envelope == nil || envelope.LearnedCaptureEvidence == nil || envelope.Source.NodeID != r.hunterID || !envelope.Source.ObservationDomainKnown || pipeline.ValidateCaptureEvidence(envelope) != nil {
+		return false
+	}
+	domain, ok := r.domains[envelope.Source.InterfaceName]
+	if !ok || uint32(domain) != envelope.Source.ObservationDomain {
+		return false
+	}
+	for _, candidate := range envelope.LearnedCaptureEvidence.Candidates {
+		if len(candidate.GetLegacyMediaRule()) == 0 {
+			continue
+		}
+		_, rule, err := voiprules.BindingFromLegacyCandidate(candidate)
+		if err != nil || r.validateMediaRule == nil || !r.validateMediaRule(rule, r.hunterID, uint32(domain), envelope.Packet(), envelope.CaptureTime) {
+			return false
+		}
+	}
+	return true
 }

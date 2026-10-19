@@ -13,6 +13,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/packetreceipt"
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
@@ -250,11 +251,12 @@ func (p *Processor) StreamReliablePackets(stream data.ReliablePacketService_Stre
 	if p.upstreamManager != nil && p.upstreamManager.Configured() {
 		return status.Error(codes.FailedPrecondition, "receiver custody with an external upstream requires retained upstream delivery; use central scope")
 	}
+	learnedEvidenceVersions := p.acceptLearnedEvidenceVersions(open.LearnedEvidenceVersions)
 	ready := &data.RawPacketReceipt{Identity: proto.Clone(id).(*data.RawPacketIdentity)}
 	if err := p.packetCustody.signer.Sign(ready); err != nil {
 		return status.Error(codes.Internal, "raw receipt signing unavailable")
 	}
-	if err := stream.Send(&data.ReliablePacketControl{ProtocolVersion: 1, Identity: id, Receipt: ready, Control: &data.StreamControl{FlowControl: p.flowController.Determine()}}); err != nil {
+	if err := stream.Send(&data.ReliablePacketControl{ProtocolVersion: 1, Identity: id, Receipt: ready, LearnedEvidenceVersions: learnedEvidenceVersions, Control: &data.StreamControl{FlowControl: p.flowController.Determine()}}); err != nil {
 		return err
 	}
 	for {
@@ -278,6 +280,9 @@ func (p *Processor) StreamReliablePackets(stream data.ReliablePacketService_Stre
 			return status.Error(codes.Unavailable, "raw policy not ready")
 		}
 		if message.Batch != nil {
+			if err := learnedwire.ValidateBatchEvidence(message.Batch, p.acceptLearnedEvidenceVersions(learnedEvidenceVersions)); err != nil {
+				return status.Errorf(codes.FailedPrecondition, "reliable evidence contract: %v", err)
+			}
 			if err := p.validateLICapturePolicy(message.Batch); err != nil {
 				return status.Error(codes.PermissionDenied, err.Error())
 			}
@@ -348,6 +353,11 @@ func (p *Processor) proxyReliablePackets(stream data.ReliablePacketService_Strea
 	if err != nil {
 		return err
 	}
+	learnedEvidenceVersions := learnedwire.AcceptEvidenceVersions(ready.LearnedEvidenceVersions)
+	if len(learnedwire.AcceptEvidenceVersions(open.LearnedEvidenceVersions)) == 0 {
+		learnedEvidenceVersions = nil
+	}
+	ready.LearnedEvidenceVersions = learnedEvidenceVersions
 	if err := stream.Send(ready); err != nil {
 		return err
 	}
@@ -367,6 +377,11 @@ func (p *Processor) proxyReliablePackets(stream data.ReliablePacketService_Strea
 		}
 		if open.RelayId != "" && !p.reliableRelayAuthorized(stream.Context(), open.RelayId, open.Identity.SourceId) {
 			return status.Error(codes.PermissionDenied, "raw relay delegation revoked")
+		}
+		if message.Batch != nil {
+			if err := learnedwire.ValidateBatchEvidence(message.Batch, learnedEvidenceVersions); err != nil {
+				return status.Errorf(codes.FailedPrecondition, "central relay evidence contract: %v", err)
+			}
 		}
 		message = proto.Clone(message).(*data.ReliablePacketMessage)
 		message.RelayId = p.config.ProcessorID

@@ -10,6 +10,40 @@ The same components run inside a tap: its local capture source subscribes to its
 own processor's publisher in process. No loopback gRPC connection is needed.
 Ordinary capture, packet outputs and optional LI consumers use these features.
 
+## Shared learned-rule engine
+
+Distributed media selection uses the subject-neutral `learnedrules` engine. A
+binding identifies an issuing authority and epoch, a subject and its incarnation,
+current intent references, explicit source/domain scope, typed selectors,
+versioned adapter context and finite validity. The engine owns bounded lifecycle,
+snapshots, revisions, expiry and withdrawal. The VoIP adapter interprets SIP/SDP,
+qualifies RTP/RTCP and resolves call ownership. Legacy media APIs are views over
+that same committed state, not a second registry.
+
+VoIP is the only production adapter. The internal selector contract supports
+exact IPv4/IPv6 UDP or TCP endpoints with source, destination or either direction
+and registered per-selector qualifiers. The VoIP adapter publishes UDP media
+endpoints with RTP, RTCP or multiplexed-media qualification. There is no generic
+rule CLI, RADIUS subscriber-rule learning, address/prefix selector or full-flow
+selector exposed by this release. Future adapters must supply their own evidence,
+intent and subject-lifetime validation; enabling media rules does not enable them.
+
+The advertised `supported_protocols` list describes the complete source path.
+The internal generic runtime supports UDP and TCP. Existing VoIP hunter/tap
+capture paths advertise UDP only for learned bindings; SIP over TCP remains
+independent. A TCP binding on such a path is refused before readiness, even if
+generic matching understands TCP, because the preceding capture filter might
+exclude it.
+
+A match yields candidate binding references, not an assertion of ownership or
+output authorization. Several adapters may associate one packet with different
+subjects without combining their intents. VoIP still rejects ambiguous call
+ownership. Candidate overflow is explicit and cannot make a retained subset look
+unique; independently matched ordinary filters remain separate. Kernel endpoint
+entries are candidate admission only: userspace enforces protocol, direction,
+domain, qualifier and current binding semantics. Shared physical entries survive
+withdrawal of one binding while another still needs them.
+
 ## Defaults and independent choices
 
 | Choice | Default | Alternatives |
@@ -299,6 +333,20 @@ revision, readiness and rule/endpoint counts. A pending report has `enabled: tru
 and false/omitted `ready`; `application_failed` indicates a failed application,
 without exposing raw error text or selectors. Zero/false fields may be omitted.
 
+Generic state appears under `learned_rules` in `lc show status` and
+`stats.learned_rules` in `lc show hunter`. It includes readiness,
+generation/revision/sequence, binding/selector/byte/subscriber counts,
+lifecycle counters, `candidate_overflows`, `capacity_rejections` and
+`capabilities`. Capabilities identify `adapter_id`, `context_version`,
+`endpoint_selector_versions`, `supported_protocols`, qualifier `id`/`version`
+pairs and `evidence_versions`. Source status separates `desired_revision` from
+acknowledged `effective_revision`; `application_reported` distinguishes an
+actual installation report from pending state, and `application_failed` reports
+installation errors without raw text. Publisher status alone does not
+acknowledge source installation. Zero/false fields may be omitted. These
+summaries expose no subject IDs, intent IDs or packet addresses; existing
+`media_rules` remains the VoIP-only view.
+
 Optional `packet_duplicates` status exposes `attempts`, `committed`, `duplicates`,
 `in_flight`, `repeats_retained`, `unsupported_retained`, `ambiguous_retained`,
 `capacity_retained`, `outside_window_retained`, `aborted`, `entries`, `contributors`
@@ -315,6 +363,51 @@ Hunter-filtered lists should omit local-only selectors; administrative list/show
 queries should retain them. Check existing capture/output queue-drop counters
 separately: successful rule application and duplicate suppression do not prove
 lossless capture or delivery.
+
+## Control compatibility and packet evidence
+
+New peers prefer the versioned `LearnedControlService`. A source advertises the
+adapter/context, exact-endpoint selector, qualifier and packet-evidence versions
+its complete path can implement. The authenticated processor validates source
+registration and scope. A bounded complete snapshot becomes visible atomically;
+its publication revision is independent of every immutable binding revision.
+Effective application reports identify the current source subscription and
+separate applied revision, synchronization and installation errors. A candidate
+backend becoming ready does not establish exact userspace readiness.
+
+The existing `MediaControlService` remains an exact VoIP compatibility view.
+Fallback from generic control requires an explicit `Unimplemented` result and a
+binding that legacy VoIP semantics can represent exactly. Authentication,
+signature, scope, malformed-message and installation failures do not permit
+fallback. An ordinary media client can retry legacy v1 only after an explicit
+unsupported-version result; grant-bearing capture still requires legacy v2 when
+using that service and cannot downgrade to ordinary v1.
+
+Packet evidence is negotiated independently of the control service. Existing raw
+packet field 16, `capture_selection_proof`, retains its serialized signed
+`MediaRule` meaning. Typed field 17, `learned_capture_evidence`, carries a versioned
+candidate list; each candidate has either a binding reference or the exact
+original signed-media bytes. It can represent diagnostic and VoIP candidates
+together without merging their subjects. Unknown versions and contradictory
+simultaneous field-16/field-17 representations are rejected. A reference without
+retained authoritative binding state is unresolved, not a new subject lifetime.
+
+Upgrade terminal packet receivers and all relays before enabling typed producers.
+Raw stream readiness must acknowledge evidence version 1 across the complete
+route, including reliable forwarding. Control-service support alone is
+insufficient: old protobuf receivers may discard unknown fields. Unsupported
+routes reject typed packets before forwarding or custody, without silently
+converting them into legacy packets or discarding associations. Existing field-16
+senders and stored evidence remain supported.
+
+Protected VoIP retains its existing signed media artifact and media-only grant
+purpose. The adapter checks that the binding and proof describe the same subject
+incarnation, authority, revisions, intents, scope, validity and qualified
+endpoints. Historical proof validation reconstructs that captured context; it
+does not require the learned binding or its issuing epoch to remain active.
+Current LI delivery eligibility is checked separately. Historical packets cannot
+renew capture, recreate a subject or broaden a media grant into generic TCP or
+subscriber capture permission.
 
 ## LI central task selection
 

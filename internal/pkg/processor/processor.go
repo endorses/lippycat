@@ -47,6 +47,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/failover"
 	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/logstream"
@@ -72,6 +73,9 @@ import (
 
 // Config contains processor configuration
 type Config struct {
+	// LearnedAdapters are immutable typed extensions registered before capture starts.
+	LearnedAdapters                    []core.Adapter
+	LearnedRules                       *LearnedRulesConfig
 	MediaRules                         MediaRulesConfig
 	PacketDedup                        packetdedup.Settings
 	PrepareUpstream                    func(context.Context, failover.Endpoint) error
@@ -224,6 +228,7 @@ type StructuredLogConfig struct {
 // Processor represents a processor node
 type Processor struct {
 	mediaControl     *processorMediaControl
+	learnedControl   *processorLearnedControl
 	packetDuplicates *packetdedup.Detector
 	liHandoverCancel context.CancelFunc
 	liHandoverWG     sync.WaitGroup
@@ -438,6 +443,9 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	}
 	if err := p.initMediaControl(); err != nil {
 		return nil, fmt.Errorf("initialize media control: %w", err)
+	}
+	if err := p.initLearnedControl(); err != nil {
+		return nil, fmt.Errorf("initialize learned control: %w", err)
 	}
 	p.initLIManager()
 	if err := p.prepareLIStorage(); err != nil {
@@ -891,6 +899,7 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	})
 	p.statsCollector.SetRawPacketProvider(p.rawPacketStatus)
 	p.statsCollector.SetMediaRuleProvider(p.mediaRulesStatusProto)
+	p.statsCollector.SetLearnedRuleProvider(p.learnedRulesStatusProto)
 	p.statsCollector.SetPacketDuplicateProvider(p.packetDuplicateStatusProto)
 	return p, nil
 }

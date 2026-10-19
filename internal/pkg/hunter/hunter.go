@@ -17,6 +17,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/admissionintegration"
+	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
 	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
@@ -32,6 +33,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/packetforwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
@@ -66,6 +68,10 @@ func stableFilterIDUnion(direct, inherited []string) []string {
 
 // Config contains hunter configuration
 type Config struct {
+	// LearnedAdapters are immutable typed extensions registered before capture starts.
+	LearnedAdapters      []core.Adapter
+	LearnedRuntime       *core.Runtime
+	CaptureInterfaces    func() []pcaptypes.PcapInterface
 	Packets              packetforwarding.Config
 	FilterPolicy         filterpolicy.Config
 	EventAnalysis        *eventconfig.Config
@@ -240,6 +246,7 @@ func New(config Config) (*Hunter, error) {
 	}
 	captureManager := huntercapture.New(huntercapture.Config{
 		ReassembleIPFragments: config.VoIPMode,
+		CaptureInterfaces:     config.CaptureInterfaces,
 		FilterInstaller:       admissionInstaller,
 		RADIUSPorts:           config.RADIUSPorts,
 		Interfaces:            config.Interfaces,
@@ -272,10 +279,16 @@ func New(config Config) (*Hunter, error) {
 		return nil, fmt.Errorf("configure hunter media rules: %w", err)
 	}
 
+	if err := h.configureLearnedCapture(); err != nil {
+		return nil, fmt.Errorf("configure learned capture: %w", err)
+	}
+
 	// Create filter manager with capture restarter interface
 	h.filterManager = filtering.New(config.HunterID, captureManager, h)
-	if h.mediaRules != nil {
+	if h.mediaRules != nil && h.config.VoIPMode {
 		h.filterManager.SetFilterValidator(validateProcessorMediaFilters)
+	} else if h.config.LearnedRuntime != nil {
+		h.filterManager.SetFilterValidator(validateGenericCaptureFilters)
 	}
 	if err := h.filterManager.InitializeSharedPolicy(config.FilterPolicy, config.SupportedFilterTypes); err != nil {
 		return nil, fmt.Errorf("initialize hunter shared policy: %w", err)
@@ -1058,9 +1071,10 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *pipeline.PacketEnvel
 		OriginalLength: originalLen,
 		LinkType:       pktInfo.LinkType,
 		Source: pipeline.SourceProvenance{
-			Kind:          pipeline.SourceLiveCapture,
-			NodeID:        h.config.HunterID,
-			InterfaceName: pktInfo.Interface,
+			Kind:                    pipeline.SourceLiveCapture,
+			NodeID:                  h.config.HunterID,
+			InterfaceName:           pktInfo.Interface,
+			CapturePolicyGeneration: capture.CapturePolicyGeneration(pkt),
 		},
 		// TODO: Add metadata extraction (SIP, RTP, etc.)
 	}

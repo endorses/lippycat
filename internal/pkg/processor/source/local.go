@@ -30,6 +30,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
@@ -290,8 +291,14 @@ func credibleSIPMethod(method []byte) bool {
 // LocalSource captures packets from local network interfaces.
 // It implements the PacketSource interface for standalone capture mode.
 type LocalSource struct {
-	observationDomains atomic.Pointer[map[string]mediaadmission.DomainID]
-	radiusProcessor    *radius.CaptureProcessor
+	learnedPolicySnapshot           func() ([]byte, error)
+	policyBatchMu                   sync.Mutex
+	currentBatchSignedCapturePolicy []byte
+	learnedRuntime                  *core.Runtime
+	learnedBaseUnrestricted         bool
+	validateLearnedProof            func(*pipeline.PacketEnvelope) bool
+	observationDomains              atomic.Pointer[map[string]mediaadmission.DomainID]
+	radiusProcessor                 *radius.CaptureProcessor
 	// Configuration
 	config LocalSourceConfig
 
@@ -466,14 +473,15 @@ func NewLocalSource(cfg LocalSourceConfig) *LocalSource {
 		logger.Error("Failed to initialize RADIUS capture", "error", err)
 	}
 	return &LocalSource{
-		radiusProcessor: radiusProcessor,
-		config:          cfg,
-		currentBatch:    make([]*pipeline.PacketEnvelope, 0, cfg.BatchSize),
-		batches:         make(chan *PacketBatch, cfg.BatchBuffer),
-		stats:           NewAtomicStats(),
-		callFilterCache: newCallFilterCache(cfg.CallFilterCacheSize),
-		selectionPolicy: callregistry.StickySelectionPolicy{},
-		captureError:    make(chan error, 1),
+		radiusProcessor:         radiusProcessor,
+		learnedBaseUnrestricted: cfg.BPFFilter == "",
+		config:                  cfg,
+		currentBatch:            make([]*pipeline.PacketEnvelope, 0, cfg.BatchSize),
+		batches:                 make(chan *PacketBatch, cfg.BatchBuffer),
+		stats:                   NewAtomicStats(),
+		callFilterCache:         newCallFilterCache(cfg.CallFilterCacheSize),
+		selectionPolicy:         callregistry.StickySelectionPolicy{},
+		captureError:            make(chan error, 1),
 	}
 }
 
@@ -1038,18 +1046,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				continue
 			}
 			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
-			s.batchMu.Lock()
-			s.currentBatch = append(s.currentBatch, envelope)
-			if injectedPkt.AfterProcess != nil {
-				s.currentBatchAfterProcess = append(s.currentBatchAfterProcess, injectedPkt.AfterProcess)
-			}
-			batchLen := len(s.currentBatch)
-			s.batchMu.Unlock()
-
-			// Send if batch is full
-			if batchLen >= s.config.BatchSize {
-				s.sendBatch()
-			}
+			s.appendEnvelope(envelope, nil, injectedPkt.AfterProcess, nil)
 
 		case pktInfo, ok := <-input:
 			if !ok {
@@ -1061,6 +1058,15 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			// Count ALL packets received from buffer (before filtering)
 			s.stats.AddCaptured()
 			if !s.hasPacketDemand() {
+				continue
+			}
+
+			if learned, err := s.learnedPacket(pktInfo); err != nil {
+				s.stats.AddDropped(1)
+				logger.Debug("Local learned packet selection rejected", "error", err)
+				continue
+			} else if learned != nil {
+				s.appendPolicyPacket(learned, nil)
 				continue
 			}
 
@@ -1264,15 +1270,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			}
 			// A packet is forwarded only after it can be admitted to a batch.
 			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
-			s.batchMu.Lock()
-			s.currentBatch = append(s.currentBatch, envelope)
-			batchLen := len(s.currentBatch)
-			s.batchMu.Unlock()
-
-			// Send if batch is full
-			if batchLen >= s.config.BatchSize {
-				s.sendBatch()
-			}
+			s.appendEnvelope(envelope, nil, nil, nil)
 
 		case <-ticker.C:
 			// Send batch on timeout
@@ -1301,6 +1299,7 @@ func (s *LocalSource) sendBatch() {
 	sipDrops := uint64(captureSnapshot.SIPDropped)         // #nosec G115 -- counters cannot be negative
 	batchDrops := s.stats.packetsDropped.Load()
 	batch := &PacketBatch{
+		SignedCapturePolicy: append([]byte(nil), s.currentBatchSignedCapturePolicy...),
 		RADIUSSourceTrusted: true,
 		MediaSourceTrusted:  true,
 		SourceID:            s.SourceID(),
@@ -1329,6 +1328,7 @@ func (s *LocalSource) sendBatch() {
 	s.currentBatchPolicyChecks = nil
 	// Reset batch
 	s.currentBatch = make([]*pipeline.PacketEnvelope, 0, s.config.BatchSize)
+	s.currentBatchSignedCapturePolicy = nil
 	s.currentBatchAfterProcess = nil
 	s.batchMu.Unlock()
 	s.stats.AddBatch()
@@ -1481,6 +1481,12 @@ func (s *LocalSource) setBPFFilter(filter string, policyBoundary bool) error {
 	defer s.mu.Unlock()
 	if s.stopped {
 		return errors.New("local capture source is closed")
+	}
+	if policyBoundary {
+		if s.learnedRuntime != nil && filter != "" {
+			return errors.New("learned capture cannot install a restrictive policy BPF filter")
+		}
+		s.learnedBaseUnrestricted = filter == ""
 	}
 
 	// Re-applying an identical filter needlessly tears down and recreates every

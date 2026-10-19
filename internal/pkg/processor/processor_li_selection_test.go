@@ -9,12 +9,15 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/api/gen/learnedevidence"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
 	policyfixture "github.com/endorses/lippycat/internal/pkg/filterpolicy/testutil"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	voiprules "github.com/endorses/lippycat/internal/pkg/voip/learnedrules"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/require"
@@ -59,6 +62,30 @@ func TestLICentralSelectionRequiresSignedExactMediaProof(t *testing.T) {
 	packet := &data.CapturedPacket{Data: raw.Bytes(), LinkType: uint32(layers.LinkTypeRaw), TimestampNs: time.Now().UnixNano(), ObservationDomainKnown: true, InheritedMatchedFilterIds: []string{grant.Id}, CaptureSelectionProof: proof}
 	batch := &data.PacketBatch{HunterId: "edge-a", SignedCapturePolicy: encoded, Packets: []*data.CapturedPacket{packet}}
 	require.NoError(t, p.validateLICapturePolicy(batch))
+	decodedRule, err := voiprules.DecodeLegacyRule(rule)
+	require.NoError(t, err)
+	typedBatch := proto.Clone(batch).(*data.PacketBatch)
+	typedPacket := typedBatch.Packets[0]
+	typedPacket.CaptureSelectionProof = nil
+	typedPacket.LearnedCaptureEvidence = &learnedevidence.LearnedCaptureEvidence{Version: learnedwire.EvidenceVersion, Candidates: []*learnedevidence.LearnedCandidate{learnedwire.Candidate(voiprules.ToBinding(decodedRule))}}
+	require.Nil(t, p.mediaControl, "historical proof validation must not need an active learned registry")
+	require.NoError(t, p.validateLICapturePolicy(typedBatch))
+	selectedProof, err := capturedMediaProof(typedPacket)
+	require.NoError(t, err)
+	require.Equal(t, proof, selectedProof, "typed evidence preserves original artifact bytes")
+	for _, mutate := range []func(*data.CapturedPacket){
+		func(p *data.CapturedPacket) {
+			p.LearnedCaptureEvidence.Candidates[0].SubjectIncarnation = "another-lifetime"
+		},
+		func(p *data.CapturedPacket) { p.LearnedCaptureEvidence.Candidates[0].AuthorityGeneration++ },
+		func(p *data.CapturedPacket) { p.CaptureSelectionProof = proof },
+		func(p *data.CapturedPacket) { p.LearnedCaptureEvidence.Overflow = true },
+		func(p *data.CapturedPacket) { p.LearnedCaptureEvidence.Candidates[0].GetLegacyMediaRule()[0] ^= 1 },
+	} {
+		bad := proto.Clone(typedBatch).(*data.PacketBatch)
+		mutate(bad.Packets[0])
+		require.ErrorIs(t, p.validateLICapturePolicy(bad), li.ErrCaptureAuthority)
+	}
 	for _, tc := range []struct {
 		name   string
 		change func(*data.PacketBatch)
@@ -113,4 +140,5 @@ func TestLICentralSelectionRequiresSignedExactMediaProof(t *testing.T) {
 	targets := []li.TargetIdentity{{Type: li.TargetTypeSIPURI, Value: "sip:replacement@example.test"}}
 	require.NoError(t, p.liManager.ModifyTask(f.xid, &li.TaskModification{Targets: &targets}))
 	require.ErrorIs(t, p.validateLICapturePolicy(batch), li.ErrCaptureAuthority, "signed original rule cannot rebind to modified task")
+	require.ErrorIs(t, p.validateLICapturePolicy(typedBatch), li.ErrCaptureAuthority, "typed historical proof cannot bypass current task changes")
 }

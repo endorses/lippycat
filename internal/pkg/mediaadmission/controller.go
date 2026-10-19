@@ -125,13 +125,13 @@ func (c *Controller) scope(domain DomainID) (*scopeState, error) {
 }
 
 // BeginOwner is called exactly once per selected authoritative lifetime. The
-// returned token must be retained by its adapter; CallID is diagnostic only.
+// returned token must be retained by its adapter; Label is diagnostic only.
 // Capacity failure may still return a nonzero token: the caller owns that bounded
 // pending reservation and must retry it with UpdateOwner or retire it with EndOwner.
 // Pending reservations retain no endpoints and never count as active owners.
 // Once the global PendingDialogCapacity is exhausted, zero-token failure marks
 // desired state unknown; ordinary retries cannot clear that lost observation.
-func (c *Controller) BeginOwner(domain DomainID, callID string) (OwnerID, error) {
+func (c *Controller) BeginOwner(domain DomainID, label string) (OwnerID, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	defer c.publishStatusLocked()
@@ -139,8 +139,8 @@ func (c *Controller) BeginOwner(domain DomainID, callID string) (OwnerID, error)
 	if err != nil {
 		return OwnerID{}, err
 	}
-	if callID == "" || len(callID) > 4096 {
-		return OwnerID{}, errors.New("invalid admission Call-ID")
+	if label == "" || len(label) > 4096 {
+		return OwnerID{}, errors.New("invalid admission owner label")
 	}
 	pending := len(c.owners)-c.pendingOwners >= c.config.OwnerCapacity
 	if pending && c.pendingOwners >= c.config.PendingDialogCapacity {
@@ -151,7 +151,7 @@ func (c *Controller) BeginOwner(domain DomainID, callID string) (OwnerID, error)
 	if c.nextOwner == 0 {
 		return OwnerID{}, errors.New("admission owner generation exhausted")
 	}
-	id := OwnerID{Session: c.session, Generation: c.nextOwner, CallID: callID}
+	id := OwnerID{Session: c.session, Generation: c.nextOwner, Label: label}
 	c.owners[id] = &ownerState{domain: domain, endpoints: make(map[EndpointKey]struct{}), pending: pending}
 	if pending {
 		c.pendingOwners++

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/packetreceipt"
 	"github.com/endorses/lippycat/internal/pkg/packetspool"
 	"google.golang.org/grpc"
@@ -21,18 +22,19 @@ import (
 type Stream struct {
 	backlogThrough uint64
 	data.ReliablePacketService_StreamReliablePacketsClient
-	spool        *packetspool.Spool
-	identity     *data.RawPacketIdentity
-	verifier     *packetreceipt.Verifier
-	mu           sync.Mutex
-	expected     *data.PacketBatch
-	losses       *data.ReliablePacketMessage
-	lossSnapshot packetspool.LossCoverage
-	acked        uint64
-	lossAcked    uint64
-	changed      chan struct{}
-	ready        bool
-	cancel       context.CancelFunc
+	spool            *packetspool.Spool
+	identity         *data.RawPacketIdentity
+	verifier         *packetreceipt.Verifier
+	mu               sync.Mutex
+	expected         *data.PacketBatch
+	losses           *data.ReliablePacketMessage
+	lossSnapshot     packetspool.LossCoverage
+	acked            uint64
+	lossAcked        uint64
+	changed          chan struct{}
+	ready            bool
+	evidenceVersions []uint32
+	cancel           context.CancelFunc
 }
 
 func Open(ctx context.Context, conn grpc.ClientConnInterface, spool *packetspool.Spool, verifier *packetreceipt.Verifier) (*Stream, error) {
@@ -62,12 +64,16 @@ func (s *Stream) boundedSend(timeout time.Duration, send func() error) error {
 
 func (s *Stream) Send(batch *data.PacketBatch) error {
 	if batch.Sequence == 0 && len(batch.Packets) == 0 {
-		return s.ReliablePacketService_StreamReliablePacketsClient.Send(&data.ReliablePacketMessage{ProtocolVersion: 1, Identity: s.identity})
+		return s.ReliablePacketService_StreamReliablePacketsClient.Send(&data.ReliablePacketMessage{ProtocolVersion: 1, Identity: s.identity, LearnedEvidenceVersions: []uint32{learnedwire.EvidenceVersion}})
 	}
 	if batch.HunterId != s.identity.SourceId || batch.ProducerSessionId != s.identity.ProducerSessionId || batch.CaptureEpoch != s.identity.CaptureEpoch {
 		return errors.New("durable raw batch producer identity mismatch")
 	}
 	s.mu.Lock()
+	if err := learnedwire.ValidateBatchEvidence(batch, s.evidenceVersions); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	s.expected = proto.Clone(batch).(*data.PacketBatch)
 	s.mu.Unlock()
 	return s.ReliablePacketService_StreamReliablePacketsClient.Send(&data.ReliablePacketMessage{ProtocolVersion: 1, Identity: s.identity, Batch: batch, CurrentCapture: batch.Sequence > s.backlogThrough})
@@ -92,6 +98,8 @@ func (s *Stream) Recv() (*data.StreamControl, error) {
 			return nil, errors.New("invalid durable raw stream readiness")
 		}
 		s.ready = true
+		s.evidenceVersions = learnedwire.AcceptEvidenceVersions(control.LearnedEvidenceVersions)
+		control.Control.LearnedEvidenceVersions = append([]uint32(nil), s.evidenceVersions...)
 		return control.Control, nil
 	}
 	if receipt == nil {
@@ -215,4 +223,12 @@ func (s *Stream) SendNext(ctx context.Context, wait func(context.Context) error,
 		case <-ticker.C:
 		}
 	}
+}
+
+// LearnedEvidenceVersions is the destination's readiness acknowledgement, not
+// merely the formats understood by the immediate sender.
+func (s *Stream) LearnedEvidenceVersions() []uint32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]uint32(nil), s.evidenceVersions...)
 }

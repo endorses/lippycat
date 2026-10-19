@@ -17,8 +17,11 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	evidencepb "github.com/endorses/lippycat/api/gen/learnedevidence"
+	learnedpb "github.com/endorses/lippycat/api/gen/learnedrules"
 	"github.com/endorses/lippycat/api/gen/management"
 	policyfixture "github.com/endorses/lippycat/internal/pkg/filterpolicy/testutil"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
@@ -28,6 +31,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
+	voiprules "github.com/endorses/lippycat/internal/pkg/voip/learnedrules"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/require"
@@ -41,12 +45,14 @@ import (
 // signed raw ingress, ordinary processor batching and the mutual-TLS MDF reader.
 // No manually signed media rule or packet metadata supplies the selected call.
 func TestCentralTaskCaptureSourceContinuity(t *testing.T) {
-	for _, dedup := range []bool{false, true} {
-		t.Run(fmt.Sprintf("dedup-%t", dedup), func(t *testing.T) { centralTaskCaptureSourceContinuity(t, dedup) })
+	for _, typed := range []bool{false, true} {
+		for _, dedup := range []bool{false, true} {
+			t.Run(fmt.Sprintf("typed-%t/dedup-%t", typed, dedup), func(t *testing.T) { centralTaskCaptureSourceContinuity(t, dedup, typed) })
+		}
 	}
 }
 
-func centralTaskCaptureSourceContinuity(t *testing.T, dedup bool) {
+func centralTaskCaptureSourceContinuity(t *testing.T, dedup, typed bool) {
 	f := newPersistentProcessorFixture(t)
 	f.taskDeliveryType, f.destinationDeliveryType = "X2andX3", "X2andX3"
 	f.config.LITaskFilterDistributionScope = "local_only"
@@ -118,7 +124,7 @@ func centralTaskCaptureSourceContinuity(t *testing.T, dedup bool) {
 		rules = append(rules, encoded)
 	}
 	require.Len(t, rules, 2, "one signed scoped rule for each authorized remote capture source")
-	peers := centralTaskRuleSubscribers(t, p, []string{"hunter-a", "hunter-b"})
+	peers := centralTaskRuleSubscribersWithProtocol(t, p, []string{"hunter-a", "hunter-b"}, typed)
 	rulesInstalled := time.Now()
 	firstAdmitted := time.Time{}
 	ruleFor := func(node string) *management.MediaRule {
@@ -162,12 +168,26 @@ func centralTaskCaptureSourceContinuity(t *testing.T, dedup bool) {
 		}
 		proof, err := proto.Marshal(ruleFor(node))
 		require.NoError(t, err)
-		envelope.CaptureSelectionProof = proof
+		if typed {
+			installed := peers[node].store.Core().ActiveRules()
+			require.Len(t, installed, 1)
+			candidate := learnedwire.Candidate(installed[0])
+			require.Equal(t, proof, candidate.GetLegacyMediaRule(), "generic control preserves exact signed artifact")
+			envelope.LearnedCaptureEvidence = &evidencepb.LearnedCaptureEvidence{Version: 1, Candidates: []*evidencepb.LearnedCandidate{candidate}}
+		} else {
+			envelope.CaptureSelectionProof = proof
+		}
 		// Only public opaque selection evidence arrives from the capture source.
 		envelope.InheritedMatchedFilterIDs = []string{signed.Snapshot.SelectionGrants[0].Id}
 		envelope.MatchedFilterIDs = append([]string(nil), envelope.InheritedMatchedFilterIDs...)
 		raw, err := grpcadapter.ToCapturedPacket(envelope)
 		require.NoError(t, err)
+		if typed {
+			require.Empty(t, raw.CaptureSelectionProof)
+			require.NotNil(t, raw.LearnedCaptureEvidence)
+		} else {
+			require.Nil(t, raw.LearnedCaptureEvidence)
+		}
 		batch := &data.PacketBatch{HunterId: node, SignedCapturePolicy: policyBytes, Packets: []*data.CapturedPacket{raw}}
 		require.NoError(t, p.validateLICapturePolicy(batch))
 		normalized, err := source.FromProtoBatchE(batch)
@@ -289,12 +309,18 @@ func centralTaskCaptureSourceContinuity(t *testing.T, dedup bool) {
 // centralRulePeer exercises the actual versioned stream codec and atomic receiver
 // used by hunters. Its transport verifies the configured CA and DNS-bound source.
 type centralRulePeer struct {
-	store    *mediarules.Store
-	receiver *wire.Receiver
-	stream   management.MediaControlService_SubscribeMediaRulesClient
+	store           *mediarules.Store
+	receiver        *wire.Receiver
+	stream          management.MediaControlService_SubscribeMediaRulesClient
+	genericReceiver *learnedwire.Receiver
+	genericStream   learnedpb.LearnedControlService_SubscribeLearnedRulesClient
 }
 
 func centralTaskRuleSubscribers(t *testing.T, p *Processor, nodes []string) map[string]*centralRulePeer {
+	t.Helper()
+	return centralTaskRuleSubscribersWithProtocol(t, p, nodes, false)
+}
+func centralTaskRuleSubscribersWithProtocol(t *testing.T, p *Processor, nodes []string, typed bool) map[string]*centralRulePeer {
 	t.Helper()
 	certificate, err := tls.LoadX509KeyPair(p.config.TLSCertFile, p.config.TLSKeyFile)
 	require.NoError(t, err)
@@ -308,6 +334,7 @@ func centralTaskRuleSubscribers(t *testing.T, p *Processor, nodes []string) map[
 	require.NoError(t, err)
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}, ClientCAs: roots, ClientAuth: tls.RequireAndVerifyClientCert})))
 	management.RegisterMediaControlServiceServer(server, p.mediaControl.service)
+	learnedpb.RegisterLearnedControlServiceServer(server, p.mediaControl.genericService)
 	management.RegisterManagementServiceServer(server, p)
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
@@ -329,8 +356,6 @@ func centralTaskRuleSubscribers(t *testing.T, p *Processor, nodes []string) map[
 		registration, err := management.NewManagementServiceClient(client).RegisterHunter(ctx, &management.HunterRegistration{HunterId: node})
 		require.NoError(t, err)
 		require.True(t, registration.Accepted)
-		stream, err := management.NewMediaControlServiceClient(client).SubscribeMediaRules(ctx, &management.MediaRuleRequest{ProtocolVersion: wire.GrantVersion, HunterId: node, ProcessorId: p.config.ProcessorID})
-		require.NoError(t, err)
 		var domains []mediaadmission.DomainID
 		for _, mapping := range cfg.Sources {
 			if mapping.HunterID == node {
@@ -340,9 +365,24 @@ func centralTaskRuleSubscribers(t *testing.T, p *Processor, nodes []string) map[
 		store, err := mediarules.New(cfg.StoreConfig(p.config.ProcessorID, node, domains, nil))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, store.Close()) })
-		receiver, err := wire.NewReceiver(store, p.config.ProcessorID, limits)
-		require.NoError(t, err)
-		peer := &centralRulePeer{store: store, receiver: receiver, stream: stream}
+		peer := &centralRulePeer{store: store}
+		if typed {
+			adapter := voiprules.Adapter()
+			capability := &learnedpb.LearnedCapability{AdapterId: adapter.ID, ContextVersion: adapter.Version, EndpointSelectorVersions: []uint32{1}, EvidenceVersions: []uint32{1}, SupportedProtocols: []uint32{17}}
+			for _, q := range adapter.Qualifiers {
+				capability.Qualifiers = append(capability.Qualifiers, &learnedpb.LearnedQualifier{Id: q.ID, Version: q.Version})
+			}
+			caps := []*learnedpb.LearnedCapability{capability}
+			peer.genericStream, err = learnedpb.NewLearnedControlServiceClient(client).SubscribeLearnedRules(ctx, &learnedpb.LearnedRuleRequest{ProtocolVersion: 1, HunterId: node, ProcessorId: p.config.ProcessorID, Capabilities: caps})
+			require.NoError(t, err)
+			peer.genericReceiver, err = learnedwire.NewReceiver(store.Core(), p.config.ProcessorID, learnedwire.Limits{MaxMessageBytes: limits.MaxMessageBytes, MaxSnapshotBytes: limits.MaxSnapshotBytes, MaxRules: limits.MaxRules}, caps)
+			require.NoError(t, err)
+		} else {
+			peer.stream, err = management.NewMediaControlServiceClient(client).SubscribeMediaRules(ctx, &management.MediaRuleRequest{ProtocolVersion: wire.GrantVersion, HunterId: node, ProcessorId: p.config.ProcessorID})
+			require.NoError(t, err)
+			peer.receiver, err = wire.NewReceiver(store, p.config.ProcessorID, limits)
+			require.NoError(t, err)
+		}
 		centralReceiveRuleSnapshot(t, peer)
 		peers[node] = peer
 	}
@@ -352,6 +392,16 @@ func centralTaskRuleSubscribers(t *testing.T, p *Processor, nodes []string) map[
 func centralReceiveRuleSnapshot(t *testing.T, peer *centralRulePeer) {
 	t.Helper()
 	for {
+		if peer.genericStream != nil {
+			update, err := peer.genericStream.Recv()
+			require.NoError(t, err)
+			require.EqualValues(t, learnedwire.Version, update.ProtocolVersion)
+			require.NoError(t, peer.genericReceiver.Apply(update))
+			if update.SnapshotEnd {
+				return
+			}
+			continue
+		}
 		update, err := peer.stream.Recv()
 		require.NoError(t, err)
 		require.EqualValues(t, wire.GrantVersion, update.ProtocolVersion)

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package lippycat.data;
 
+import "learned_evidence.proto";
+
 option go_package = "github.com/endorses/lippycat/api/gen/data";
 
 // DataService handles high-volume packet streaming from hunters to processors
@@ -61,6 +63,7 @@ message ReliablePacketMessage {
     // connection opened is evidence only and cannot rearm temporary capture.
     // Kept outside PacketBatch so custody digest/receipts remain unchanged.
     bool current_capture = 8;
+    repeated uint32 learned_evidence_versions = 9;
 }
 
 message RawPacketReceipt {
@@ -83,12 +86,14 @@ message ReliablePacketControl {
     uint32 protocol_version = 2;
     RawPacketIdentity identity = 3;
     RawPacketReceipt receipt = 4;
+    repeated uint32 learned_evidence_versions = 5;
 }
 
 message RelayPacketMessage {
     string relay_id = 1;
     uint32 protocol_version = 2;
     PacketBatch batch = 3;
+    repeated uint32 learned_evidence_versions = 4;
 }
 
 // PacketBatch contains multiple packets captured by a hunter
@@ -120,6 +125,8 @@ message PacketBatch {
     // Deterministic SignedPolicySnapshot for the effective capture policy.
     // Its original authority signature and IDs survive every relay and replay.
     bytes signed_capture_policy = 9;
+    // Offer on stream open; control replies acknowledge end-to-end preservation.
+    repeated uint32 learned_evidence_versions = 10;
 }
 
 // CapturedPacket represents a single captured network packet
@@ -175,6 +182,8 @@ message CapturedPacket {
     bool observation_domain_known = 15;
     // Complete signed public MediaRule for centrally selected media.
     bytes capture_selection_proof = 16;
+    // Explicit format negotiation is required before using this field.
+    lippycat.learnedevidence.LearnedCaptureEvidence learned_capture_evidence = 17;
 }
 
 // PacketMetadata contains hunter-side analysis results
@@ -481,6 +490,7 @@ message StreamControl {
 
     // Error message (if any)
     string error = 3;
+    repeated uint32 learned_evidence_versions = 4;
 }
 
 // FlowControl signals

@@ -37,6 +37,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
+	learnedpb "github.com/endorses/lippycat/api/gen/learnedrules"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/constants"
@@ -298,6 +299,7 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 	logger.Info("Processor started", "listen_addr", p.config.ListenAddr)
 	p.startPacketCustody(p.ctx)
 	p.startMediaControl(p.ctx)
+	p.startLearnedControl(p.ctx)
 
 	// Start local capture loop if using LocalSource. Its startup and runtime
 	// capture failures must fault the processor, not leave a serving empty node.
@@ -342,6 +344,10 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 func (p *Processor) registerGRPCServices(registrar grpc.ServiceRegistrar) {
 	if p.mediaControl != nil {
 		management.RegisterMediaControlServiceServer(registrar, p.mediaControl.service)
+		learnedpb.RegisterLearnedControlServiceServer(registrar, p.mediaControl.genericService)
+	}
+	if p.mediaControl == nil && p.learnedControl != nil {
+		learnedpb.RegisterLearnedControlServiceServer(registrar, p.learnedControl.service)
 	}
 	p.registerPacketCustody(registrar)
 	p.registerSharedPolicy(registrar)
@@ -388,6 +394,9 @@ func (p *Processor) Shutdown() error {
 		p.wg.Wait()
 		p.shutdownErr = errors.Join(p.shutdownErr, p.closePacketCustody())
 		p.shutdownErr = errors.Join(p.shutdownErr, p.closeMediaControl())
+		if p.learnedControl != nil {
+			p.shutdownErr = errors.Join(p.shutdownErr, p.learnedControl.store.Close())
+		}
 		p.closeLIHandoverPolicy()
 		p.shutdownErr = errors.Join(p.shutdownErr, p.closeSharedPolicy())
 		p.sdpDiagnostics.close()

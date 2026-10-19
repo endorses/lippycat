@@ -6,12 +6,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
 	"github.com/endorses/lippycat/internal/pkg/mediarules/wire"
@@ -182,4 +185,48 @@ func TestHunterGrantResolverRequiresTypedPermissionAndPreservesExactProof(t *tes
 	permitted = false
 	_, ok = r.ResolveMedia(packet, "first")
 	require.False(t, ok, "revoked permission wins over installed endpoints")
+}
+
+func TestVoIPSourceRejectsGenericTCPBeforeInstallation(t *testing.T) {
+	adapter := core.Adapter{ID: "diagnostic", Version: 1, Validate: func(b core.Binding) error {
+		if string(b.Context) != "diagnostic-v1" {
+			return core.ErrInvalid
+		}
+		return nil
+	}, Authorize: func(core.Binding) error { return nil }}
+	h := &Hunter{config: Config{HunterID: "edge", VoIPMode: true, VoIPMediaPolicy: "processor", MediaRules: mediarules.Settings{ProcessorID: "receiver"}, TLSEnabled: true, TLSCertFile: "certificate", TLSKeyFile: "key", LearnedAdapters: []core.Adapter{adapter}}}
+	require.NoError(t, h.configureMediaRules())
+	t.Cleanup(func() { require.NoError(t, h.mediaRules.store.Close()) })
+	session := core.Session{ProcessorID: "receiver", Generation: 1}
+	control, err := h.mediaRules.store.StartSession("receiver", session)
+	require.NoError(t, err)
+	now := time.Now()
+	binding := core.Binding{ID: "probe", Session: session, Revision: 1, AdapterID: "diagnostic", ContextVersion: 1, Subject: core.Subject{ID: "device", Incarnation: "one"}, AttributionContext: "diagnostic", Context: []byte("diagnostic-v1"), Scope: []core.Scope{{HunterID: "edge", Domain: 0}}, Selectors: []core.Selector{{Address: netip.MustParseAddr("192.0.2.1"), Port: 443, Protocol: core.TCP}}, NotBefore: now, ExpiresAt: now.Add(time.Minute)}
+	require.ErrorIs(t, h.mediaRules.store.Core().ApplySnapshot(control, 1, []core.Binding{binding}), core.ErrUnsupported)
+	require.False(t, h.mediaRules.store.Status().Ready)
+	require.Empty(t, h.mediaRules.store.Core().ActiveRules())
+}
+
+func TestVoIPRuntimeFactoryBoundsTypedEvidenceCandidates(t *testing.T) {
+	adapter := core.Adapter{ID: "diagnostic", Version: 1, Validate: func(core.Binding) error { return nil }, Authorize: func(core.Binding) error { return nil }}
+	h := &Hunter{config: Config{HunterID: "edge", Interfaces: []string{"capture0"}, VoIPMode: true, VoIPMediaPolicy: "processor", MediaRules: mediarules.Settings{ProcessorID: "receiver"}, TLSEnabled: true, TLSCertFile: "certificate", TLSKeyFile: "key", LearnedAdapters: []core.Adapter{adapter}}}
+	require.NoError(t, h.configureMediaRules())
+	t.Cleanup(func() { require.NoError(t, h.mediaRules.store.Close()) })
+	session := core.Session{ProcessorID: "receiver", Generation: 1}
+	control, err := h.mediaRules.store.StartSession("receiver", session)
+	require.NoError(t, err)
+	now := time.Now()
+	var bindings []core.Binding
+	for i := 0; i <= learnedwire.DefaultEvidenceLimits.MaxCandidates; i++ {
+		bindings = append(bindings, core.Binding{ID: fmt.Sprintf("diagnostic-%d", i), Session: session, Revision: 1, AdapterID: "diagnostic", ContextVersion: 1, Subject: core.Subject{ID: fmt.Sprintf("subject-%d", i), Incarnation: "one"}, AttributionContext: "diagnostic", Scope: []core.Scope{{HunterID: "edge", Domain: 0}}, Selectors: []core.Selector{{Address: netip.MustParseAddr("192.0.2.2"), Port: 45000, Protocol: core.UDP}}, NotBefore: now, ExpiresAt: now.Add(time.Minute)})
+	}
+	require.NoError(t, h.mediaRules.store.Core().ApplySnapshot(control, 1, bindings[:learnedwire.DefaultEvidenceLimits.MaxCandidates]))
+	complete := h.mediaRules.runtime.Match(mediaRuleTestPacket(t), "capture0")
+	require.False(t, complete.Overflow)
+	require.Len(t, complete.Bindings, learnedwire.DefaultEvidenceLimits.MaxCandidates)
+	require.NoError(t, h.mediaRules.store.Core().ApplySnapshot(control, 2, bindings))
+	result := h.mediaRules.runtime.Match(mediaRuleTestPacket(t), "capture0")
+	require.True(t, result.Overflow)
+	require.Empty(t, result.Bindings, "a truncated candidate set cannot be forwarded as complete evidence")
+	require.EqualValues(t, 1, h.mediaRules.store.Core().Status().CandidateOverflows)
 }

@@ -129,7 +129,7 @@ func TestShadowSamplingMismatchInvalidatesPendingEvidence(t *testing.T) {
 
 func shadowFixture() (*ShadowCorrelator, OwnerID, ShadowSample, []byte) {
 	c := NewShadowCorrelator(4, 2, 100)
-	owner := OwnerID{Session: 1, Generation: 1, CallID: "synthetic"}
+	owner := OwnerID{Session: 1, Generation: 1, Label: "synthetic"}
 	c.Selection(owner, 0, 20)
 	c.Expectation(owner, 0, true, true, 1, 30, 3)
 	frame := []byte{1, 2, 3, 4, 5}
@@ -285,7 +285,7 @@ func TestShadowCorrelatorCapacityAndDomainIsolation(t *testing.T) {
 
 func TestShadowCorrelatorPreselectionUsesVerifiedLifetimeStart(t *testing.T) {
 	c := NewShadowCorrelator(4, 2, 100)
-	owner := OwnerID{Session: 1, Generation: 1, CallID: "synthetic"}
+	owner := OwnerID{Session: 1, Generation: 1, Label: "synthetic"}
 	frame := []byte{1, 2, 3}
 	sample := ShadowSample{SampleEvery: 1, Domain: 0, Generation: 0, EventMonotonicNS: 10, Length: 3, IdentityLength: 3, Identity: [256]byte{1, 2, 3}}
 	c.Sample(sample, 15)

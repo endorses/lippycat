@@ -1024,6 +1024,12 @@ settings do not preserve pre-match RTP. See
 [selective VoIP media capture](../part5-advanced/voip.md#selective-media-capture-with-ebpf)
 for behavior and implementation status.
 
+## Learned-rule configuration compatibility {#learned-rule-configuration-compatibility}
+
+The shared learned-rule engine retains existing `hunter.voip.media_rules`, `processor.voip.media_rules` and `tap.voip.media_rules` settings, signalling/media policies and interface-domain maps. VoIP remains the only production adapter; internal UDP/TCP endpoint types do not add a public rule language or enable RADIUS subscriber capture. Existing `pending_dialog_capacity` spelling and configured resource limits remain valid.
+
+Control and packet-evidence capability negotiation is automatic, separate from those configuration keys. Upgrade receivers and relays before typed producers; unsupported evidence paths refuse packets instead of discarding associations. See [Distributed Media Selection](../part3-distributed/media-selection.md#media-control-evidence-upgrades) for supported contracts, legacy fallback, effective installation and historical evidence behavior.
+
 ## Failover Policy and Packet Custody {#failover-policy-and-packet-custody}
 
 The [failover and reliable delivery chapter](../part3-distributed/processor-failover.md#failover-and-reliable-delivery) describes the selector precedence, signed policies, receipt boundaries and offline initialization. Processor and tap `relay_origins` map authenticated relay IDs to explicit original hunter IDs; topology membership grants no delegation.

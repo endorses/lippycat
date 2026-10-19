@@ -4,7 +4,7 @@
 PROTOC = protoc
 
 # Protobuf files
-PROTO_FILES = data.proto management.proto media.proto events/v1/events.proto
+PROTO_FILES = data.proto management.proto media.proto learned_rules.proto learned_evidence.proto events/v1/events.proto
 
 # Output directory for generated Go files
 OUT_DIR = ../gen
@@ -16,7 +16,7 @@ EVENTS_V1_PKG = github.com/endorses/lippycat/api/gen/events/v1
 
 .PHONY: all clean check-deps
 
-all: check-deps $(OUT_DIR)/data $(OUT_DIR)/management $(OUT_DIR)/events/v1
+all: check-deps $(OUT_DIR)/data $(OUT_DIR)/management $(OUT_DIR)/events/v1 $(OUT_DIR)/learnedrules $(OUT_DIR)/learnedevidence
 	@echo "Generating Go code from protobuf definitions..."
 	$(PROTOC) --go_out=$(OUT_DIR)/data --go_opt=paths=source_relative \
 		--go-grpc_out=$(OUT_DIR)/data --go-grpc_opt=paths=source_relative \
@@ -30,6 +30,9 @@ all: check-deps $(OUT_DIR)/data $(OUT_DIR)/management $(OUT_DIR)/events/v1
 	$(PROTOC) --go_out=$(OUT_DIR) --go_opt=paths=source_relative \
 		--go-grpc_out=$(OUT_DIR) --go-grpc_opt=paths=source_relative \
 		events/v1/events.proto
+	$(PROTOC) --go_out=$(OUT_DIR)/learnedevidence --go_opt=paths=source_relative learned_evidence.proto
+	$(PROTOC) --go_out=$(OUT_DIR)/learnedrules --go_opt=paths=source_relative \
+		--go-grpc_out=$(OUT_DIR)/learnedrules --go-grpc_opt=paths=source_relative learned_rules.proto
 	@echo "✅ Protobuf generation complete"
 
 $(OUT_DIR)/data:
@@ -41,6 +44,9 @@ $(OUT_DIR)/management:
 $(OUT_DIR)/events/v1:
 	mkdir -p $(OUT_DIR)/events/v1
 
+$(OUT_DIR)/learnedrules $(OUT_DIR)/learnedevidence:
+	mkdir -p $@
+
 check-deps:
 	@which protoc > /dev/null || (echo "❌ protoc not found. Install with: sudo apt install protobuf-compiler" && exit 1)
 	@which protoc-gen-go > /dev/null || (echo "❌ protoc-gen-go not found. Install with: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest" && exit 1)
@@ -51,6 +57,7 @@ clean:
 	rm -rf $(OUT_DIR)/data/*.pb.go
 	rm -rf $(OUT_DIR)/management/*.pb.go
 	rm -rf $(OUT_DIR)/events/v1/*.pb.go
+	rm -rf $(OUT_DIR)/learnedrules/*.pb.go $(OUT_DIR)/learnedevidence/*.pb.go
 	@echo "✅ Cleaned generated files"
 
 install-deps:

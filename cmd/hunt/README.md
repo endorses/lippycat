@@ -835,6 +835,16 @@ failure states and verification status.
 
 ## Independent SIP forwarding and processor-selected media
 
+VoIP selection uses the shared learned-rule engine for bounded bindings, expiry,
+source scope and installation. SIP interpretation and RTP/RTCP qualification stay
+in the VoIP adapter, the only production adapter. Existing configuration stays
+valid; there is no public generic-rule syntax or RADIUS subscriber-rule adapter.
+New peers prefer generic control, with exact legacy VoIP compatibility for
+explicitly unsupported peers. Typed packet evidence is negotiated separately:
+upgrade receivers and every relay before producers, and check effective
+installation rather than treating a kernel endpoint hit as capture authority.
+See [control and evidence compatibility](../../docs/DISTRIBUTED_MEDIA.md#control-compatibility-and-packet-evidence).
+
 `hunt voip` accepts `--signalling-policy matched|all|none` and
 `--media-policy local|processor`. Defaults remain `matched` and `local`.
 Use `all` explicitly when eligible candidate SIP must reach a processor that

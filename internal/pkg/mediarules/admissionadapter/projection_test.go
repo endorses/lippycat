@@ -84,19 +84,13 @@ func TestProjectionUsesLocalOwnersAndPreservesSharedEndpoints(t *testing.T) {
 	require.NoError(t, store.ApplySnapshot(control, 1, []mediarules.Rule{first, second}))
 	require.True(t, p.Ready(store.Status().Sequence))
 	require.Len(t, backend.entries, 1)
-	require.Len(t, p.owners, 2)
-	for key, token := range p.owners {
-		require.NotEqual(t, key.Lifetime.Session, token.Session)
-		require.NotZero(t, token.Session)
-	}
+
 	require.NoError(t, store.ApplyDelta(control, 2, nil, []string{"first"}))
 	require.True(t, p.Ready(store.Status().Sequence))
 	require.Len(t, backend.entries, 1)
-	require.Len(t, p.owners, 1)
 	require.NoError(t, store.ApplyDelta(control, 3, nil, []string{"second"}))
 	require.True(t, p.Ready(store.Status().Sequence))
 	require.Empty(t, backend.entries)
-	require.Empty(t, p.owners)
 	// Delayed observer callbacks cannot resurrect the retired lifetime.
 	p.OnMediaRulesChanged(mediarules.Change{Snapshot: mediarules.Snapshot{Ready: true, Sequence: 2}, Active: []mediarules.Rule{first}})
 	require.Empty(t, backend.entries)
@@ -127,4 +121,24 @@ func TestProjectionSessionInvalidationRetiresMedia(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, p.Ready(store.Status().Sequence))
 	require.Empty(t, backend.entries)
+}
+
+func TestSourceProjectionCompatibilityRetainsFullMediaBinding(t *testing.T) {
+	cfg := mediaadmission.DefaultConfig()
+	cfg.Enabled = true
+	cfg.FailurePolicy = mediaadmission.FailureClosed
+	backend := &mapBackend{entries: make(map[mediaadmission.EndpointKey]struct{})}
+	controller, err := mediaadmission.NewController(t.Context(), cfg, backend)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, controller.Close(context.Background())) })
+	p, err := NewForSource(t.Context(), controller, "hunter", []mediaadmission.DomainID{0}, nil)
+	require.NoError(t, err)
+	rule := projectionRule("selected", 1)
+	rule.Scope = append(rule.Scope, mediarules.Scope{HunterID: "other-hunter", Domain: 20})
+	rule.Endpoints = append(rule.Endpoints, mediarules.Endpoint{Key: mediaadmission.EndpointKey{Domain: 20, Addr: netip.MustParseAddr("192.0.2.2"), Port: 46000}, Kind: mediarules.RTP})
+	p.OnMediaRulesChanged(mediarules.Change{Snapshot: mediarules.Snapshot{Ready: true, Sequence: 1}, Active: []mediarules.Rule{rule}})
+	require.True(t, p.Ready(1))
+	require.Len(t, backend.entries, 1)
+	require.Contains(t, backend.entries, rule.Endpoints[0].Key)
+	require.Len(t, rule.Endpoints, 2)
 }

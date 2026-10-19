@@ -1,0 +1,94 @@
+syntax = "proto3";
+package lippycat.learnedrules;
+option go_package = "github.com/endorses/lippycat/api/gen/learnedrules";
+
+// Capability advertisement is a promise that the complete capture path can
+// implement the advertised semantics. Unsupported contracts fail explicitly.
+service LearnedControlService {
+    rpc SubscribeLearnedRules(LearnedRuleRequest) returns (stream LearnedRuleUpdate);
+    rpc ReportLearnedRuleStatus(LearnedRuleApplication) returns (LearnedRuleReceipt);
+}
+message LearnedQualifier { string id = 1; uint32 version = 2; }
+message LearnedCapability {
+    string adapter_id = 1;
+    uint32 context_version = 2;
+    repeated uint32 endpoint_selector_versions = 3;
+    repeated LearnedQualifier qualifiers = 4;
+    repeated uint32 evidence_versions = 5;
+    // Empty retains the original v1 UDP/TCP contract; production sources advertise explicitly.
+    repeated uint32 supported_protocols = 6;
+}
+message LearnedRuleRequest {
+    uint32 protocol_version = 1;
+    string hunter_id = 2;
+    string processor_id = 3;
+    repeated LearnedCapability capabilities = 4;
+}
+message LearnedRuleSession { string processor_id = 1; uint64 generation = 2; }
+message LearnedRuleScope { string hunter_id = 1; uint32 domain = 2; }
+message LearnedIntent { string id = 1; uint64 revision = 2; }
+message LearnedSelector {
+    uint32 domain = 1;
+    string address = 2;
+    uint32 port = 3;
+    uint32 protocol = 4;
+    uint32 direction = 5;
+    LearnedQualifier qualifier = 6;
+}
+message LearnedBinding {
+    string id = 1;
+    LearnedRuleSession session = 2;
+    uint64 revision = 3;
+    string adapter_id = 4;
+    uint32 context_version = 5;
+    string subject_id = 6;
+    string subject_incarnation = 7;
+    string attribution_context = 8;
+    repeated LearnedIntent intents = 9;
+    repeated string evidence_refs = 10;
+    repeated LearnedRuleScope scopes = 11;
+    repeated LearnedSelector selectors = 12;
+    bytes context = 13;
+    // Exact adapter-defined artifact, never re-signed or rewritten by transport.
+    bytes proof = 14;
+    int64 not_before_ns = 15;
+    int64 expires_at_ns = 16;
+}
+message LearnedRuleUpdate {
+    uint32 protocol_version = 1;
+    LearnedRuleSession session = 2;
+    uint64 revision = 3;
+    bool snapshot_begin = 4;
+    bool snapshot_end = 5;
+    repeated LearnedBinding bindings = 6;
+    repeated string removed_ids = 7;
+    bool resync_required = 8;
+    repeated LearnedCapability capabilities = 9;
+    string subscription_id = 10;
+}
+message LearnedRuleApplication {
+    string hunter_id = 1;
+    LearnedRuleSession session = 2;
+    uint64 applied_revision = 3;
+    bool synchronized = 4;
+    uint32 active_bindings = 5;
+    uint32 active_selectors = 6;
+    string error = 7;
+    string subscription_id = 8;
+    // Bounded local lifecycle/resource outcomes, never subject-derived labels.
+    uint64 candidate_overflows = 9;
+    uint64 retained_bytes = 10;
+    uint64 expired = 11;
+    uint64 stale_updates = 12;
+    uint64 resyncs = 13;
+    uint64 capacity_rejections = 14;
+    repeated LearnedAdapterApplication adapter_applications = 15;
+}
+message LearnedRuleReceipt { bool accepted = 1; }
+
+message LearnedAdapterApplication {
+    string adapter_id = 1;
+    uint32 context_version = 2;
+    uint32 active_bindings = 3;
+    uint32 active_selectors = 4;
+}

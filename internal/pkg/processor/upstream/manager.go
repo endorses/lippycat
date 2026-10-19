@@ -15,6 +15,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/failover"
 	"github.com/endorses/lippycat/internal/pkg/grpcpool"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"google.golang.org/grpc"
@@ -386,7 +387,11 @@ func (m *Manager) connectEndpoint(endpoint failover.Endpoint) error {
 		switch rawRelayVersion {
 		case 0:
 			logger.Warn("Upstream does not advertise authenticated raw relay ingress; using legacy packet forwarding", "address", endpoint.Address, "notice", "legacy admission may reject relayed hunter origins")
-			stream, err = dataClient.StreamPackets(generationCtx)
+			var legacy data.DataService_StreamPacketsClient
+			legacy, err = dataClient.StreamPackets(generationCtx)
+			if err == nil {
+				stream = learnedwire.NewPacketStream(legacy, nil)
+			}
 		case 1:
 			stream, err = openRelayStream(generationCtx, conn, m.config.ProcessorID)
 		default:
@@ -828,4 +833,17 @@ func (m *Manager) eventGeneration() (eventsv1.EventServiceClient, *connection) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.eventClient, m.generation
+}
+
+// LearnedEvidenceVersions reports preservation validated across the active raw route.
+func (m *Manager) LearnedEvidenceVersions() []uint32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.generation == nil || m.generation.stream == nil || !m.generation.accepting.Load() || m.generation.ctx.Err() != nil {
+		return nil
+	}
+	if stream, ok := m.generation.stream.(interface{ LearnedEvidenceVersions() []uint32 }); ok {
+		return stream.LearnedEvidenceVersions()
+	}
+	return nil
 }

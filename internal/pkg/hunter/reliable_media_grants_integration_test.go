@@ -14,11 +14,14 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	learnedpb "github.com/endorses/lippycat/api/gen/learnedrules"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capturegrant"
 	"github.com/endorses/lippycat/internal/pkg/filterpolicy"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
+	learnedwire "github.com/endorses/lippycat/internal/pkg/learnedrules/wire"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/mediarules"
 	"github.com/endorses/lippycat/internal/pkg/mediarules/wire"
@@ -36,11 +39,27 @@ import (
 // provisioning and historical LI delivery remain separate integration tests.
 type reliableGrantFixture struct {
 	*reliableVoIPBoundaryFixture
-	publisher *mediarules.Store
-	control   mediarules.Control
-	service   *wire.Service
-	snapshot  *management.SignedPolicySnapshot
-	rule      mediarules.Rule
+	publisher      *mediarules.Store
+	control        mediarules.Control
+	service        *wire.Service
+	genericService *learnedwire.Service
+	typed          bool
+	snapshot       *management.SignedPolicySnapshot
+	rule           mediarules.Rule
+}
+
+func reliableGrantDiagnosticAdapter() core.Adapter {
+	return core.Adapter{ID: "diagnostic", Version: 1, Validate: func(b core.Binding) error {
+		if string(b.Context) != "diagnostic-v1" {
+			return core.ErrInvalid
+		}
+		return nil
+	}, Authorize: func(b core.Binding) error {
+		if len(b.Intents) != 1 || b.Intents[0].ID != "diagnostic-request" {
+			return core.ErrAuthority
+		}
+		return nil
+	}}
 }
 
 func newReliableGrantFixture(t *testing.T, until time.Time) *reliableGrantFixture {
@@ -49,7 +68,11 @@ func newReliableGrantFixture(t *testing.T, until time.Time) *reliableGrantFixtur
 }
 func newReliableGrantFixtureForOwner(t *testing.T, until time.Time, owner string, batchSize int) *reliableGrantFixture {
 	t.Helper()
-	g := &reliableGrantFixture{}
+	return newReliableGrantFixtureForProtocol(t, until, owner, batchSize, false)
+}
+func newReliableGrantFixtureForProtocol(t *testing.T, until time.Time, owner string, batchSize int, typed bool) *reliableGrantFixture {
+	t.Helper()
+	g := &reliableGrantFixture{typed: typed}
 	g.reliableVoIPBoundaryFixture = newReliableVoIPBoundaryFixture(t, func(f *reliableVoIPBoundaryFixture, server *grpc.Server, cfg *Config) {
 		if owner == "shared" {
 			shared := f.policyConfig
@@ -77,7 +100,12 @@ func newReliableGrantFixtureForOwner(t *testing.T, until time.Time, owner string
 		f.policy.current = g.snapshot
 		settings, err := (mediarules.Settings{}).Normalize()
 		require.NoError(t, err)
-		g.publisher, err = mediarules.New(settings.StoreConfig("receiver", "", nil, nil))
+		if typed {
+			// Register the same independent adapter at publication and capture. Its
+			// ordinary intent must never inherit the LI media grant's authority.
+			cfg.LearnedAdapters = []core.Adapter{reliableGrantDiagnosticAdapter()}
+		}
+		g.publisher, err = mediarules.NewWithAdapters(settings.StoreConfig("receiver", "", nil, nil), cfg.LearnedAdapters...)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, g.publisher.Close()) })
 		g.rule = currentMediaRule()
@@ -100,6 +128,18 @@ func newReliableGrantFixtureForOwner(t *testing.T, until time.Time, owner string
 		})
 		require.NoError(t, err)
 		management.RegisterMediaControlServiceServer(server, g.service)
+		if typed {
+
+			g.genericService, err = learnedwire.NewService(g.publisher.Core(), learnedwire.Limits{MaxMessageBytes: settings.MaxMessageBytes, MaxSnapshotBytes: settings.MaxSnapshotBytes, MaxRules: settings.MaxRules}, 4, func(ctx context.Context, hunterID string) error {
+				remote, ok := peer.FromContext(ctx)
+				if !ok || hunterID != "edge" {
+					return fmt.Errorf("unexpected source")
+				}
+				return verifiedMediaIssuer(remote, "edge")
+			})
+			require.NoError(t, err)
+			learnedpb.RegisterLearnedControlServiceServer(server, g.genericService)
+		}
 		cfg.BatchSize = batchSize
 		if batchSize > 1 {
 			cfg.BatchTimeout = time.Hour
@@ -110,6 +150,10 @@ func newReliableGrantFixtureForOwner(t *testing.T, until time.Time, owner string
 		cfg.VoIPInterfaceDomains = map[string]mediaadmission.DomainID{"protected-interface": 0, "other-domain": 1}
 	})
 	require.Eventually(t, func() bool {
+		if typed {
+			application := g.genericService.Application("edge")
+			return application != nil && application.Synchronized && application.ActiveBindings == 1
+		}
 		application := g.service.Application("edge")
 		return application != nil && application.Synchronized && application.ActiveRules == 1
 	}, 5*time.Second, 5*time.Millisecond)
@@ -150,8 +194,21 @@ func assertGrantBatch(t *testing.T, g *reliableGrantFixture, batch *data.PacketB
 	require.NoError(t, g.verifier.Verify(signed))
 	require.Equal(t, expectedPolicy, signed.Snapshot.Revision)
 	require.Empty(t, signed.Snapshot.Filters)
+	proof := p.CaptureSelectionProof
+	if g.typed {
+		require.Empty(t, proof, "typed capture emits one evidence representation")
+		require.NoError(t, learnedwire.ValidateEvidence(p.LearnedCaptureEvidence, learnedwire.DefaultEvidenceLimits))
+		require.Len(t, p.LearnedCaptureEvidence.Candidates, 1)
+		candidate := p.LearnedCaptureEvidence.Candidates[0]
+		require.Equal(t, "voip", candidate.AdapterId)
+		require.Equal(t, g.rule.Call.CallID, candidate.SubjectId)
+		require.Equal(t, "17:3", candidate.SubjectIncarnation)
+		proof = candidate.GetLegacyMediaRule()
+	} else {
+		require.Nil(t, p.LearnedCaptureEvidence)
+	}
 	rule := &management.MediaRule{}
-	require.NoError(t, proto.Unmarshal(p.CaptureSelectionProof, rule))
+	require.NoError(t, proto.Unmarshal(proof, rule))
 	require.NoError(t, g.verifier.VerifyMediaRule(rule))
 	require.Equal(t, "centrally-selected-call", rule.Call.CallId)
 	require.Equal(t, uint64(3), rule.Call.RegistryGeneration)
@@ -229,11 +286,28 @@ func TestGrantOnlyReliableHunterExactMediaPolicyReplacementAndWithdrawal(t *test
 }
 
 func TestGrantOnlyReliableHunterOfflineExpiryRestartReplaysOriginalProof(t *testing.T) {
-	g := newReliableGrantFixture(t, time.Now().Add(3*time.Second))
+	for _, typed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("typed-%t", typed), func(t *testing.T) { grantOnlyReliableHunterOfflineExpiryRestartReplaysOriginalProof(t, typed) })
+	}
+}
+func grantOnlyReliableHunterOfflineExpiryRestartReplaysOriginalProof(t *testing.T, typed bool) {
+	g := newReliableGrantFixtureForProtocol(t, time.Now().Add(3*time.Second), "li", 1, typed)
+	if typed {
+		require.Nil(t, g.service.Application("edge"), "generic control must be selected when supported")
+		stream := g.h.connectionManager.GetStream()
+		accepted, ok := stream.(interface{ LearnedEvidenceVersions() []uint32 })
+		require.True(t, ok)
+		require.Equal(t, []uint32{1}, accepted.LearnedEvidenceVersions())
+	}
 	g.send(t, grantBoundaryMedia(t, 45000))
 	g.waitAck(t, 1)
 	g.server.Stop()
-	require.Eventually(t, func() bool { return g.service.Application("edge") == nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		if typed {
+			return g.genericService.Application("edge") == nil
+		}
+		return g.service.Application("edge") == nil
+	}, time.Second, time.Millisecond)
 
 	require.Eventually(t, func() bool {
 		state := g.h.connectionManager.Status()
@@ -250,6 +324,12 @@ func TestGrantOnlyReliableHunterOfflineExpiryRestartReplaysOriginalProof(t *test
 	require.NoError(t, err)
 	require.Len(t, retained, 1)
 	assertGrantBatch(t, g, retained[0], 1)
+	require.Equal(t, offline.Packet.Metadata().Timestamp.UnixNano(), retained[0].Packets[0].TimestampNs)
+	if typed {
+		exactProof, err := proto.Marshal(wire.EncodeRule(g.rule))
+		require.NoError(t, err)
+		require.Equal(t, exactProof, retained[0].Packets[0].LearnedCaptureEvidence.Candidates[0].GetLegacyMediaRule())
+	}
 	original := proto.Clone(retained[0]).(*data.PacketBatch)
 	identity := g.h.packetSpool.Identity()
 	require.Eventually(t, func() bool { return !g.h.filterManager.CaptureAllowed(time.Now()) }, 5*time.Second, 5*time.Millisecond)
@@ -267,7 +347,16 @@ func TestGrantOnlyReliableHunterOfflineExpiryRestartReplaysOriginalProof(t *test
 	current, err := g.verifier.SignSnapshot(g.signer, withdrawal)
 	require.NoError(t, err)
 	g.policy.publish(current)
-	require.NoError(t, g.publisher.ApplySnapshot(g.control, 2, nil))
+	// Retire the entire issuing epoch, not merely the binding. Retained
+	// signed capture facts must remain replayable without live learned state.
+	previousSession := g.rule.Session
+	nextSession := previousSession
+	nextSession.Generation++
+	g.control, err = g.publisher.StartSession("receiver", nextSession)
+	require.NoError(t, err)
+	require.NoError(t, g.publisher.ApplySnapshot(g.control, 1, nil))
+	require.NotEqual(t, previousSession, g.publisher.Status().Session)
+	require.Empty(t, g.publisher.ActiveRules())
 	pair, err := tls.LoadX509KeyPair(config.TLSCertFile, config.TLSKeyFile)
 	require.NoError(t, err)
 	encoded, err := os.ReadFile(config.TLSCAFile)
@@ -281,6 +370,9 @@ func TestGrantOnlyReliableHunterOfflineExpiryRestartReplaysOriginalProof(t *test
 	data.RegisterReliablePacketServiceServer(restarted, g.receiver)
 	management.RegisterFilterPolicyServiceServer(restarted, g.policy)
 	management.RegisterMediaControlServiceServer(restarted, g.service)
+	if typed {
+		learnedpb.RegisterLearnedControlServiceServer(restarted, g.genericService)
+	}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- restarted.Serve(listener) }()
 	t.Cleanup(func() { restarted.Stop(); require.NoError(t, <-serveDone) })
@@ -395,4 +487,112 @@ func TestSharedOwnerGrantProducerChecksOriginalCaptureAndSealAuthority(t *testin
 	require.Len(t, pending, 2)
 	assertGrantBatch(t, g, pending[0].Batch, 1)
 	assertGrantBatch(t, g, pending[1].Batch, 2)
+}
+
+// A valid generic binding and a global MEDIA lease are deliberately independent
+// authorities. Exercise the real producer so neither admission nor sealing can
+// mistake the former for a grant to capture arbitrary subscriber/diagnostic UDP.
+func TestDiagnosticBindingCannotBroadenLIOnlyMediaGrant(t *testing.T) {
+	for _, owner := range []string{"li", "shared"} {
+		t.Run(owner, func(t *testing.T) {
+			g := newReliableGrantFixtureForProtocol(t, time.Now().Add(time.Minute), owner, 1, true)
+			g.send(t, grantBoundaryMedia(t, 45000))
+			g.waitAck(t, 1)
+			binding := core.Binding{ID: "diagnostic-binding", Session: g.rule.Session, Revision: 2, AdapterID: "diagnostic", ContextVersion: 1, Subject: core.Subject{ID: "diagnostic-subject", Incarnation: "request-1"}, AttributionContext: "diagnostic", Intents: []core.IntentRef{{ID: "diagnostic-request", Revision: 1}}, Scope: []core.Scope{{HunterID: "edge", Domain: 0}}, Selectors: []core.Selector{{Address: g.rule.Endpoints[0].Key.Addr, Port: 47000, Protocol: core.UDP, Direction: core.Destination}}, Context: []byte("diagnostic-v1"), NotBefore: time.Now().Add(-time.Second), ExpiresAt: g.rule.ExpiresAt}
+			require.NoError(t, g.publisher.Core().ApplyDelta(g.control, 2, []core.Binding{binding}, nil))
+			require.Eventually(t, func() bool {
+				application := g.genericService.Application("edge")
+				return application != nil && application.Synchronized && application.ActiveBindings == 2
+			}, time.Second, time.Millisecond)
+			packet := boundaryTransportPacket(t, []byte("independent-diagnostic-payload"), false, 48000, 47000)
+			candidates := g.h.mediaRules.runtime.Match(packet.Packet, packet.Interface)
+			require.False(t, candidates.Overflow)
+			require.Len(t, candidates.Bindings, 1)
+			require.Equal(t, "diagnostic", candidates.Bindings[0].AdapterID)
+			require.Empty(t, candidates.Bindings[0].Proof)
+			require.True(t, g.h.filterManager.CaptureAllowed(time.Now()), "global MEDIA lease is still valid during independent diagnostic selection")
+			sendAndDrainGrantCapture(t, g.reliableVoIPBoundaryFixture, packet)
+			if owner == "li" {
+				require.Equal(t, uint64(1), g.h.packetSpool.Status().LastSequence, "reference-only binding cannot broaden a media-only LI grant")
+			} else {
+				g.waitAck(t, 2)
+			}
+			// Rejection must not disable valid signed media on the same actual source.
+			g.send(t, grantBoundaryMedia(t, 45000))
+			expected := uint64(2)
+			if owner == "shared" {
+				expected = 3
+			}
+			g.waitAck(t, expected)
+			g.stopHunter(t)
+			g.server.Stop()
+			require.NoError(t, g.receiver.Shutdown())
+			custody, err := packetreceipt.Open(g.store)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, custody.Close()) }()
+			pending, err := custody.Pending(32)
+			require.NoError(t, err)
+			require.Len(t, pending, int(expected))
+			assertGrantBatch(t, g, pending[0].Batch, 1)
+			assertGrantBatch(t, g, pending[len(pending)-1].Batch, 1)
+			if owner == "shared" {
+				ordinary := pending[1].Batch.Packets[0]
+				require.Empty(t, ordinary.CaptureSelectionProof)
+				require.Empty(t, ordinary.MatchedFilterIds)
+				require.Empty(t, ordinary.InheritedMatchedFilterIds)
+				require.Len(t, ordinary.LearnedCaptureEvidence.Candidates, 1)
+				candidate := ordinary.LearnedCaptureEvidence.Candidates[0]
+				require.Equal(t, "diagnostic", candidate.AdapterId)
+				require.Equal(t, "diagnostic-subject", candidate.SubjectId)
+				require.True(t, candidate.GetReferenceOnly())
+				require.Empty(t, candidate.GetLegacyMediaRule())
+			}
+		})
+	}
+}
+
+// Overflow must stop the actual mixed-adapter producer before it can fall back
+// to the legacy VoIP resolver and silently discard the other associations.
+func TestRemoteMixedCandidateOverflowCannotFallBackToLegacyMedia(t *testing.T) {
+	g := newReliableGrantFixtureForProtocol(t, time.Now().Add(time.Minute), "li", 1, true)
+	g.send(t, grantBoundaryMedia(t, 45000))
+	g.waitAck(t, 1)
+	const diagnosticCount = 65
+	bindings := make([]core.Binding, 0, diagnosticCount)
+	for index := range diagnosticCount {
+		bindings = append(bindings, core.Binding{ID: fmt.Sprintf("overflow-diagnostic-%d", index), Session: g.rule.Session, Revision: 2, AdapterID: "diagnostic", ContextVersion: 1, Subject: core.Subject{ID: fmt.Sprintf("diagnostic-subject-%d", index), Incarnation: "request-1"}, AttributionContext: "diagnostic", Intents: []core.IntentRef{{ID: "diagnostic-request", Revision: 1}}, Scope: []core.Scope{{HunterID: "edge", Domain: 0}}, Selectors: []core.Selector{{Address: g.rule.Endpoints[0].Key.Addr, Port: g.rule.Endpoints[0].Key.Port, Protocol: core.UDP, Direction: core.Either}}, Context: []byte("diagnostic-v1"), NotBefore: time.Now().Add(-time.Second), ExpiresAt: g.rule.ExpiresAt})
+	}
+	require.NoError(t, g.publisher.Core().ApplyDelta(g.control, 2, bindings, nil))
+	require.Eventually(t, func() bool {
+		application := g.genericService.Application("edge")
+		return application != nil && application.Synchronized && application.ActiveBindings == diagnosticCount+1
+	}, time.Second, time.Millisecond)
+	require.Len(t, g.h.mediaRules.store.Core().ActiveRules(), diagnosticCount+1)
+	packet := grantBoundaryMedia(t, 45000)
+	facts, ok := core.PacketFacts(packet.Packet, 0)
+	require.True(t, ok)
+	// The compatibility view excludes independent adapters. It demonstrates that
+	// the old VoIP-only fallback could still claim a unique valid signed owner.
+	legacy := g.h.mediaRules.store.Resolve(mediaadmission.EndpointKey{Addr: facts.Source.Address, Port: facts.Source.Port}, mediaadmission.EndpointKey{Addr: facts.Destination.Address, Port: facts.Destination.Port})
+	require.True(t, legacy.Resolved, "VoIP considered alone has one exact owner")
+	require.NotNil(t, legacy.Rule)
+	require.Equal(t, g.rule.Call.CallID, legacy.Call.CallID)
+	require.True(t, g.h.filterManager.CaptureMediaRuleAllowed(wire.EncodeRule(*legacy.Rule), packet.Packet, 0, packet.Packet.Metadata().Timestamp), "legacy signed VoIP authority alone would accept this RTP")
+	before := g.h.mediaRules.store.Core().Status().CandidateOverflows
+	sendAndDrainGrantCapture(t, g.reliableVoIPBoundaryFixture, packet)
+	require.Greater(t, g.h.mediaRules.store.Core().Status().CandidateOverflows, before, "the actual remote producer must report its complete candidate-set overflow")
+	require.Equal(t, uint64(1), g.h.packetSpool.Status().LastSequence, "overflow cannot emit either truncated typed evidence or legacy field16 fallback")
+	require.Zero(t, g.h.packetSpool.Status().PendingRecords)
+	g.stopHunter(t)
+	g.server.Stop()
+	require.NoError(t, g.receiver.Shutdown())
+	custody, err := packetreceipt.Open(g.store)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, custody.Close()) }()
+	pending, err := custody.Pending(32)
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "overflow never reaches receiver custody")
+	assertGrantBatch(t, g, pending[0].Batch, 1)
+	require.Empty(t, pending[0].Batch.Packets[0].CaptureSelectionProof)
+	require.NotNil(t, pending[0].Batch.Packets[0].LearnedCaptureEvidence)
 }

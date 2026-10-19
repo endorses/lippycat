@@ -1,6 +1,6 @@
-// Package mediarules owns bounded, ephemeral media selection state. Call
-// selection, SIP validation, authentication and packet output remain with the
-// caller; a media rule is neither a SIP parser nor an output authorization.
+// Package mediarules preserves the media-selection API as a VoIP view over the
+// shared learned-rule engine. A rule selects capture candidates; attribution and
+// output authorization remain separate decisions.
 package mediarules
 
 import (
@@ -8,88 +8,33 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	core "github.com/endorses/lippycat/internal/pkg/learnedrules"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
+	voiprules "github.com/endorses/lippycat/internal/pkg/voip/learnedrules"
 )
 
-type Revision uint64
-
-// Session identifies the issuing processor's current control generation.
-type Session struct {
-	ProcessorID string
-	Generation  uint64
-}
-
-// Control is a connection-local capability, returned only after StartSession.
-// Reconnecting invalidates callbacks carrying the previous connection's token,
-// even when the remote session did not change.
-type Control struct {
-	session Session
-	local   uint64
-	store   *Store
-}
-
-type Scope struct {
-	HunterID string
-	Domain   mediaadmission.DomainID
-}
-
-type MediaKind uint8
+// Compatibility names retain the public media API while the VoIP adapter owns
+// call context and the common engine owns session authority.
+type Revision = core.Revision
+type Session = core.Session
+type Control = core.Control
+type Scope = voiprules.Scope
+type MediaKind = voiprules.MediaKind
 
 const (
-	RTP MediaKind = iota
-	RTCP
-	RTPAndRTCP
+	RTP        = voiprules.RTP
+	RTCP       = voiprules.RTCP
+	RTPAndRTCP = voiprules.RTPAndRTCP
 )
 
-type Endpoint struct {
-	Key  mediaadmission.EndpointKey
-	Kind MediaKind
-}
-
-// CallAssociation carries already verified selection/dialog evidence. The
-// opaque registry lifetime prevents a reused SIP Call-ID inheriting selection.
-// ResolveDialog assists forwarding only; its result does not validate a SIP
-// transaction or authorize ending/changing a call.
-type SelectionRef struct {
-	ID       string
-	Revision uint64
-}
-
-type CallAssociation struct {
-	Lifetime              callregistry.Lifetime
-	CallID                string
-	FromTag               string
-	ToTag                 string
-	SelectionRevision     uint64
-	CapturePolicyRevision uint64
-	FilterIDs             []string
-	SelectionGrants       []SelectionRef
-}
-
-type Rule struct {
-	ID               string
-	Session          Session
-	Revision         Revision
-	Call             CallAssociation
-	Scope            []Scope
-	Endpoints        []Endpoint
-	NotBefore        time.Time
-	ExpiresAt        time.Time
-	CaptureSignature []byte
-}
+type Endpoint = voiprules.Endpoint
+type SelectionRef = voiprules.SelectionRef
+type CallAssociation = voiprules.CallAssociation
+type Rule = voiprules.Rule
 
 // Clock separates wall time used to validate remote timestamps from monotonic
 // elapsed time used to enforce installed deadlines.
-type Clock interface {
-	Now() time.Time
-	Elapsed() time.Duration
-}
-
-type systemClock struct{ start time.Time }
-
-func (c systemClock) Now() time.Time         { return time.Now() }
-func (c systemClock) Elapsed() time.Duration { return time.Since(c.start) }
+type Clock = core.Clock
 
 type Config struct {
 	ProcessorID string
@@ -128,14 +73,14 @@ func (c Config) validate() error {
 }
 
 var (
-	ErrAuthority = errors.New("media-rule issuer is not the configured authenticated processor")
-	ErrSession   = errors.New("stale media-rule control session")
-	ErrRevision  = errors.New("stale or discontinuous media-rule revision")
-	ErrNotReady  = errors.New("media rules require a complete snapshot")
-	ErrCapacity  = errors.New("media-rule configured capacity exceeded")
-	ErrScope     = errors.New("media rule does not belong to the configured capture scope")
-	ErrInvalid   = errors.New("invalid media rule")
-	ErrClosed    = errors.New("media-rule store closed")
+	ErrAuthority = core.ErrAuthority
+	ErrSession   = core.ErrSession
+	ErrRevision  = core.ErrRevision
+	ErrNotReady  = core.ErrNotReady
+	ErrCapacity  = core.ErrCapacity
+	ErrScope     = core.ErrScope
+	ErrInvalid   = core.ErrInvalid
+	ErrClosed    = core.ErrClosed
 )
 
 type RemovalReason string
@@ -174,13 +119,7 @@ type Change struct {
 
 type Observer interface{ OnMediaRulesChanged(Change) }
 
-type Resolution struct {
-	// Rule is an owned exact media rule for the unambiguous resolved owner.
-	Rule      *Rule
-	Call      CallAssociation
-	Resolved  bool
-	Ambiguous bool
-}
+type Resolution = voiprules.Resolution
 
 type Status struct {
 	Session      Session

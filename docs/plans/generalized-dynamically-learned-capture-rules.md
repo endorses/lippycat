@@ -2,8 +2,8 @@
 
 Date: 2026-10-19
 
-Status: implementation verified. All feature and verification tasks are complete;
-the final commit task remains pending until the changes are committed.
+Status: complete. All implementation and verification tasks are complete.
+Implementation committed as `69353fa0`.
 
 Baseline: `main` at `69c89acc`. Design source:
 [Generalized dynamically learned capture rules](../research/generalized-dynamically-learned-capture-rules.md).
@@ -391,7 +391,7 @@ or runtime diagnostic CLI is required to prove the extension boundary.
       `make manual-check` and `make manual`.
 - [x] Run the relevant package race suites and established repository gates below.
       Record actual results and limitations before marking this plan complete.
-- [ ] Format changed files and generated outputs appropriately, inspect the final
+- [x] Format changed files and generated outputs appropriately, inspect the final
       diff, then commit implementation, documentation, and verified plan status.
 
 ## Verification commands and evidence

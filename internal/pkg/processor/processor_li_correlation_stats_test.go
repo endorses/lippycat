@@ -27,6 +27,21 @@ func TestMapLICallCorrelationStats(t *testing.T) {
 	require.EqualValues(t, 3, got.Standalone["blind"])
 	require.EqualValues(t, 4, got.Sdp["suspended"])
 }
+
+func TestMapLIResponseWaitStats(t *testing.T) {
+	source := li.CallCorrelationStats{ResponseWait: map[string]uint64{"request": 2, "finalized": 1}, PendingDialogs: 1, PendingPackets: 3, PendingBytes: 4096}
+	got := mapLICallCorrelationStats(source)
+	require.EqualValues(t, 1, got.PendingDialogs)
+	require.EqualValues(t, 3, got.PendingPackets)
+	require.EqualValues(t, 4096, got.PendingBytes)
+	require.EqualValues(t, 2, got.ResponseWait["request"])
+	source.ResponseWait["request"] = 9
+	require.EqualValues(t, 2, got.ResponseWait["request"])
+	got = mapLICallCorrelationStats(li.CallCorrelationStats{PendingDialogs: -1, PendingPackets: -1, PendingBytes: -1})
+	require.Zero(t, got.PendingDialogs)
+	require.Zero(t, got.PendingPackets)
+	require.Zero(t, got.PendingBytes)
+}
 func TestPopulateLICallCorrelationStatsUnavailable(t *testing.T) {
 	p := &Processor{}
 	p.populateLICallCorrelationStats(nil)

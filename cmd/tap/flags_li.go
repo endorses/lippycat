@@ -442,6 +442,12 @@ func applyRADIUSLIConfig(cmd *cobra.Command, config *processor.Config) error {
 // values; nested node aliases use a JSON array of arrays in the environment.
 func liCallCorrelationFields(config *li.CallCorrelationConfig) map[string]any {
 	return map[string]any{
+		"identity_profiles":          &config.IdentityProfiles,
+		"response_wait":              &config.ResponseWait,
+		"response_wait_window":       &config.ResponseWaitWindow,
+		"max_pending_dialogs":        &config.MaxPendingDialogs,
+		"max_pending_packets":        &config.MaxPendingPackets,
+		"max_pending_bytes":          &config.MaxPendingBytes,
 		"session_headers":            &config.SessionHeaders,
 		"parent_call_id_headers":     &config.ParentCallIDHeaders,
 		"sdp_origin_matching":        &config.SDPOriginMatching,
@@ -518,6 +524,12 @@ func readLICallCorrelationConfig() (li.CallCorrelationConfig, error) {
 			} else {
 				err = decodeLICorrelationList(raw, field)
 			}
+		case *[]li.CorrelationIdentityProfile:
+			if value, ok := raw.(string); ok && strings.TrimSpace(value) == "" {
+				*field = nil
+			} else {
+				err = decodeLICorrelationList(raw, field)
+			}
 		case *[][]string:
 			err = decodeLICorrelationList(raw, field)
 		case *[]securestore.KeyRef:
@@ -556,8 +568,13 @@ func decodeLICorrelationList(raw any, target any) error {
 			return fmt.Errorf("encode list: %w", err)
 		}
 	}
-	if err := json.Unmarshal(data, target); err != nil {
-		return fmt.Errorf("expected a string list (nested lists for node_aliases): %w", err)
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("expected a valid configuration list: %w", err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("expected a single configuration list")
 	}
 	return nil
 }

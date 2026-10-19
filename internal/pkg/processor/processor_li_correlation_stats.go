@@ -25,6 +25,7 @@ func mapLICallCorrelationStats(s li.CallCorrelationStats) *management.LICallCorr
 		Blind: s.Blind, BlindCause: s.BlindCause, BlindRemainingNs: int64(s.BlindRemaining), Persistence: s.Persistence, UncertainWrites: s.UncertainWrites, UnresolvedWrites: s.UnresolvedWrites, SdpDisabled: s.SDPDisabled, UnrecordedDecisions: s.UnrecordedDecisions,
 		DeferredPackets: uint64(max(0, s.DeferredPackets)), DeferredBytes: uint64(max(0, s.DeferredBytes)), DeferredRejected: s.DeferredRejected,
 		WaitTimeouts: s.WaitTimeouts, PressureReleases: s.PressureReleases, ShutdownTimeouts: s.ShutdownTimeouts,
+		ResponseWait: copyLICorrelationStatsMap(s.ResponseWait), PendingDialogs: uint64(max(0, s.PendingDialogs)), PendingPackets: uint64(max(0, s.PendingPackets)), PendingBytes: uint64(max(0, s.PendingBytes)),
 	}
 }
 func copyLICorrelationStatsMap(source map[string]uint64) map[string]uint64 {

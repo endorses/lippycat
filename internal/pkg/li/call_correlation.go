@@ -113,6 +113,8 @@ type CallCorrelationStats struct {
 	DeferredPackets, DeferredBytes                               int
 	DeferredRejected                                             uint64
 	WaitTimeouts, PressureReleases, ShutdownTimeouts             uint64
+	ResponseWait                                                 map[string]uint64
+	PendingDialogs, PendingPackets, PendingBytes                 int
 }
 
 // CallCorrelator serializes decisions, indexes and group intersections under one
@@ -150,6 +152,11 @@ type CallCorrelator struct {
 	closing                        bool
 	lastStorageWarning             time.Time
 	stats                          CallCorrelationStats
+	identityProfiles               []correlationIdentityProfile
+	responsePending                map[string]*correlationPending
+	pendingPackets, pendingBytes   int
+	waitNow                        func() time.Time
+	waitAfter                      func(time.Duration) <-chan time.Time
 }
 
 func NewCallCorrelator(config CallCorrelationConfig, lifetime time.Duration, store CallCorrelationPersistence) (*CallCorrelator, error) {
@@ -160,10 +167,15 @@ func NewCallCorrelator(config CallCorrelationConfig, lifetime time.Duration, sto
 	if lifetime <= 0 {
 		return nil, errors.New("LI call correlation requires a positive call lifetime")
 	}
+	profiles, err := compileCorrelationIdentityProfiles(config.IdentityProfiles)
+	if err != nil {
+		return nil, err
+	}
 	c := &CallCorrelator{config: config, lifetime: lifetime, now: time.Now, store: store,
 		groups: map[uint64]*correlationGroup{}, records: map[string]*correlationRecord{}, candidates: map[string]*correlationCandidate{}, transactions: map[string]correlationTransaction{},
 		headerIndex: map[string]map[string]*correlationCandidate{}, addressIndex: map[string]map[string]*correlationCandidate{}, numberIndex: map[string]map[string]*correlationCandidate{}, originIndex: map[sdpOriginHistoryKey]map[string]*correlationCandidate{}, aliases: map[string]string{}, history: newSDPOriginHistory(config),
-		stop: make(chan struct{}), closeDone: make(chan struct{}), stats: CallCorrelationStats{Adopted: map[string]uint64{}, Standalone: map[string]uint64{}, SDP: map[string]uint64{}}}
+		identityProfiles: profiles, responsePending: map[string]*correlationPending{}, waitNow: time.Now, waitAfter: time.After,
+		stop: make(chan struct{}), closeDone: make(chan struct{}), stats: CallCorrelationStats{Adopted: map[string]uint64{}, Standalone: map[string]uint64{}, SDP: map[string]uint64{}, ResponseWait: map[string]uint64{}}}
 	for i, set := range config.NodeAliases {
 		for _, value := range set {
 			addr, _ := netip.ParseAddr(value)
@@ -364,6 +376,13 @@ func (c *CallCorrelator) Resolve(pkt *types.PacketDisplay, tasks []CallCorrelati
 // ResolveContext allows a waiting packet to be canceled without changing the
 // reserved decision. Store ownership remains serialized until its write returns.
 func (c *CallCorrelator) ResolveContext(ctx context.Context, pkt *types.PacketDisplay, tasks []CallCorrelationTask) (CallCorrelationDecision, error) {
+	if c.config.ResponseWait && c.config.Enabled() {
+		return c.resolveWaitingContext(ctx, pkt, tasks)
+	}
+	return c.resolveReservedContext(ctx, pkt, tasks)
+}
+
+func (c *CallCorrelator) resolveReservedContext(ctx context.Context, pkt *types.PacketDisplay, tasks []CallCorrelationTask) (CallCorrelationDecision, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -433,6 +452,10 @@ func (c *CallCorrelator) ResolveAsync(ctx context.Context, pkt *types.PacketDisp
 			c.mu.Unlock()
 			return errors.New("LI correlation closed")
 		}
+		if handled, err := c.queueResponseLocked(ctx, pkt, tasks, bytes, fn); handled {
+			c.mu.Unlock()
+			return err
+		}
 		deferred := correlationDeferred{ctx: ctx, fn: fn, bytes: bytes}
 		if pkt != nil && pkt.VoIPData != nil {
 			if r := c.records[pkt.VoIPData.CallID]; r != nil && r.ready != nil {
@@ -492,7 +515,7 @@ func (c *CallCorrelator) ResolveAsync(ctx context.Context, pkt *types.PacketDisp
 
 // deliverDirect serializes callers with a pressure-triggered handoff after the
 // retained FIFO. Storage never owns this gate; callbacks run without mu.
-func (c *CallCorrelator) deliverDirect(ctx context.Context, r *correlationRecord, fn func(CallCorrelationDecision), owns bool) {
+func (c *CallCorrelator) deliverDirect(ctx context.Context, r *correlationRecord, fn func(CallCorrelationDecision), owns bool) bool {
 	if !owns {
 		r.dispatchMu.Lock()
 	}
@@ -502,7 +525,9 @@ func (c *CallCorrelator) deliverDirect(ctx context.Context, r *correlationRecord
 	c.mu.Unlock()
 	if !closing && ctx.Err() == nil {
 		fn(decision)
+		return true
 	}
+	return false
 }
 
 // releaseUncertainLocked ends the logical wait without releasing physical store
@@ -548,7 +573,7 @@ func (c *CallCorrelator) awaitReservation(r *correlationRecord) {
 	c.drainDeferred(r)
 }
 func (c *CallCorrelator) deferredCapacity(bytes int) bool {
-	return bytes <= maxCallCorrelationStoreBytes && c.deferredPackets < c.config.MaxCandidates && c.deferredBytes <= maxCallCorrelationStoreBytes-bytes
+	return bytes <= maxCallCorrelationStoreBytes && c.deferredPackets+c.pendingPackets < c.config.MaxCandidates && c.deferredBytes+c.pendingBytes <= maxCallCorrelationStoreBytes-bytes
 }
 func (c *CallCorrelator) enqueueDeferred(r *correlationRecord, packet correlationDeferred) {
 	r.deferred = append(r.deferred, packet)
@@ -617,6 +642,15 @@ func (c *CallCorrelator) resolveLocked(pkt *types.PacketDisplay, tasks []CallCor
 		eligible = false
 		result.Reason = "candidate_limit"
 	}
+	if pending := c.responsePending[callID]; pending != nil {
+		if pending.reason != "request" {
+			eligible = false
+		}
+		if pending.finalized {
+			eligible = false
+			result.Reason = "finalized"
+		}
+	}
 	headers, invalid := correlationSessionKeys(pkt, c.config.SessionHeaders)
 	incoming := taskSet(tasks)
 	source, destination := c.address(pkt.SrcIP), c.address(pkt.DstIP)
@@ -631,7 +665,7 @@ func (c *CallCorrelator) resolveLocked(pkt *types.PacketDisplay, tasks []CallCor
 	if len(c.config.SessionHeaders) > 0 || c.config.SDPOriginMatching {
 		candidateTTL = c.lifetime
 	}
-	v := &correlationCandidate{transaction: tx, callID: callID, source: source, destination: destination, calling: correlationIdentity(pkt.VoIPData.From), called: correlationIdentity(pkt.VoIPData.To), started: started, expires: now.Add(candidateTTL), headers: headers, final: pkt.VoIPData.Status >= 200}
+	v := &correlationCandidate{transaction: tx, callID: callID, source: source, destination: destination, calling: correlationIdentityWithProfiles(pkt.VoIPData.From, c.identityProfiles), called: correlationIdentityWithProfiles(pkt.VoIPData.To, c.identityProfiles), started: started, expires: now.Add(candidateTTL), headers: headers, final: pkt.VoIPData.Status >= 200}
 	if v.final {
 		v.finalAt = started
 	}
@@ -647,7 +681,7 @@ func (c *CallCorrelator) resolveLocked(pkt *types.PacketDisplay, tasks []CallCor
 		}
 	} else if now.Before(c.blindUntil) {
 		result.Reason = "blind_period"
-	} else if !eligible && result.Reason != "candidate_limit" {
+	} else if !eligible && result.Reason != "candidate_limit" && result.Reason != "finalized" {
 		result.Reason = "not_eligible"
 	}
 	var oldTasks map[CallCorrelationTask]bool
@@ -690,6 +724,9 @@ func (c *CallCorrelator) resolveLocked(pkt *types.PacketDisplay, tasks []CallCor
 	c.serial++
 	result.token = c.serial
 	r := &correlationRecord{decision: result, last: now, group: group}
+	if pending := c.responsePending[callID]; pending != nil && pending.finalized {
+		r.terminal = now.Add(c.config.TerminalGrace)
+	}
 	group.members++
 	c.records[callID] = r
 	if eligible && len(c.candidates) < c.config.MaxCandidates {
@@ -1114,6 +1151,17 @@ func (c *CallCorrelator) Published(d CallCorrelationDecision) {
 func (c *CallCorrelator) Finalize(callID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if pending := c.responsePending[callID]; pending != nil && !pending.finalized {
+		pending.finalized = true
+		if pending.reason == "" {
+			c.triggerResponseLocked(pending, "finalized", nil)
+		} else if c.records[callID] == nil {
+			// Request arrival may already have woken the owner, but has not
+			// reserved a decision yet. Finalization still forbids an adoption.
+			pending.reason, pending.seed = "finalized", nil
+			c.stats.ResponseWait["finalized"]++
+		}
+	}
 	if r := c.records[callID]; r != nil {
 		if r.terminal.IsZero() {
 			r.terminal = c.now().Add(c.config.TerminalGrace)
@@ -1124,6 +1172,9 @@ func (c *CallCorrelator) Finalize(callID string) {
 	}
 }
 func (c *CallCorrelator) Maintain() error {
+	c.mu.Lock()
+	c.releaseExpiredResponsesLocked()
+	c.mu.Unlock()
 	if !c.writeMu.TryLock() {
 		return nil
 	}
@@ -1239,11 +1290,13 @@ func (c *CallCorrelator) CloseContext(ctx context.Context) error {
 }
 func (c *CallCorrelator) markDirty() { c.revision++; c.dirty = true }
 func (c *CallCorrelator) recordLive(r *correlationRecord, now time.Time) bool {
-	return r.ready != nil || ((r.terminal.IsZero() || now.Before(r.terminal)) && now.Sub(r.last) < c.lifetime)
+	return r.ready != nil || c.responsePending[r.decision.CallID] != nil || ((r.terminal.IsZero() || now.Before(r.terminal)) && now.Sub(r.last) < c.lifetime)
 }
 func (c *CallCorrelator) candidateLive(v *correlationCandidate, now time.Time) bool {
 	r := c.records[v.callID]
-	return now.Before(v.expires) && r != nil && r.decision.token == v.recordToken && c.recordLive(r, now)
+	// A retained FIFO pins its selected record, not the eligibility of its
+	// evidence. In particular it cannot extend terminal grace or idle lifetime.
+	return now.Before(v.expires) && r != nil && r.decision.token == v.recordToken && (r.terminal.IsZero() || now.Before(r.terminal)) && now.Sub(r.last) < c.lifetime
 }
 func (c *CallCorrelator) expireRecord(id string, now time.Time) {
 	r := c.records[id]
@@ -1272,10 +1325,13 @@ func (c *CallCorrelator) Stats() CallCorrelationStats {
 	defer c.mu.Unlock()
 	now := c.now()
 	c.expire(now)
+	c.releaseExpiredResponsesLocked()
 	s := c.stats
 	s.Adopted = copyCorrelationCounts(s.Adopted)
 	s.Standalone = copyCorrelationCounts(s.Standalone)
 	s.SDP = copyCorrelationCounts(s.SDP)
+	s.ResponseWait = copyCorrelationCounts(s.ResponseWait)
+	s.PendingDialogs, s.PendingPackets, s.PendingBytes = len(c.responsePending), c.pendingPackets, c.pendingBytes
 	s.Records = len(c.records)
 	s.Candidates = len(c.candidates)
 	s.Transactions = len(c.transactions)

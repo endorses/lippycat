@@ -86,9 +86,11 @@ the exact extraction rules are described below.
 ## How the decision is made {#correlation-decision-flow}
 
 A retained decision takes precedence over every signal. A new leg needs an
-observed initial INVITE request before it can join a group. Response-only
-capture and an X3-first leg cannot use later evidence to replace their retained
-standalone decisions. New adoption also depends on retained state, capacity, the
+observed initial INVITE request before it can join a group. Optional response
+waiting can retain an unseen dialog briefly before selecting an ID, so its
+corresponding initial INVITE can provide evidence. A response-only dialog after
+that wait, and an X3-first leg without a waiting response, keep their standalone
+decisions when later evidence arrives. New adoption also depends on retained state, capacity, the
 decision horizon and storage availability.
 
 {{#figure fig-call-leg-correlation-decision}} shows the retained-decision check,
@@ -167,14 +169,23 @@ self-referencing parents cannot regroup a published child.
 Address chaining compares initial INVITE transport addresses within
 `address_window` and before the relevant final response. `node_aliases` is a
 list of disjoint address lists, each representing one node; it does not rewrite
-calling or called identities. Compare complete canonical identities, never
-number suffixes or deployment-specific digit substitutions. Exact calling/called
+calling or called identities. Compare complete identities using the configured
+normalization scope, never generic number suffixes. Exact calling/called
 identity matching requires the exact pair within `number_window` and no address
 match; its capture-time window is symmetric, including the boundary, so reversed
 arrival can match. Address chaining with rewritten identities requires one
 eligible address candidate and no called-number candidate. These heuristics can
-falsely group unrelated calls; missing observations and A,C,B arrival in an A →
-B → C chain can leave one call split.
+falsely group unrelated calls. Concurrent calls to the same canonical called
+identity through a shared signaling node can collide in R1 even when only one
+prior group is eligible. Concurrent calls or rapid redials with the same
+canonical calling/called pair can collide in R2. Multiple-candidate rejection
+and normalization do not make either key a unique session identifier. Rewritten
+address chaining also cannot distinguish all unrelated parallel dialogs. Enable
+these methods only where the observable evidence is suitable; trusted H/P/S
+precedence is unchanged. Missing observations and A,C,B arrival in an A → B → C
+chain can leave one call split. Diagnose residual splits by actual timing,
+setup, task, ambiguity, expiry and capacity decisions: an eligible address
+candidate suppresses R2, and normalization does not widen `number_window`.
 
 SDP origin matching compares the full SDP origin
 `(username, sess-id, nettype, addrtype, unicast-address)`; version is revision
@@ -279,6 +290,12 @@ processor:
       address_window: 2s
       number_window: 500ms
       node_aliases: []
+      identity_profiles: []
+      response_wait: false
+      response_wait_window: 5ms
+      max_pending_dialogs: 1000
+      max_pending_packets: 10000
+      max_pending_bytes: 16777216
       decision_horizon: 5m
       terminal_grace: 30s
       wait_timeout: 5s
@@ -291,6 +308,87 @@ processor:
       store_read_keys: []
 ```
 
+### Scoped telephone identity profiles {#correlation-identity-profiles}
+
+`identity_profiles` defaults to `[]`, preserving existing exact comparison.
+Each named profile defines a `namespace`, exact case-insensitive `sip_hosts`
+and explicit `phone_contexts`. Global `tel:` identities require `global_tel`.
+A numeric SIP user without `user=phone` requires `allow_numeric_sip`. Bare
+digits become global only with `allow_bare_global` or a configured
+`international_prefixes` interpretation. All these switches default to `false`
+and lists to empty. Unmatched non-telephone usernames retain exact user/domain
+comparison and user case. Profiles do not enable R1/R2, authorize matching,
+change task filters or alter trusted-rule precedence.
+
+Telephone keys remove permitted visual separators and retain global/local
+status, local context, extensions, subaddresses and other identity-bearing URI
+parameters. Local SIP identities without a context retain their host; an
+explicit context must be allowed by `phone_contexts`. Global keys can cross
+hosts only within the declared namespace. Different namespaces, local contexts,
+extensions and tenants remain distinct. There is no last-N-digit or generic
+suffix matching.
+
+An explicit `phone-context` prevents implicit global interpretation by
+`allow_bare_global` or `international_prefixes`. An explicit routing rewrite
+can map the number, but its context remains part of the key. Telephone URI
+parameter values are case-folded; SIP user and subaddress case is retained.
+Escaped unreserved characters are normalized, while escaped reserved characters
+cannot acquire numeric meaning. Duplicate identity parameters and malformed
+contexts produce no key. Unknown profile fields are configuration errors.
+Replacements may contain digits, a leading plus and valid numeric or named
+captures; empty replacements and unknown captures are rejected.
+
+A nonnumeric SIP routing prefix becomes telephone evidence only when a selected
+profile permits telephone interpretation through `user=phone` or
+`allow_numeric_sip` and an explicit full anchored rewrite matches the user.
+For example, `^ROUTE([0-9]+)$` with replacement `+${1}` can interpret a synthetic
+routing token in that profile. Arbitrary unmatched usernames retain exact
+comparison; neither digits within a username nor an unscoped rule imply a
+telephone identity.
+
+With profiles enabled, unsupported URI header/query syntax after the host
+suppresses weak identity evidence. A valid `?` before `@` belongs to the SIP
+username and is preserved: `sip:alice?desk@voice.example.com` is distinct from
+`sip:alice@voice.example.com`. It is not a post-host query such as
+`sip:alice@voice.example.com?subject=example`.
+
+`rewrite_rules` contains anchored Go-compatible regular expressions with
+`pattern` and `replacement`. Rules inspect the original separator-stripped
+number once; they do not form a stripping cascade. The resulting transform must
+be idempotent. Overlapping profiles, conflicting rewrites, malformed identities,
+non-idempotent results and empty or oversized outputs produce no usable
+telephone key rather than selecting a favorable candidate. Invalid configured
+patterns or replacements fail startup.
+
+A configuration may contain at most 32 profiles, 64 hosts and 64 contexts per
+profile, and 16 international prefixes and 16 rewrite rules per profile.
+Names, namespaces and scope strings are limited to 256 bytes; patterns and
+replacements to 512 bytes. URI inputs are limited to 4096 bytes and telephone
+numbers to 128 bytes. These limits bound parsing and retained configuration;
+they do not change the existing candidate or record limits.
+
+This synthetic example permits an explicit international dial prefix on one
+example SIP host. It does not enable a matching rule; choose R1/R2 separately
+only after evaluating concurrency and task scope.
+
+<!-- i18n:skip -->
+
+```yaml
+processor:
+  li:
+    correlation:
+      identity_profiles:
+        - name: example-telephone
+          namespace: example-tenant
+          sip_hosts: [voice.example.com]
+          phone_contexts: [example.com]
+          global_tel: false
+          allow_numeric_sip: true
+          allow_bare_global: false
+          international_prefixes: ["00"]
+          rewrite_rules: []
+```
+
 ### Status and evidence lifecycle {#correlation-status}
 
 `lc show status` exposes aggregate `li_call_correlation` telemetry when grouping
@@ -299,6 +397,14 @@ buckets, retained records and candidate/transaction/origin counts with
 configured limits, suspended origins, blind-period cause and remaining
 nanoseconds, persistence status, uncertain writes and unresolved writes. No
 Call-IDs, numbers, addresses or SIP header values are included.
+
+`pending_dialogs`, `pending_packets` and `pending_bytes` report current
+response-origin queue usage, including persistence waiting and FIFO draining
+after reservation. The aggregate `response_wait` map uses
+fixed outcome keys: `waiting`, `request`, `timeout`, `pressure`, `cancelled`,
+`cancelled_packets`, `shutdown_packets`, `finalized` and `rejected`. These are separate from
+persistence `wait_timeouts` and deferred handoff usage. No profile patterns,
+identities or Call-IDs are telemetry labels.
 
 `unrecorded_decisions` counts reservation attempts lost at the record limit.
 Repeated packets may increment it repeatedly; it is not a once-per-leg outcome
@@ -314,8 +420,9 @@ preferring the address inside angle brackets. Extraction removes the `sip:`,
 `sips:` or `tel:` scheme, URI/header parameters after `;` or `?`, and a
 single-colon SIP host port. Comparison preserves the user or telephone value,
 including case and digits, and lowercases only the host after `@`; IPv6 host
-spelling is preserved apart from case. It never compares suffixes, strips
-telephone punctuation or applies operator-specific digit rewrites.
+spelling is preserved apart from case. This compatibility behavior applies when no identity profile is configured.
+Configured profiles use a separate correlation-only parser; authorization and
+direction extraction remain unchanged.
 
 SDP roles are learned from retained initial transactions. A retransmitted
 initial INVITE can establish a previously missing offer without changing its
@@ -338,6 +445,52 @@ to processor time. Retention and observation expiry use processor time. Delayed
 batches must still satisfy capture-time windows and retained deadlines;
 arbitrary forwarding delay is not tolerated. Cleanup scans run during
 maintenance, while lookups reject locally expired evidence between ticks.
+
+### Response waiting before reservation {#correlation-response-wait}
+
+`response_wait` defaults to `false` and does not enable any matching method.
+When enabled, an eligible response for an unseen Call-ID may retain immutable
+packet snapshots before reserving a Correlation ID. `response_wait_window`
+defaults to `5ms` and bounds this wait using local elapsed time. It does not
+change the capture-time matching windows. Later packets do not renew the
+deadline. Zero pending limits or window select defaults; negative values are invalid.
+Dialog and packet limits cannot exceed 1000000 each, and the byte limit cannot
+exceed 1073741824 (1 GiB). The corresponding observed initial INVITE supplies transaction
+evidence; a response's transport direction cannot substitute for that request.
+
+Packets admitted for the same waiting dialog, including associated X3, share
+one first-decision boundary and retain admission order. Media must already be
+associated with that dialog through the existing authorized path; waiting does
+not infer ownership, a Call-ID or a task from another packet. A truly X3-first
+dialog without a waiting response retains the existing standalone behavior.
+
+`max_pending_dialogs` (default `1000`), `max_pending_packets` (default `10000`)
+and `max_pending_bytes` (default `16777216`, 16 MiB) bound the undecided queue.
+These are configured accounting limits, not process RSS or performance targets.
+Their accounting includes retained metadata. They coexist with `max_candidates`,
+`max_records`, the existing deferred persistence handoff and downstream queues;
+processor snapshot admission also enforces its combined count/byte bounds.
+Timeout or pending-capacity pressure selects standalone once and releases
+eligible previously admitted packets in order. The packet causing pressure may
+be rejected explicitly rather than admitted beyond the bound; a new dialog
+that cannot enter the pending queue takes the ordinary standalone path. A
+later INVITE keeps that selected ID. Request-backed adoption instead enters the
+existing persistence decision and delivery path; an uncertain persistence
+outcome never becomes an undecided response wait.
+
+Finalizing a dialog that is still awaiting its first decision releases its
+admitted signaling with a standalone ID and records `response_wait.finalized`
+once. Associated media remains subject to the existing call-lifecycle gate.
+An already reserved ID stays immutable. Retaining the response FIFO does not
+extend `terminal_grace`.
+
+Each released packet is revalidated against its original admission time, task
+and call incarnations, authorization, destinations and product expiry. Task or
+call invalidation, cancellation and shutdown can discard waiting products;
+waiting does not extend their lifetime. The undecided queue is volatile: a
+process failure loses its snapshots. Raw packets and canonical identity indexes
+are not added to the correlation store. Waiting does not promise publication
+after producer cancellation or callbacks after close.
 
 ### Pending decisions and shutdown {#correlation-pending-shutdown}
 
@@ -416,11 +569,13 @@ continuity; startup never automatically downgrades to that mode or replaces a
 damaged store.
 
 First-time grouping requires an observed initial INVITE request or retained
-evidence for that exact transaction. A response-only leg reserves standalone
-even when trusted session headers or SDP origin would otherwise match; CSeq
-values (including zero) and response To-tags cannot prove that a response
-belongs to an initial INVITE. Responses to re-INVITEs, unknown transactions and
-response-first capture do not change retained decisions.
+evidence for that exact transaction. A response alone cannot establish that
+evidence, even when trusted session headers or SDP origin would otherwise
+match. CSeq values (including zero), response direction and response To-tags
+cannot prove that the transaction is an initial INVITE. Responses to re-INVITEs
+and unknown transactions cannot supply guessed request or SDP-role evidence.
+Optional response waiting only postpones the first reservation; it never
+changes an already retained decision.
 
 ### Counter definitions {#correlation-counters}
 
@@ -442,8 +597,9 @@ count every dirty record or historical write attempt. `uncertain_writes` counts
 observed uncertain outcomes.
 
 `deferred_packets` and `deferred_bytes` report the current pending-packet
-handoff usage; `deferred_rejected` is retained for status compatibility;
-count/byte pressure now releases eligible products instead of incrementing it.
+handoff usage; `deferred_rejected` is retained for status compatibility. Persistence-handoff
+count/byte pressure releases eligible products instead of incrementing it;
+response-wait snapshot rejections increment it alongside `response_wait.rejected`.
 `wait_timeouts` counts logical adoption deadlines, `pressure_releases` counts
 early capacity releases and `shutdown_timeouts` counts owners whose caller
 shutdown budget was exhausted. These counts are separate from physical

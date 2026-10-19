@@ -81,3 +81,58 @@ func TestCallCorrelationConfigRequiresValidPersistentKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestCallCorrelationConfigIdentityAndWaitingDoNotEnableMatching(t *testing.T) {
+	c := DefaultCallCorrelationConfig()
+	c.ResponseWait = true
+	c.IdentityProfiles = []CorrelationIdentityProfile{{Name: "example", Namespace: "example", SIPHosts: []string{"sip.example"}}}
+	require.NoError(t, c.Validate())
+	require.False(t, c.Enabled())
+	c.ResponseWait = false
+	require.False(t, c.Normalized().ResponseWait)
+	for _, change := range []func(*CallCorrelationConfig){func(c *CallCorrelationConfig) { c.ResponseWaitWindow = -1 }, func(c *CallCorrelationConfig) { c.MaxPendingDialogs = -1 }, func(c *CallCorrelationConfig) { c.MaxPendingPackets = 1000001 }, func(c *CallCorrelationConfig) { c.MaxPendingBytes = 1<<30 + 1 }} {
+		bad := c
+		change(&bad)
+		require.Error(t, bad.Validate())
+	}
+}
+func TestCallCorrelationConfigRejectsInvalidIdentityProfiles(t *testing.T) {
+	base := CorrelationIdentityProfile{Name: "example", Namespace: "tenant", SIPHosts: []string{"sip.example"}}
+	for _, change := range []func(*CorrelationIdentityProfile){
+		func(p *CorrelationIdentityProfile) { p.Name = "" }, func(p *CorrelationIdentityProfile) { p.Namespace = "" }, func(p *CorrelationIdentityProfile) { p.SIPHosts = nil }, func(p *CorrelationIdentityProfile) { p.SIPHosts = []string{"*.example"} }, func(p *CorrelationIdentityProfile) { p.SIPHosts = []string{"sip.example", "SIP.EXAMPLE"} },
+		func(p *CorrelationIdentityProfile) { p.InternationalPrefixes = []string{"+"} }, func(p *CorrelationIdentityProfile) {
+			p.RewriteRules = []CorrelationIdentityRewrite{{Pattern: `99([0-9]+)$`, Replacement: `$1`}}
+		}, func(p *CorrelationIdentityProfile) {
+			p.RewriteRules = []CorrelationIdentityRewrite{{Pattern: `^99(?=123)$`, Replacement: `123`}}
+		}, func(p *CorrelationIdentityProfile) {
+			p.RewriteRules = []CorrelationIdentityRewrite{{Pattern: `^99([0-9]+)$`, Replacement: `${missing}`}}
+		},
+	} {
+		p := base
+		change(&p)
+		c := DefaultCallCorrelationConfig()
+		c.IdentityProfiles = []CorrelationIdentityProfile{p}
+		require.Error(t, c.Validate())
+	}
+	c := DefaultCallCorrelationConfig()
+	c.IdentityProfiles = []CorrelationIdentityProfile{base, base}
+	require.Error(t, c.Validate())
+}
+
+func TestCallCorrelationConfigIdentityProfileBounds(t *testing.T) {
+	p := CorrelationIdentityProfile{Name: "example", Namespace: "example", SIPHosts: []string{"sip.example"}}
+	for _, change := range []func(*CorrelationIdentityProfile){func(p *CorrelationIdentityProfile) { p.Namespace = "bad\x01" }, func(p *CorrelationIdentityProfile) { p.PhoneContexts = []string{"+"} }, func(p *CorrelationIdentityProfile) { p.SIPHosts = []string{"sip.example:bad"} }, func(p *CorrelationIdentityProfile) { p.RewriteRules = make([]CorrelationIdentityRewrite, 17) }, func(p *CorrelationIdentityProfile) { p.InternationalPrefixes = make([]string, 17) }, func(p *CorrelationIdentityProfile) {
+		p.RewriteRules = []CorrelationIdentityRewrite{{Pattern: `^([0-9]+)$`, Replacement: `alice`}}
+	}, func(p *CorrelationIdentityProfile) {
+		p.RewriteRules = []CorrelationIdentityRewrite{{Pattern: `^([0-9]+)$`, Replacement: ``}}
+	}} {
+		v := p
+		change(&v)
+		c := DefaultCallCorrelationConfig()
+		c.IdentityProfiles = []CorrelationIdentityProfile{v}
+		require.Error(t, c.Validate())
+	}
+	c := DefaultCallCorrelationConfig()
+	c.IdentityProfiles = make([]CorrelationIdentityProfile, 33)
+	require.Error(t, c.Validate())
+}

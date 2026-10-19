@@ -209,10 +209,12 @@ func (p *Processor) deliverLICorrelationSnapshot(snapshot *deferredLICorrelation
 	if snapshot.generation != 0 {
 		admission, err := p.callLifecycle.AdmitGeneration(snapshot.packet.VoIPData.CallID, snapshot.generation)
 		if err != nil {
+			recordLateX3Suppression(snapshot.packet.VoIPData.CallID, snapshot.generation, "correlation_snapshot_admission")
 			return
 		}
 		defer admission.Release()
 		if admission.Incarnation() != snapshot.incarnation {
+			recordLateX3Suppression(snapshot.packet.VoIPData.CallID, snapshot.generation, "correlation_snapshot_incarnation")
 			return
 		}
 		// Queueing must not extend the original delivery admission deadline.

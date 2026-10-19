@@ -12,27 +12,33 @@ import (
 // CallCorrelationConfig configures optional LI call-leg grouping. It is shared
 // with non-LI command configuration; the correlator itself is LI-tagged.
 type CallCorrelationConfig struct {
-	StoreKeys                securestore.KeyConfig `mapstructure:"-"`
-	SessionHeaders           []string              `mapstructure:"session_headers"`
-	ParentCallIDHeaders      []string              `mapstructure:"parent_call_id_headers"`
-	SDPOriginMatching        bool                  `mapstructure:"sdp_origin_matching"`
-	SDPOriginReuseWindow     time.Duration         `mapstructure:"sdp_origin_reuse_window"`
-	SDPOriginObservationTTL  time.Duration         `mapstructure:"sdp_origin_observation_ttl"`
-	SDPOriginSuspend         time.Duration         `mapstructure:"sdp_origin_suspend"`
-	SDPOriginMaxTracked      int                   `mapstructure:"sdp_origin_max_tracked"`
-	AddressChaining          bool                  `mapstructure:"address_chaining"`
-	AddressChainingRewritten bool                  `mapstructure:"address_chaining_rewritten"`
-	NumberChaining           bool                  `mapstructure:"number_chaining"`
-	AddressWindow            time.Duration         `mapstructure:"address_window"`
-	NumberWindow             time.Duration         `mapstructure:"number_window"`
-	NodeAliases              [][]string            `mapstructure:"node_aliases"`
-	DecisionHorizon          time.Duration         `mapstructure:"decision_horizon"`
-	TerminalGrace            time.Duration         `mapstructure:"terminal_grace"`
-	WaitTimeout              time.Duration         `mapstructure:"wait_timeout"`
-	ShutdownTimeout          time.Duration         `mapstructure:"shutdown_timeout"`
-	StoreFile                string                `mapstructure:"store_file"`
-	MaxCandidates            int                   `mapstructure:"max_candidates"`
-	MaxRecords               int                   `mapstructure:"max_records"`
+	StoreKeys                securestore.KeyConfig        `mapstructure:"-"`
+	SessionHeaders           []string                     `mapstructure:"session_headers"`
+	ParentCallIDHeaders      []string                     `mapstructure:"parent_call_id_headers"`
+	SDPOriginMatching        bool                         `mapstructure:"sdp_origin_matching"`
+	SDPOriginReuseWindow     time.Duration                `mapstructure:"sdp_origin_reuse_window"`
+	SDPOriginObservationTTL  time.Duration                `mapstructure:"sdp_origin_observation_ttl"`
+	SDPOriginSuspend         time.Duration                `mapstructure:"sdp_origin_suspend"`
+	SDPOriginMaxTracked      int                          `mapstructure:"sdp_origin_max_tracked"`
+	AddressChaining          bool                         `mapstructure:"address_chaining"`
+	AddressChainingRewritten bool                         `mapstructure:"address_chaining_rewritten"`
+	NumberChaining           bool                         `mapstructure:"number_chaining"`
+	AddressWindow            time.Duration                `mapstructure:"address_window"`
+	NumberWindow             time.Duration                `mapstructure:"number_window"`
+	NodeAliases              [][]string                   `mapstructure:"node_aliases"`
+	DecisionHorizon          time.Duration                `mapstructure:"decision_horizon"`
+	TerminalGrace            time.Duration                `mapstructure:"terminal_grace"`
+	WaitTimeout              time.Duration                `mapstructure:"wait_timeout"`
+	ShutdownTimeout          time.Duration                `mapstructure:"shutdown_timeout"`
+	StoreFile                string                       `mapstructure:"store_file"`
+	MaxCandidates            int                          `mapstructure:"max_candidates"`
+	MaxRecords               int                          `mapstructure:"max_records"`
+	IdentityProfiles         []CorrelationIdentityProfile `mapstructure:"identity_profiles"`
+	ResponseWait             bool                         `mapstructure:"response_wait"`
+	ResponseWaitWindow       time.Duration                `mapstructure:"response_wait_window"`
+	MaxPendingDialogs        int                          `mapstructure:"max_pending_dialogs"`
+	MaxPendingPackets        int                          `mapstructure:"max_pending_packets"`
+	MaxPendingBytes          int                          `mapstructure:"max_pending_bytes"`
 }
 
 func DefaultCallCorrelationConfig() CallCorrelationConfig {
@@ -43,6 +49,7 @@ func DefaultCallCorrelationConfig() CallCorrelationConfig {
 		DecisionHorizon: 5 * time.Minute, TerminalGrace: 30 * time.Second,
 		WaitTimeout: 5 * time.Second, ShutdownTimeout: 10 * time.Second,
 		MaxCandidates: 10000, MaxRecords: 100000,
+		ResponseWaitWindow: 5 * time.Millisecond, MaxPendingDialogs: 1000, MaxPendingPackets: 10000, MaxPendingBytes: 16 << 20,
 	}
 }
 
@@ -57,7 +64,7 @@ func (c CallCorrelationConfig) Normalized() CallCorrelationConfig {
 		{&c.SDPOriginReuseWindow, d.SDPOriginReuseWindow}, {&c.SDPOriginObservationTTL, d.SDPOriginObservationTTL},
 		{&c.SDPOriginSuspend, d.SDPOriginSuspend}, {&c.AddressWindow, d.AddressWindow},
 		{&c.NumberWindow, d.NumberWindow}, {&c.DecisionHorizon, d.DecisionHorizon}, {&c.TerminalGrace, d.TerminalGrace},
-		{&c.WaitTimeout, d.WaitTimeout}, {&c.ShutdownTimeout, d.ShutdownTimeout},
+		{&c.ResponseWaitWindow, d.ResponseWaitWindow}, {&c.WaitTimeout, d.WaitTimeout}, {&c.ShutdownTimeout, d.ShutdownTimeout},
 	} {
 		if *p.v == 0 {
 			*p.v = p.d
@@ -71,6 +78,15 @@ func (c CallCorrelationConfig) Normalized() CallCorrelationConfig {
 	}
 	if c.MaxRecords == 0 {
 		c.MaxRecords = d.MaxRecords
+	}
+	if c.MaxPendingDialogs == 0 {
+		c.MaxPendingDialogs = d.MaxPendingDialogs
+	}
+	if c.MaxPendingPackets == 0 {
+		c.MaxPendingPackets = d.MaxPendingPackets
+	}
+	if c.MaxPendingBytes == 0 {
+		c.MaxPendingBytes = d.MaxPendingBytes
 	}
 	return c
 }
@@ -93,10 +109,16 @@ func validCorrelationHeader(name string) bool {
 
 func (c CallCorrelationConfig) Validate() error {
 	c = c.Normalized()
-	for _, d := range []time.Duration{c.SDPOriginReuseWindow, c.SDPOriginObservationTTL, c.SDPOriginSuspend, c.AddressWindow, c.NumberWindow, c.DecisionHorizon, c.TerminalGrace, c.WaitTimeout, c.ShutdownTimeout} {
+	for _, d := range []time.Duration{c.SDPOriginReuseWindow, c.SDPOriginObservationTTL, c.SDPOriginSuspend, c.AddressWindow, c.NumberWindow, c.DecisionHorizon, c.TerminalGrace, c.WaitTimeout, c.ShutdownTimeout, c.ResponseWaitWindow} {
 		if d <= 0 {
 			return fmt.Errorf("LI call correlation durations must be positive")
 		}
+	}
+	if c.MaxPendingDialogs < 1 || c.MaxPendingPackets < 1 || c.MaxPendingBytes < 1 {
+		return fmt.Errorf("LI response wait limits must be positive")
+	}
+	if c.MaxPendingDialogs > 1000000 || c.MaxPendingPackets > 1000000 || c.MaxPendingBytes > 1<<30 {
+		return fmt.Errorf("LI response wait limits exceed supported ceilings")
 	}
 	if c.MaxCandidates < 1 || c.MaxRecords < 1 || c.SDPOriginMaxTracked < 1 {
 		return fmt.Errorf("LI call correlation limits must be positive")
@@ -166,5 +188,8 @@ func (c CallCorrelationConfig) Validate() error {
 		}
 	}
 
+	if _, err := compileCorrelationIdentityProfiles(c.IdentityProfiles); err != nil {
+		return err
+	}
 	return nil
 }

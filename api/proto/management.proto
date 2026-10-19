@@ -847,6 +847,12 @@ message LICallCorrelationStats {
     uint64 pressure_releases = 28;
     // Close attempts whose shared shutdown budget expired before owner cleanup.
     uint64 shutdown_timeouts = 29;
+    // Fixed aggregate outcomes for response-first waiting, before ID reservation.
+    map<string, uint64> response_wait = 30;
+    // Owned response FIFO, including handoff through persistence and delivery.
+    uint64 pending_dialogs = 31;
+    uint64 pending_packets = 32;
+    uint64 pending_bytes = 33;
 }
 
 // Diagnostic details are bounded to the first 32 failures per snapshot. Counts

@@ -395,7 +395,9 @@ func TestProcessorCallCorrelationDeferredMediaRejectsReusedLifetime(t *testing.T
 	require.NoError(t, p.liStorage.correlation.ResolveAsync(p.ctx, child, []li.CallCorrelationTask{{StateIncarnation: p.liStorage.correlationContext, XID: xid, Generation: task.ActivationGeneration}}, 0, func(li.CallCorrelationDecision) { close(callbackDone) }))
 	store.unblock()
 	awaitCorrelationBarrier(t, callbackDone, "deferred media callbacks did not drain")
-	require.Equal(t, before, p.getLIEncodingStats(), "held old-lifetime media must not encode into a replacement call")
+	expected := before
+	expected.X3FinalizedSuppressed++
+	require.Equal(t, expected, p.getLIEncodingStats(), "held old-lifetime media must count one rejection without encoding into a replacement call")
 	select {
 	case <-products:
 		t.Fatal("old lifetime media reached TLS")

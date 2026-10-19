@@ -11,6 +11,7 @@ import (
 
 func TestCallCorrelationStatusWireAndJSON(t *testing.T) {
 	stats := &management.LICallCorrelationStats{
+		ResponseWait: map[string]uint64{"waiting": 2, "request": 1, "timeout": 1}, PendingDialogs: 1, PendingPackets: 2, PendingBytes: 1024,
 		Storage: &management.StorageStatus{Mode: "encrypted", State: "ready", ActiveKeyId: "correlation-1", PriorKeyIds: []string{"correlation-0"}, Commits: 2, Uncertain: 3, KeyUsage: &management.EncryptionUsageStats{ReservedInvocations: 4, ReservedBlocks: 5}},
 		Adopted: map[string]uint64{"H": 1}, Standalone: map[string]uint64{"blind": 2}, Sdp: map[string]uint64{"unusable": 3},
 		Records: 4, Candidates: 5, Transactions: 6, Origins: 7, SuspendedOrigins: 8, GroupsTwo: 9, GroupsThree: 10, GroupsFourOrMore: 11,

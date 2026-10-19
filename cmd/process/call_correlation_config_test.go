@@ -71,6 +71,7 @@ func TestLICallCorrelationYAMLAndEnvironment(t *testing.T) {
 		NodeAliases:     [][]string{{"192.0.2.1", "192.0.2.2"}, {"2001:db8::1", "2001:db8::2"}},
 		DecisionHorizon: 6 * time.Minute, TerminalGrace: 40 * time.Second,
 		WaitTimeout: 2 * time.Second, ShutdownTimeout: 7 * time.Second,
+		ResponseWaitWindow: 5 * time.Millisecond, MaxPendingDialogs: 1000, MaxPendingPackets: 10000, MaxPendingBytes: 16 << 20,
 		StoreFile: "/protected/correlation.store",
 		StoreKeys: securestore.KeyConfig{Active: securestore.KeyRef{ID: "correlation-v2", File: "/protected/correlation.key"}, Prior: []securestore.KeyRef{{ID: "correlation-v1", File: "/protected/old.key"}}}, MaxCandidates: 300, MaxRecords: 400,
 	}
@@ -181,6 +182,73 @@ func TestLICallCorrelationRejectsDuplicateStoreKeyIDs(t *testing.T) {
 			viper.Set("processor.li.correlation.store_read_keys", prior)
 			_, err := readLICallCorrelationConfig()
 			require.ErrorContains(t, err, "unique IDs")
+		})
+	}
+}
+
+func TestLICallCorrelationIdentityProfilesAndResponseWait(t *testing.T) {
+	resetLICorrelationViper(t)
+	viper.SetConfigType("yaml")
+	require.NoError(t, viper.ReadConfig(strings.NewReader(`processor:
+  li:
+    correlation:
+      response_wait: true
+      response_wait_window: 12ms
+      max_pending_dialogs: 20
+      max_pending_packets: 50
+      max_pending_bytes: 8192
+      identity_profiles:
+        - name: example
+          namespace: tenant
+          sip_hosts: [sip.example]
+          phone_contexts: [local.example]
+          global_tel: true
+          allow_numeric_sip: true
+          allow_bare_global: true
+          international_prefixes: ['00']
+          rewrite_rules:
+            - pattern: '^99([0-9]+)$'
+              replacement: '${1}'
+`)))
+	c, err := readLICallCorrelationConfig()
+	require.NoError(t, err)
+	require.True(t, c.ResponseWait)
+	require.Equal(t, 12*time.Millisecond, c.ResponseWaitWindow)
+	require.Equal(t, 20, c.MaxPendingDialogs)
+	require.Equal(t, 50, c.MaxPendingPackets)
+	require.Equal(t, 8192, c.MaxPendingBytes)
+	require.False(t, c.Enabled())
+	require.Equal(t, []li.CorrelationIdentityProfile{{Name: "example", Namespace: "tenant", SIPHosts: []string{"sip.example"}, PhoneContexts: []string{"local.example"}, GlobalTEL: true, AllowNumericSIP: true, AllowBareGlobal: true, InternationalPrefixes: []string{"00"}, RewriteRules: []li.CorrelationIdentityRewrite{{Pattern: `^99([0-9]+)$`, Replacement: `${1}`}}}}, c.IdentityProfiles)
+	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_IDENTITY_PROFILES", `[{"name":"other","namespace":"tenant","sip_hosts":["other.example"]}]`)
+	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_RESPONSE_WAIT", "false")
+	c, err = readLICallCorrelationConfig()
+	require.NoError(t, err)
+	require.False(t, c.ResponseWait)
+	require.Equal(t, "other", c.IdentityProfiles[0].Name)
+	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_IDENTITY_PROFILES", "")
+	c, err = readLICallCorrelationConfig()
+	require.NoError(t, err)
+	require.Empty(t, c.IdentityProfiles)
+	t.Setenv("LIPPYCAT_PROCESSOR_LI_CORRELATION_IDENTITY_PROFILES", `[]`)
+	c, err = readLICallCorrelationConfig()
+	require.NoError(t, err)
+	require.Empty(t, c.IdentityProfiles)
+}
+func TestLICallCorrelationInvalidProfilesAndResponseBounds(t *testing.T) {
+	for _, test := range []struct {
+		key   string
+		value any
+	}{
+		{"identity_profiles", `[{"name":"example","namespace":"example","sip_hosts":["sip.example"],"unknown":true}]`},
+		{"identity_profiles", `[{"name":"example","namespace":"example","sip_hosts":["sip.example"],"allow_bare_global":"yes"}]`},
+		{"identity_profiles", `[{"name":"example","namespace":"example","sip_hosts":["sip.example"],"rewrite_rules":[{"pattern":"unanchored","replacement":"x"}]}]`},
+		{"response_wait_window", "-1ms"}, {"max_pending_dialogs", -1}, {"max_pending_packets", 1000001}, {"max_pending_bytes", -1},
+	} {
+		t.Run(test.key, func(t *testing.T) {
+			resetLICorrelationViper(t)
+			viper.Set("processor.li.correlation."+test.key, test.value)
+			_, err := readLICallCorrelationConfig()
+			require.ErrorContains(t, err, "processor.li.correlation")
 		})
 	}
 }

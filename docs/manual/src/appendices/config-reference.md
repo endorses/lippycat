@@ -641,12 +641,21 @@ if any of them is missing.
 | `processor.li.delivery_tls_ca`          | string   | `""`      | CA certificate for MDF verification.                                          |
 | `processor.li.delivery_tls_pinned_cert` | list     | `[]`      | Pinned certificates for MDF connections.                                      |
 
-Optional SIP call-leg grouping uses `processor.li.correlation` or `tap.li.correlation`, with every matching rule disabled by default. The [call-leg correlation reference](../part5-advanced/sip-call-leg-correlation.md#correlation-configuration) lists all keys, matching precedence, bounds, restart limitations and dedicated encrypted-store setup. Configuration is independent of task authorization and source packet selection. Response-only legs require retained initial-request evidence; storage backlog leaves new adoptions standalone. Configured-store startup errors never trigger automatic store-free fallback.
+Optional SIP call-leg grouping uses `processor.li.correlation` or `tap.li.correlation`, with every matching rule disabled by default. The [call-leg correlation reference](../part5-advanced/sip-call-leg-correlation.md#correlation-configuration) lists all keys, matching precedence, bounds, restart limitations and dedicated encrypted-store setup. Configuration is independent of task authorization and source packet selection. Response-only legs require initial-request evidence; optional `response_wait` delays the first reservation to allow a reordered initial INVITE to arrive; storage backlog leaves new adoptions standalone. Configured-store startup errors never trigger automatic store-free fallback.
 
 The correlation `wait_timeout` (default `5s`) and `shutdown_timeout` (default `10s`)
 are positive durations under either prefix. They bound a fixed reservation wait
 and one shared correlation shutdown budget, independently of delivery socket
 timeouts and queue flushing.
+
+`response_wait` defaults to `false`; `response_wait_window` defaults to `5ms`.
+The undecided response queue is bounded by `max_pending_dialogs` (`1000`),
+`max_pending_packets` (`10000`) and `max_pending_bytes` (`16777216`). These are
+separate from persistence waiting and its deferred snapshots. Timeout or pressure
+selects standalone; cancellation and shutdown can discard waiting products.
+The queue is volatile and does not survive restart. `identity_profiles` defaults
+to `[]`; profiles affect R1/R2 comparison keys only and do not enable matching or
+authorize packets. See the reference for profile fields and collision limitations.
 
 ### `tap` — Tap Node {#tap--tap-node}
 

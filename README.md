@@ -1,7 +1,7 @@
 # lippycat 🫦🐱
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.13.0-blue" alt="Version"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.13.1-blue" alt="Version"></a>
   <a href="go.mod"><img src="https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go" alt="Go Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
   <a href="#installation"><img src="https://img.shields.io/badge/platform-linux-lightgrey?logo=linux" alt="Platform"></a>
@@ -16,7 +16,7 @@
 
 Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, HTTP, TLS/JA3, Email (SMTP/IMAP/POP3), and RADIUS analysis with distributed capture capabilities.
 
-**[Read the Manual](https://🫦🐱.ws)** | **Status:** v0.13.0 - Early development. Expect breaking changes.
+**[Read the Manual](https://🫦🐱.ws)** | **Status:** v0.13.1 - Early development. Expect breaking changes.
 
 ![Live packet capture in lippycat with colored protocol rows and packet details](docs/demos/packet-stream.gif)
 

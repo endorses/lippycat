@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-10-20
+
+### Added
+
+- Add repeated offline PCAP replay across `sniff` protocols with `--replay-loop`
+  and `--replay-loop-delay`, cancellable pacing, and continuous virtual-interface
+  demonstrations.
+- Add ordered processor failover for hunters, taps and processor upstreams,
+  authenticated relay handover, and optional reliable raw-packet delivery with
+  durable signed receipts, encrypted spooling, and receiver or central
+  acknowledgment scopes. Best-effort delivery remains the default.
+- Add signed shared filter policies with persistent revision validation,
+  explicit replica synchronization, and optional LI capture handover.
+- Add processor-selected distributed RTP/RTCP capture across hunters and tap-local
+  sources, independent signaling and media policies, centrally retained filters
+  via `local_only`, and optional bounded cross-hunter packet duplicate suppression.
+- Add central LI task selection using signed media-only capture grants without
+  distributing private task selectors, plus optional X2/X3 capture-source metadata
+  identifying the original hunter, interface, observation domain and capture time.
+- Add opt-in scoped telephone identity normalization and bounded buffering of
+  response-first SIP observations for LI call correlation. Exact identity
+  comparison and immediate reservation remain the defaults; these settings do
+  not enable correlation methods or change task authorization.
+- Add a synthetic traffic generator, reproducible demo recording recipe, and
+  packet-capture demonstrations in the README and manual.
+
+### Changed
+
+- Generalize dynamically learned capture rules into a bounded shared engine with
+  typed selectors, evidence and lifecycle handling, while retaining VoIP-specific
+  interpretation in its adapter. VoIP remains the only production adapter.
+- Expand the English, German and Catalan manuals with failover, distributed media,
+  LI recovery and call correlation guidance; numbered linked figures and a figure
+  index; fullscreen image viewing; glossary hints and TUI illustrations.
+- Make protocol capture test fixtures self-contained and synchronize VoIP output
+  completion checks with output closure.
+
+### Fixed
+
+- Stop offline replay promptly on virtual-interface permission errors.
+- Encode optional LI capture-source metadata with the required proprietary
+  attribute owner envelope.
+- Fix glossary hint coverage and clickable references, overlapping mdBook image
+  viewers, fullscreen zoom behavior, and mobile sidebar dismissal.
+
 ## [0.13.0] - 2026-10-10
 
 ### Added
@@ -305,27 +350,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.11.6] - 2026-09-07
 
 ### Added
+
 - Expose TCP SIP stream recovery metrics and SIP IP-pair capacity pressure in
   hunter, processor, tap, and status reporting
 
 ### Changed
+
 - Bound SIP IP-pair retention and periodically reclaim expired entries to keep
   detector memory use under control
 - Collect detector telemetry without instantiating detection on status-only
   capture paths
 
 ### Fixed
+
 - Preserve established TCP SIP streams while recovering from reassembly errors
 - Keep TLS keylog FIFO readers connected across writer lifecycle changes
 
 ## [0.11.5] - 2026-09-04
 
 ### Added
+
 - Add source and processor telemetry for unresolved or ambiguous RTP ownership,
   suppressed identity inheritance, finalized or stale X3 work, and discarded
   reorder entries
 
 ### Changed
+
 - Resolve RTP ownership from exact endpoint evidence and carry direct-versus-
   inherited filter provenance across local and distributed capture paths
 - Centralize bounded call generations, admissions, and finalization in the
@@ -335,6 +385,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-atomic delivery behavior of multi-MDF X3 fan-out during finalization
 
 ### Fixed
+
 - Prevent shared or reused media endpoints from assigning one call's RTP to
   another call's identity filter, XID, correlation ID, or direction state while
   preserving direct IP and CIDR interception
@@ -349,11 +400,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.11.4] - 2026-09-03
 
 ### Changed
+
 - Add detector occupancy, eviction, expiry, pressure, and pause telemetry to hunter and processor health reporting
 - Make per-call PCAP finalization manager-owned, bounded, collision-safe, and consistent across protocol completion and idle reclamation
 - Treat `MaxWriters` as a non-destructive pressure threshold so active calls continue capturing until safe completion or idle reclamation
 
 ### Fixed
+
 - Keep RTP-to-call lookup cost independent of active-call cardinality in busy `watch live` sessions by removing eager call-list materialization and disabled debug-field computation
 - Replace per-insertion full detector-map scans at capacity with oldest-first batch eviction and bounded incremental expiry, preventing nonlinear pauses in hunt, tap, and processor-backed capture paths
 - Prevent late packets, concurrent closure, filename collisions, and callback re-entry from mutating finalized per-call PCAPs or delivering duplicate in-process completion hooks in tap and process modes
@@ -364,14 +417,17 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.11.3] - 2026-09-01
 
 ### Added
+
 - Add end-to-end capture-loss, queue-depth, and backpressure telemetry for local and distributed TUI capture paths
 - Add stateful SIP-over-TCP flow classification and sharded local TCP reassembly to improve high-volume capture scalability
 
 ### Changed
+
 - Prioritize tracked SIP flows during TCP reassembly, bound resynchronization work, and reduce detector and SIP header parsing allocations
 - Expand high-volume capture integrity benchmarks, regression coverage, operator documentation, and troubleshooting guidance
 
 ### Fixed
+
 - Prevent classified RTP and RTCP packets from entering SIP, IMSI, and IMEI identity matching while preserving packet-level IP matches, selected-call inheritance, and downstream filter-ID correlation
 - Route locally captured RTP through media filters and optimize the tracked-RTP filtering hot path
 - Preserve SIP TCP discontinuities, reset classification for reused connections, and handle duplicate Content-Length framing safely
@@ -381,65 +437,78 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.11.2] - 2026-08-31
 
 ### Changed
+
 - Avoid redundant packet copying and decoding in local capture, and buffer live normalization to reduce capture-path stalls
 - Surface cumulative libpcap receive/drop counters and exact application buffer drops in local TUI health statistics and capture logs
 - Base TCP auto-tuning pressure on enforced stream capacity, with idempotent backpressure transitions that honor disabled backpressure
 
 ### Fixed
+
 - Preserve aggregate capture-drop logging when no telemetry callback is configured
 - Eliminate flaky CI failures caused by an unsafe concurrency-test barrier and hard-coded integration-test ports
 
 ## [0.11.1] - 2026-08-31
 
 ### Changed
+
 - Expand the CUDA build matrix to link and vet the complete combined `all,li,cuda` feature partition alongside the existing CUDA variants
 
 ### Fixed
+
 - Resolve HTTP-header logging configuration once during tap composition instead of querying Viper for every locally captured packet, eliminating substantial CPU, allocation, and GC overhead on high-throughput links
 
 ## [0.11.0] - 2026-08-29
 
 ### Added
+
 - Add optional structured protocol logging for `sniff`, `tap`, and `process`, with Zeek-style TSV or JSONL `conn`, `dns`, `ssl`, `http`, `smtp`, and `files` streams, bounded asynchronous queues, rotation hooks, and stage-aware emission for hierarchical deployments
 - Add stable flow and Community IDs, connection lifecycle summaries, bounded HTTP/SMTP file metadata and optional extraction, plus direct metadata-event delivery to LI X2 in LI builds
 - Allow tap nodes to accept hunter connections, with configurable `--max-hunters` (`0` means unlimited)
 - Add multi-architecture CUDA kernels for compute capabilities 7.5, 8.0, 8.6, and 8.9, with PTX forward compatibility
 
 ### Changed
+
 - Unify local, distributed, live, and offline packet handling behind normalized pipeline contracts while preserving source identity, timestamps, filtering, PCAP and virtual-interface output, and replay order
 - Centralize SIP parsing, TCP reassembly, VoIP call registry and lifecycle, selection policy, and session output across sniff, hunt, tap, process, and TUI paths
 - Consolidate protocol command construction and DNS analysis, and move GPU filtering into the protocol-neutral `gpuaccel` package
 - Make `make test` the documented complete test entry point, covering the all-tag suite and LI package tests
 
 ### Fixed
+
 - Correct structured-log TSV and JSON encoding, rotation and transaction behavior, queue-drain semantics, and TUI and LI build-partition adapters
 - Preserve injected TCP security settings, compact SIP identity headers, buffered SIP sink delivery, terminal call ordering, offline replay order, and PCAP sink behavior
 - Repair CUDA pattern-matching runtime initialization and backend cleanup
 
 ### Removed
+
 - Remove legacy local capture paths and unused VoIP performance and plugin machinery, including unsupported AF_XDP capture code and documentation
 
 ## [0.10.10] - 2026-08-27
 
 ### Changed
+
 - Validate packet-buffer throughput with deterministic capacity, accounting, and drain invariants instead of a runner-speed-dependent delivery percentage
 - Coordinate socket-backed LI keepalive peer shutdown before closing manager-side TLS connections in tests
 
 ### Fixed
+
 - Prevent build-matrix flakes in packet-buffer throughput and LI keepalive shutdown tests
 - Install `xmllint` in the build-partition job so authoritative X1 schema tests can run under the `li` build tag
 
 ## [0.10.9] - 2026-08-27
 
 ### Added
+
 - Build-matrix verification for supported tag combinations and regression coverage for streaming ownership, backpressure, filtering, reassembly, TLS fingerprinting, and writer lifecycles
 
 ### Changed
+
 - Bound TCP reassembly memory and make stream, packet, and writer ownership explicit across hunter, processor, TUI, and VoIP pipelines
 - Require every active pressure source to clear before flow control resumes, with queue-specific state tracking for PCAP and upstream forwarding
 - Harden LI/X1 configuration and validation, filter synchronization, JA4/TLS parsing, and SIMD/backend selection
 
 ### Fixed
+
 - Prevent stale stream generations, concurrent sends, reconnect races, and shutdown ordering errors in hunter and upstream forwarding
 - Prevent premature pooled-buffer reuse, dropped writer errors, and packet lifetime violations in capture, TUI, PCAP, and VoIP processing
 - Preserve filter consistency during concurrent updates and avoid resuming hunters while any processor backlog remains pressured
@@ -447,10 +516,12 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.10.8] - 2026-08-27
 
 ### Changed
+
 - Keep LI filter IDs stable across task modification and reactivation, and reconcile persisted filters against active local task targets
 - Serialize changed live BPF updates and wait for the previous capture generation to close before reopening capture handles
 
 ### Fixed
+
 - Avoid redundant live-capture restarts when application-layer filter changes leave the effective BPF expression unchanged
 - Remove orphaned LI filters during periodic ADMF reconciliation and roll back partially applied filter updates to their prior definitions
 - Remove an ineffectual BPF state assignment reported by CI
@@ -458,62 +529,75 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.10.7] - 2026-08-27
 
 ### Changed
+
 - Validate required X2 and X3 delivery capability collectively across all destinations assigned to an LI task while preserving compatibility with restored legacy destinations
 
 ### Fixed
+
 - Allow combined X2/X3 tasks to activate and arm filters when separate X2-only and X3-only destinations provide complete coverage
 - Report a missing delivery interface against the task instead of blaming an individually valid split destination
 
 ## [0.10.6] - 2026-08-27
 
 ### Changed
+
 - Accept mandatory mediation-level LIID and delivery type fields from schema-conformant X1 peers while continuing to route delivery by DID
 
 ### Fixed
+
 - Preserve mediation windows from conformant activation requests so task end times remain enforceable
 - Recognize namespace-prefixed `xsi:type` values in ADMF error responses and surface their error code and description
 
 ## [0.10.5] - 2026-08-27
 
 ### Changed
+
 - Emit derived ETSI X1 responses through `x1ResponseMessage` with the correct `xsi:type`, base-field ordering, and request-operation vocabulary
 - Keep inbound X1 response parsing compatible with both schema-valid and legacy error response envelopes
 
 ### Fixed
+
 - Correct task-detail mediation LIIDs, delivery-type values, and required fault-list serialization
 - Validate bare, derived, and error server responses against the bundled ETSI X1 schema
 
 ## [0.10.4] - 2026-08-27
 
 ### Changed
+
 - Stopped emitting the vendor-specific X1 task-status lifecycle extension so `GetTaskDetails` uses only ETSI-defined provisioning status
 
 ## [0.10.3] - 2026-08-27
 
 ### Added
+
 - Reactivation of deactivated LI tasks using the same XID when the interception identity remains compatible
 - Task lifecycle status in X1 task-detail responses, including pending, active, deactivated, and expired states
 
 ### Changed
+
 - Made LI tombstone reactivation validation atomic and generation-aware while preserving activation identity
 - Emit X1 timestamps with qualified microsecond precision and updated the bundled ETSI schemas accordingly
 
 ### Fixed
+
 - Prevented conflicting or invalid tombstone reactivation from partially mutating task state
 - Corrected X1 timestamp formatting to satisfy ETSI microsecond conformance requirements
 
 ## [0.10.2] - 2026-08-26
 
 ### Added
+
 - Optional acknowledgement of valid inbound ETSI X2 and X3 keepalives, configurable independently per interface
 - Interoperability research and remediation documentation for ETSI X1 revisions, IRI policy support, and raw IP delivery
 
 ### Changed
+
 - Accepted wire-compatible X1 revisions from v1.13.1 through the declared v1.22.1 revision, with revision metrics and bounded peer logging
 - Validated X1 task and destination capabilities before mutation and returned protocol-specific errors for unsupported combinations
 - Made repeated activation of an identical XID idempotent while rejecting conflicting definitions that require `ModifyTask`
 
 ### Fixed
+
 - Enforced keepalive sequence matching, acknowledgement deadlines, direction handling, and reconnect behavior for X2/X3 delivery
 - Disabled incomplete raw IP X3 delivery so unsupported interception requests fail explicitly instead of emitting non-interoperable payloads
 - Discarded buffered X3 packets at task deactivation or expiry to prevent delivery beyond the enforcement window
@@ -521,12 +605,14 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.10.1] - 2026-08-26
 
 ### Added
+
 - Persistent LI interception state with ADMF startup synchronization and periodic reconciliation
 - Raw IPv4, IPv6, and Ethernet X3 delivery for supported non-VoIP targets
 - Independently configurable ETSI X2/X3 application keepalives with framed ACK validation and timeout-driven reconnect reporting
 - ETSI-context-scoped X2/X3 sequence numbers with deterministic reset and wraparound behavior
 
 ### Changed
+
 - Made LI filter activation and updates transactional, with rollback, collision-safe IDs, and actionable ADMF error reporting
 - Enforced mediation windows, pending activation, expiry cleanup, deliberate reactivation, and tombstone retention across the LI task lifecycle
 - Isolated X2 and X3 queue capacity, bounded RTP reordering, applied delivery retry backoff, and protected intercepted calls from ordinary LRU eviction
@@ -534,6 +620,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - Preserved original packet capture timestamps through hunter forwarding and X2/X3 encoding
 
 ### Fixed
+
 - Rejected unsupported delivery combinations and empty SIP IRI payloads instead of silently losing interception product
 - Prevented saturated delivery queues and flow shards from blocking unrelated LI traffic
 - Kept non-LI processor configuration stubs in sync with the new X2/X3 keepalive settings
@@ -541,12 +628,14 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.10.0] - 2026-08-25
 
 ### Added
+
 - Parallel multi-file PCAP processing for `sniff`
 - Direct `--processor` connection option for `watch remote`
 - Protocol-aware X2/X3 delivery over TLS with reconnect buffering and RTP reordering
 - Optional pprof diagnostics endpoint via `LC_PPROF_ADDR`
 
 ### Changed
+
 - Migrated TCP stream handling to `gopacket` reassembly for port reuse and fragmented SIP support
 - Aligned X1 and X2/X3 messages with ETSI TS 103 221 formats
 - Propagated hunter packet-drop and filter-match statistics to processors
@@ -555,6 +644,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - Declared X1 V1.22.1 to match the bundled schema; V1.13.1 remains accepted during coordinated ADMF migration, while unsupported revisions are rejected explicitly
 
 ### Fixed
+
 - Hardened capture, detector, call-buffer, PCAP-writer, TLS keylog, and processor concurrency and memory handling
 - Improved SIP identity matching, mid-call recovery, terminal call updates, and SIP `MESSAGE` display
 - Corrected RTP correlation, LI payload direction, and X3 correlation IDs
@@ -564,17 +654,20 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.9.4] - 2026-03-13
 
 ### Added
+
 - **IMSI/IMEI filtering**: Added IMSI and IMEI to ValidFilterTypes for targeted subscriber filtering
 - **User manual**: Comprehensive user manual covering distributed capture (Part III), administration & monitoring (Part IV), production & advanced topics (Part V), and appendices (A-D)
 - **Filter Type Reference**: New appendix consolidating all filter types and their matching strategies
 - **Mermaid diagrams**: Added mermaid diagram support to user manual for distributed architecture visualization
 
 ### Changed
+
 - **CLI refactoring**: Split `show hunters` into separate `list hunters` and `show hunter` commands for clearer semantics
 - Renamed `tui.*` config keys to `watch.*` in documentation
 - Updated website URL to HTTPS in CLI help text
 
 ### Fixed
+
 - **Test race**: Resolved race condition in TestCallCompletionMonitor_CancelPendingClose
 - **CI**: Bumped codecov action to v5 and made non-blocking
 - **CI**: Corrected GitHub Actions versions in manual workflow
@@ -583,10 +676,12 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.9.3] - 2026-03-11
 
 ### Added
+
 - **ESP-NULL capture support**: `--esp-null` and `--esp-icv-size` flags for explicit ESP-NULL mode
 - **TUI call navigation**: Call list/details navigation with focus management
 
 ### Fixed
+
 - VoIP: Classify TCP teardowns on known SIP IP pairs with DSCP EF guard
 - TUI: Classify ESP-NULL TCP handshakes and high-port RTP packets
 - TUI: Classify VoIP protocols in misclassified packet edge cases
@@ -596,11 +691,13 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.9.2] - 2026-02-03
 
 ### Added
+
 - **TUI enhancements**:
   - Origin and SIP reason phrases displayed in call details view
   - Current/average/peak statistics in active calls chart
 
 ### Fixed
+
 - TUI: Rewrote column width calculation for consistent layout across terminal widths
 - TUI: Ensure duration column has 7 chars for long durations (10h+)
 - TUI: More aggressive Call ID truncation when space is constrained
@@ -610,6 +707,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.9.1] - 2026-02-02
 
 ### Added
+
 - **TUI enhancements**:
   - 4-color CPU indicators with adjusted thresholds for better resource visibility
   - Permanent REC indicator when saving to PCAP
@@ -621,6 +719,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Extended IRI types for full SIP method coverage
 
 ### Fixed
+
 - Processor: Protected downstream Client/Conn fields from data race
 - Processor: Trigger stats callback on hunter reconnection
 - Processor: Include interfaces in hunter topology update
@@ -632,6 +731,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.9.0] - 2026-01-31
 
 ### Added
+
 - **TUI statistics dashboard**: Complete statistics tab with interactive dashboard
   - Protocol distribution bar charts with colored bars
   - CPU/RAM sparklines for TUI process monitoring
@@ -666,11 +766,13 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **TCP SIP timeout flags**: Configurable timeouts for TCP SIP handling
 
 ### Changed
+
 - **Default gRPC port**: Changed from 50051 to 55555
 - **Default filter policy**: Changed `--no-filter-policy` default to `deny` for hunt and tap commands
 - **Statistics tab redesign**: Simplified to Overview and Distributed views
 
 ### Fixed
+
 - **IPv4 defragmentation**: Fixed handling of fragmented SIP messages
 - **TCP SIP handling**: Multiple improvements to TCP stream handling
   - Replaced tcpreader with buffered stream to prevent capture freeze
@@ -711,6 +813,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **Invalid UTF-8 handling**: Handle invalid UTF-8 and rate calculation after reconnection
 
 ### Performance
+
 - **Statistics caching**: Cache statistics computations to eliminate CPU spikes
 - **Call view optimization**: Multi-phase performance improvements
   - Double-buffer pattern to reduce allocations
@@ -720,10 +823,12 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.8.3] - 2026-01-21
 
 ### Added
+
 - **DNS fallback parsing**: Added fallback parsing when gopacket doesn't auto-decode DNS layers, improving DNS packet detection reliability
 - **Processor automatic reconnection**: Processors now automatically reconnect to upstream connections when disconnected
 
 ### Fixed
+
 - **Processor data races**: Added per-processor mutex to fix data races in downstream manager when multiple hunters connect/disconnect
 - **TUI TAP virtual hunters**: Fixed TAP virtual hunters not showing in graph view after reconnection
 - **TUI TAP node reconnection**: Fixed TAP node reconnection and stats updates in graph view
@@ -731,10 +836,12 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.8.2] - 2026-01-20
 
 ### Added
+
 - **TUI calls view auto-scroll**: Automatically follows new calls when scrolled to bottom
 - **TUI calls view navigation**: Added GotoTop, GotoBottom methods for keyboard navigation
 
 ### Fixed
+
 - **TUI UI freeze at high packet rates**: Fixed two issues causing UI freeze when using filters like `has:voip` at 300-400 Mbit/s traffic rates. GetNewFilteredPackets now uses monotonically increasing counter instead of buffer length, and MetadataFilter for `has:voip` also matches by Protocol name (SIP/RTP)
 - **TUI VoIP call tracking**: Fixed LocalCallAggregator not being initialized on startup for live and offline capture modes, causing "No active VoIP calls" despite SIP/RTP packets being captured
 - **TUI mouse click handling**: Fixed mouse clicks selecting incorrect rows in calls view; moved to central mouse_handler.go for consistent coordinate calculation
@@ -743,9 +850,11 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.8.1] - 2026-01-20
 
 ### Added
+
 - **TUI filter documentation**: Comprehensive filter syntax help in the TUI help tab covering BPF, port, IP, and protocol filters
 
 ### Fixed
+
 - **TUI TAP node display**: Correct TAP node visualization and selection behavior in the graph view
 - **Signal handler panic**: Prevent panic on early cleanup when service fails to start
 - **CI test stability**: Use dynamic port allocation in integration tests to prevent port conflicts
@@ -754,6 +863,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.8.0] - 2026-01-19
 
 ### Breaking Changes
+
 - **`watch file` command**: Removed `-r`/`--read-file` flag in favor of positional arguments
   - Old: `lc watch file -r capture.pcap`
   - New: `lc watch file capture.pcap`
@@ -767,6 +877,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Old flag names are deprecated and will show warning messages, but continue to work
 
 ### Added
+
 - **Multi-file PCAP support**: Analyze multiple PCAP files simultaneously in TUI
   - Space-separated files in offline settings dialog
   - Header displays "Files:" when multiple files loaded
@@ -808,9 +919,11 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - `-n` for `--nodes-file` in watch remote command
 
 ### Changed
+
 - Renamed `docs/plan` directory to `docs/plans`
 
 ### Fixed
+
 - **Hunter metrics forwarding**: Store and forward CPU/RAM metrics in processor
 - **Non-amd64 SIMD**: Added fallback implementation for non-amd64 architectures
 - **Config consistency**: Use consistent `tui.*` viper config prefix
@@ -826,6 +939,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.7.3] - 2026-01-13
 
 ### Added
+
 - **DNS tunneling detection with command hooks**: Execute custom commands when DNS tunneling is detected
   - `--tunneling-command` flag with placeholder substitution (%domain%, %score%, %entropy%, etc.)
   - `--tunneling-threshold` for configurable detection sensitivity
@@ -840,6 +954,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **DNS metadata in TUI**: DNS query/response metadata now displayed in packet details
 
 ### Fixed
+
 - **Config file handling**: Fixed viper.IsSet() returning empty slice for unset config keys
   - CLI flag defaults are now preserved when config file doesn't explicitly set a value
   - Affected commands: tap, hunt, process
@@ -847,14 +962,17 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.7.2] - 2026-01-11
 
 ### Added
+
 - **Secure-by-default TLS for watch modes**: `watch live`, `watch file`, and `watch remote` now use TLS by default
   - Use `--insecure` flag to disable TLS when needed
 - **Tap node badge in TUI**: Tap nodes now display with `[TAP]` badge in nodes tab for easy identification
 
 ### Changed
+
 - **TLS credential logging**: Changed TLS credential setup logs from INFO to DEBUG level to reduce log noise
 
 ### Fixed
+
 - **Tap mode filter management**: Filter changes via `lc set/rm filter` now properly restart capture
   - BPF filters are recompiled and capture is restarted when filters change
   - Application-level filters (SIP user, phone number, call ID, codec) are updated at runtime
@@ -868,17 +986,20 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.7.1] - 2026-01-10
 
 ### Breaking Changes
+
 - **Secure-by-default TLS**: TLS is now enabled by default for all gRPC connections
   - Removed `--tls` flag from hunt, process, and tap commands
   - Use `--insecure` flag to disable TLS when needed (e.g., local development)
   - Production environments (`LIPPYCAT_PRODUCTION=true`) reject insecure connections
 
 ### Added
+
 - **TTY-aware JSON output**: CLI commands with JSON output now detect terminal vs pipe
   - Pretty-printed JSON when output is a terminal
   - Compact JSON when piped to other commands
 
 ### Changed
+
 - **`show config` command**: Refactored to display all Viper settings
   - JSON-only output format for easier parsing
   - Shows complete configuration state including defaults
@@ -886,6 +1007,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.7.0] - 2026-01-10
 
 ### Added
+
 - **TLS Decryption Support (Phase 7)**: Real-time TLS traffic decryption using SSLKEYLOGFILE
   - SSLKEYLOGFILE parser with file watcher for dynamic key updates
   - TLS 1.2 key derivation (PRF with SHA-256/SHA-384)
@@ -902,10 +1024,12 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - XML parsing timeout protection (default: 5s)
 
 ### Changed
+
 - X1 handler functions return flexible types for proper error responses
 - Improved test coverage for remotecapture, downstream, and subscriber packages
 
 ### Fixed
+
 - **Security**: Command injection vulnerability in CommandExecutor
   - Shell escaping for all user-controlled values (Call-ID, file paths, etc.)
   - Metacharacter detection with warning logs
@@ -928,6 +1052,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.6.1] - 2026-01-08
 
 ### Added
+
 - **IMAP/POP3 Protocol Support (Phase 5)**: Complete email protocol suite
   - IMAP command parser (SELECT, FETCH, SEARCH, LOGIN, etc.)
   - POP3 command parser (USER, PASS, RETR, LIST, etc.)
@@ -942,6 +1067,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.6.0] - 2026-01-07
 
 ### Added
+
 - **DNS Protocol Support (Phase 1)**: Complete DNS analysis with sniff/hunt/tap commands
   - Query/response correlation with RTT calculation
   - DNS tunneling detection via entropy analysis
@@ -987,10 +1113,12 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Improved call completion monitor for RTP handling
 
 ### Changed
+
 - Config file path logged as debug instead of stderr
 - README updated with multi-protocol support and architecture diagram
 
 ### Fixed
+
 - Prevent nil pointer crash when hunter disconnects abruptly
 - Defer PCAP header write until first packet (fixes empty file issues)
 - Apply loaded filters to LocalTarget at startup in tap mode
@@ -1001,17 +1129,20 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.5.2] - 2025-12-29
 
 ### Changed
+
 - **tap command flags**: Reorganized flags between `tap` and `tap voip` for clearer separation
   - VoIP-specific flags (`--per-call-pcap*`, `--voip-command`) now only available in `tap voip`
   - All shared flags (TLS, management, virtual interface) now persistent and inherited by `tap voip`
 - **sipuser flag**: Removed `-u` short flag to avoid conflict with `--upstream -u`
 
 ### Fixed
+
 - **Flag conflict**: Resolved `-u` short flag collision between `--sipuser` and `--upstream`
 
 ## [0.5.1] - 2025-12-29
 
 ### Fixed
+
 - **Memory leak**: Optimized sync.Pool usage to prevent buffer retention
 - **TUI overflow**: Use int64 for statistics counters to prevent overflow on high-traffic captures
 - **TLS security**: Added explicit cipher suite configuration for secure defaults
@@ -1019,19 +1150,23 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **VIF injection**: Upgraded errors to warnings with counter for better observability
 
 ### Changed
+
 - **Constants extraction**: Refactored magic numbers to documented constants for maintainability
 - **TUI state management**: Replaced global capture state with synchronized struct for thread safety
 - **VoIP logging**: Added logging for TCP stream cleanup drops for debugging
 
 ### Documentation
+
 - Clarified CUDA build tag pattern in CLAUDE.md to prevent misinterpretation
 
 ### Testing
+
 - Improved test coverage for hunter/connection and SIP parsing modules
 
 ## [0.5.0] - 2025-12-28
 
 ### Added
+
 - **ETSI Lawful Interception (LI) support** (`internal/pkg/li/`): Complete implementation of ETSI TS 103 221-1/2 interfaces
   - **X1 Interface** (ADMF ↔ NE): XML/HTTPS administration interface for task management
     - X1 Server for receiving task activation/deactivation/modification from ADMF
@@ -1060,11 +1195,13 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **Comprehensive LI documentation**: Integration guide, certificate management, architecture docs
 
 ### Changed
+
 - Hunter application filter extended with per-packet filter ID tracking for LI correlation
 - Processor packet pipeline includes LI Manager integration for matched packet delivery
 - GPU backends (CUDA, OpenCL, SIMD) support named automata for LI filter groups
 
 ### Security
+
 - **BREAKING**: Migrated RSA signature scheme from PKCS#1 v1.5 to PSS in proxy authorization tokens
   - RSA-PSS provides provable security under the random oracle model
   - Uses SHA-256 hash and salt length equal to hash length
@@ -1073,6 +1210,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.4.0] - 2025-12-21
 
 ### Added
+
 - **Standalone tap capture mode** (`lc tap`): Single-machine capture with processor capabilities
   - `lc tap` - General packet capture with TUI serving
   - `lc tap voip` - VoIP-specific capture with per-call PCAP writing
@@ -1092,6 +1230,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.3.3] - 2025-12-20
 
 ### Added
+
 - **Aho-Corasick pattern matching engine** (`internal/pkg/ahocorasick/`): High-performance multi-pattern string matching
   - Core Aho-Corasick automaton with failure links and output links
   - `MultiModeAC`: Separate automata per pattern type (literal, prefix, suffix, contains)
@@ -1110,6 +1249,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Automatic algorithm selection based on pattern count thresholds
 
 ### Changed
+
 - Hunter application filter migrated from linear search to Aho-Corasick matching
 - SIP user filtering now uses unified pattern matching infrastructure
 - GPU acceleration path uses AC-based matching for improved throughput
@@ -1117,6 +1257,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.3.2] - 2025-12-19
 
 ### Added
+
 - **Filter management CLI commands**: Remote filter management on processor nodes
   - `lc list filters`: List all filters on a processor
   - `lc show filter <id>`: Show details of a single filter by ID
@@ -1132,11 +1273,13 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **Filter client package**: `internal/pkg/filterclient` with gRPC client for filter operations
 
 ### Security
+
 - **Go 1.24.11**: Updated Go version for security fixes in CI
 
 ## [0.3.1] - 2025-12-19
 
 ### Added
+
 - **PCAP command hooks for processor node**: Execute custom commands when PCAP files are written
   - `--pcap-command`: Run command when any PCAP file is completed (supports `%pcap%` placeholder)
   - `--voip-command`: Run command when VoIP call PCAP is completed (supports `%pcap%`, `%callid%`, `%dirname%` placeholders)
@@ -1147,6 +1290,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.3.0] - 2025-12-19
 
 ### Breaking Changes
+
 - **CLI restructured to verb-object pattern**: Commands reorganized for consistency and discoverability
   - `lc tui` → `lc watch` (defaults to live mode)
   - `lc tui --remote` → `lc watch remote`
@@ -1155,6 +1299,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **TUI package relocated**: `cmd/tui/` moved to `internal/pkg/tui/` (internal implementation detail)
 
 ### Added
+
 - **New command structure**: `lc [verb] [object]` pattern for improved discoverability
   - `lc watch` - Interactive TUI monitoring (live, file, remote modes)
   - `lc list` - Resource listing (interfaces, future: hunters, calls)
@@ -1198,6 +1343,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Automatic BPF filter for processor communication port exclusion
 
 ### Changed
+
 - **Processor refactoring**: Split monolithic processor.go into focused modules
   - Core infrastructure, upstream handling, enrichment, and manager packages
   - Improved separation of concerns and testability
@@ -1207,6 +1353,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **Error handling policy**: Comprehensive guidelines established in CONTRIBUTING.md
 
 ### Fixed
+
 - **Race conditions**: Fixed PCAP writer and shutdown race conditions in VoIP package
 - **Deep copy safety**: Proper deep copies in GetCalls() to prevent concurrent modification
 - **gRPC pool stability**: Added nil checks to prevent panics in pool operations
@@ -1220,14 +1367,17 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **Config loading**: Restore TLS settings from config file when flags not provided
 
 ### Security
+
 - **PCAP file permissions**: Changed from 0644 to 0600
 - **Silent error suppression**: Eliminated in Close() operations
 
 ### Performance
+
 - **Zero-copy optimizations**: sync.Pool usage in virtual interface package
 - **Adaptive throttling**: TUI packet display responsiveness improvements
 
 ### Testing
+
 - **Test coverage improvements**:
   - processor: 31.4% → 62.6% (+31.2%)
   - capture: 30.3% → 60.4% (+30.1%)
@@ -1239,6 +1389,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.2.9] - 2025-10-21
 
 ### Added
+
 - **SIP call correlation engine**: Track and correlate SIP messages across multiple transactions with Call-ID, tag, and Via branch tracking
 - **Correlated call details panel in TUI**: View all related SIP messages for a call with dialog state awareness
 - **VoIP call aggregation in live capture mode**: Real-time call state tracking in TUI
@@ -1254,6 +1405,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - **SIP tag tracking**: Enhanced filtering and correlation capabilities
 
 ### Changed
+
 - Refactored VoIPFilter to ApplicationFilter for protocol-agnostic filtering
 - Improved TUI styling with Solarized colors and better readability
 - Optimized TUI styles and consolidated keybind hints
@@ -1262,6 +1414,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 - Reorganized documentation structure
 
 ### Fixed
+
 - **Streaming save**: Write both buffered and new packets correctly in TUI
 - **TCP stream handling**: Flush and close TCP streams in offline mode for proper SIP file writing
 - **Content-based SIP detection**: Per-call file output with accurate protocol detection
@@ -1278,12 +1431,14 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.2.8] - 2025-10-16
 
 ### Added
+
 - **Enhanced TUI call view navigation**
   - Added mouse click support for call selection
   - Added keyboard shortcuts: home/end (g/G), page up/down for navigation
   - Improved call sorting by timestamp and call ID
 
 ### Changed
+
 - **TUI calls view improvements**
   - Extract clean SIP URIs (remove display names and tag parameters)
   - Improved column width allocation for better readability
@@ -1292,6 +1447,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Consistent layout calculations with packet list component
 
 ### Fixed
+
 - **Test suite stability**
   - Fixed `TestCallAggregator_CallDuration` by adding packet timestamps
   - Updated `TestJanitorLoopCleanup` for ring-buffer-based cleanup
@@ -1304,10 +1460,12 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.2.7] - 2025-10-16
 
 ### Added
+
 - **Interfaces command** for hunter build variant
   - Hunter nodes can now list available network interfaces
 
 ### Changed
+
 - **Major architecture refactoring** for improved maintainability
   - Hunter package: Extracted connection management, packet forwarding, filtering, stats, and capture to sub-packages
   - Processor package: Extracted core infrastructure, upstream, enrichment, and managers to dedicated packages
@@ -1318,6 +1476,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Added space after info toast icon for better visual spacing
 
 ### Fixed
+
 - **Hunter stability fixes**
   - Eliminated double-buffering causing packet drops
   - Removed duplicate stream receiver causing deadlock
@@ -1330,12 +1489,14 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Added build tag to connection TLS tests
 
 ### Performance
+
 - **TUI rendering optimization**
   - Optimized packet list and details panel rendering for better responsiveness
 
 ## [0.2.6] - 2025-10-12
 
 ### Added
+
 - **FileDialog modal component** for file/directory operations
   - Unified file picker for PCAP save and nodes YAML selection
   - Vim-style navigation with real-time filtering
@@ -1348,6 +1509,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Click-to-dismiss functionality
 
 ### Documentation
+
 - Added TUI architecture documentation to CLAUDE.md
   - FileDialog and Toast design principles
   - Version management instructions
@@ -1355,6 +1517,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.2.5] - 2025-10-12
 
 ### Added
+
 - **Dynamic filter management** with hunter target selection
   - Multi-select modal for choosing which hunters a filter applies to
   - Press 's' on Targets field to open hunter selector
@@ -1362,12 +1525,14 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Filters can target all hunters or specific subset
 
 ### Changed
+
 - **Improved filter form consistency**
   - Enter key always saves the form (consistent behavior)
   - Separate 's' key for opening hunter selector
   - Clear hints and footer instructions
 
 ### Fixed
+
 - **Makefile test targets** now include `-tags all` flag
   - Required for project's build tag architecture
   - Tests now pass reliably with `make test`
@@ -1377,6 +1542,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
 ## [0.2.4] - 2025-10-11
 
 ### Added
+
 - **Hunter subscription management** in TUI
   - Press 's' to select specific hunters to subscribe to
   - Press 'd' to unsubscribe from hunters or remove processors
@@ -1392,6 +1558,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Used by TUI hunter selector modal
 
 ### Fixed
+
 - **Packet subscription and protobuf serialization** issues
   - Fixed Proto3 empty list serialization with `has_hunter_filter` field
   - Fixed concurrent protobuf serialization race condition with `proto.Clone()`
@@ -1403,6 +1570,7 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Reduced connection monitoring interval from 10s to 100ms
 
 ### Changed
+
 - **Flow control improvements**
   - Removed subscriber backpressure from affecting hunters
   - TUI client drops no longer pause hunter packet capture
@@ -1414,14 +1582,17 @@ Before upgrading, operators can reduce detector pause exposure by narrowing capt
   - Hover-based mouse scrolling
 
 ### Documentation
+
 - Improved TLS certificate generation documentation with SAN requirements
 
 ### Removed
+
 - Obsolete subscriber backpressure tests
 
 ## [0.2.3]
 
 ### Added
+
 - VoIP/SIP analysis (UDP and TCP)
 - Distributed capture architecture with build-tagged specialized binaries
 - SIMD optimizations and optional GPU acceleration

@@ -306,6 +306,8 @@ When pinning is configured, the delivery client will reject any MDF certificate 
 
 The X1 interface is the control plane between the ADMF and the processor. The ADMF uses it to manage interception tasks and delivery destinations; the processor uses it to send status notifications back to the ADMF.
 
+Successful `CreateDestination`, `ModifyDestination`, `RemoveDestination`, `Ping`, `ActivateTask`, `DeactivateTask`, and `ModifyTask` requests return their concrete response type with exactly one `oK` value of `AcknowledgedAndCompleted`. These acknowledgments confirm synchronous completion. X1 errors remain typed XML responses over HTTP 200. The supported X1 revision window and declared V1.22.1 revision remain unchanged.
+
 ### Supported Operations {#supported-operations}
 
 | Operation         | Direction  | Description                                         |
@@ -578,6 +580,42 @@ target under the retained XID.
 ## X2/X3 Delivery {#x2x3-delivery}
 
 Intercepted data is delivered to MDF endpoints using binary TLV (Type-Length-Value) encoding per ETSI TS 103 221-2.
+
+### Delivery encoding and migration {#li-delivery-encoding-and-migration}
+
+LI-enabled `process`, `tap`, and every tap protocol subcommand accept two independent startup settings. Unknown values fail startup. Explicit CLI flags override environment variables and YAML, and delivery failures never trigger automatic format negotiation or fallback.
+
+| CLI flag                              | Root-level YAML key                 | Values                      | Default     |
+| ------------------------------------- | ----------------------------------- | --------------------------- | ----------- |
+| `--li-delivery-timestamp-format`      | `li.delivery.timestamp_format`      | `legacy-12`, `etsi-8`       | `legacy-12` |
+| `--li-delivery-matched-target-format` | `li.delivery.matched_target_format` | `bare`, `target-identifier` | `bare`      |
+
+Environment overrides are `LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT` and `LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT`. These keys are separate from `processor.li` and `tap.li`. This synthetic fragment preserves the existing defaults:
+
+<!-- i18n:skip -->
+
+```yaml
+li:
+  delivery:
+    timestamp_format: legacy-12
+    matched_target_format: bare
+```
+
+`legacy-12` preserves the existing 12-octet timestamp extension. `etsi-8` writes attribute 9 as unsigned 32-bit seconds and nanoseconds in network byte order. Seconds must be in `0..4294967295`; valid fractions within the final second remain supported. Negative or overflowing seconds fail encoding without truncation, replacement, omission, or fallback. The timestamp reader accepts exactly 8 or 12 octets and rejects nanoseconds at or above `1000000000` in either layout.
+
+`bare` preserves bare single-target SIP X2/RTP X3 values and RADIUS X2 attribute-17 absence. `target-identifier` writes typed, escaped XML contents of the provisioned X1 `TargetIdentifier`, with required namespaces, without an outer `targetIdentifier` wrapper or XML declaration. It applies only to one unambiguous admitted target, including RADIUS X2. Multi-target tasks and legacy username targets without a recoverable X1 type omit optional attribute 17. Other serialization errors fail encoding without a bare-value fallback. Accepted target types, authorization, scope, direction, and correlation remain unchanged.
+
+Release the dual-layout timestamp reader and concrete X1 responses first, followed by the opt-in settings with legacy defaults. Verify receivers accept both timestamp layouts and both target representations before enabling either standard output independently. After verification, these flags can be added to an otherwise complete synthetic deployment command; the same flags work with `tap` and its protocol subcommands:
+
+<!-- i18n:skip -->
+
+```bash
+lc process --config /etc/lippycat/example.yaml \
+  --li-delivery-timestamp-format etsi-8 \
+  --li-delivery-matched-target-format target-identifier
+```
+
+Queued and journaled frames keep their original encoded bytes through fan-out, recovery, and authorized replay. A setting change affects newly encoded product only. Receivers must handle mixed legacy and standard traffic, including after rollback: resetting a setting does not rewrite a backlog. Keep legacy receiver support for the full lifetime of older records that remain deliverable; longer compatibility is allowed. Changing either default requires a separate decision and explicit receiver-readiness confirmation. These fixes do not add X1 V1.23.1 or selective IRI policy support.
 
 ### Optional SIP call-leg correlation {#sip-call-leg-correlation}
 

@@ -18,6 +18,8 @@ type LIConfig struct {
 	CallCorrelation               li.CallCorrelationConfig
 	TaskFilterDistributionScope   string
 	DeliveryCaptureSourceMetadata bool
+	DeliveryTimestampFormat       string
+	DeliveryMatchedTargetFormat   string
 	Enabled                       bool
 	X1ListenAddr                  string
 	X1TLSCertFile                 string

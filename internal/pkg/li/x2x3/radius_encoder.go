@@ -24,6 +24,7 @@ type RADIUSEncoder struct {
 	domainID              string
 	nfID                  string
 	ipID                  string
+	timestampFormat       TimestampFormat
 	captureSourceMetadata atomic.Bool
 }
 
@@ -34,10 +35,24 @@ func (e *RADIUSEncoder) SetCaptureSourceMetadata(enabled bool) {
 }
 
 func NewRADIUSEncoder(sequencer *Sequencer, domainID, nfID, ipID string) *RADIUSEncoder {
+	return newRADIUSEncoder(sequencer, domainID, nfID, ipID, TimestampFormatLegacy12)
+}
+
+// NewRADIUSEncoderWithTimestampFormat validates and fixes the output timestamp
+// format for this encoder's lifetime.
+func NewRADIUSEncoderWithTimestampFormat(sequencer *Sequencer, domainID, nfID, ipID string, format TimestampFormat) (*RADIUSEncoder, error) {
+	selected, err := ParseTimestampFormat(string(format))
+	if err != nil {
+		return nil, err
+	}
+	return newRADIUSEncoder(sequencer, domainID, nfID, ipID, selected), nil
+}
+
+func newRADIUSEncoder(sequencer *Sequencer, domainID, nfID, ipID string, format TimestampFormat) *RADIUSEncoder {
 	if sequencer == nil {
 		sequencer = NewSequencer(0)
 	}
-	return &RADIUSEncoder{sequencer: sequencer, builder: NewAttributeBuilder(), domainID: domainID, nfID: nfID, ipID: ipID}
+	return &RADIUSEncoder{sequencer: sequencer, builder: NewAttributeBuilder(), domainID: domainID, nfID: nfID, ipID: ipID, timestampFormat: format}
 }
 
 // Encode preserves the validated wire message, including the Authenticator and
@@ -79,6 +94,10 @@ func (e *RADIUSEncoder) Encode(observation *radius.Observation, xid uuid.UUID, c
 			return nil, err
 		}
 	}
+	timestamp, err := e.builder.TimestampWithFormat(observation.Capture.Timestamp, e.timestampFormat)
+	if err != nil {
+		return nil, fmt.Errorf("encode RADIUS X2 timestamp: %w", err)
+	}
 	seq, err := e.sequencer.Next(SequenceContext{PDUType: PDUTypeX2, XID: xid, DomainID: e.domainID, NFID: e.nfID, IPID: e.ipID, CorrelationID: correlationID})
 	if err != nil {
 		return nil, fmt.Errorf("sequence RADIUS X2: %w", err)
@@ -89,7 +108,7 @@ func (e *RADIUSEncoder) Encode(observation *radius.Observation, xid uuid.UUID, c
 	if captureAttribute.Type == AttrProprietary {
 		pdu.AddAttribute(captureAttribute)
 	}
-	pdu.AddAttribute(e.builder.Timestamp(observation.Capture.Timestamp))
+	pdu.AddAttribute(timestamp)
 	if e.domainID != "" {
 		pdu.AddAttribute(e.builder.DomainID(e.domainID))
 	}

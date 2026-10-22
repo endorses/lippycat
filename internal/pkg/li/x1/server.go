@@ -1069,7 +1069,7 @@ func (s *Server) logRevisionOnce(peer, version string) {
 }
 
 // processRequestMessage processes a single X1 request message.
-// Returns either *schema.X1ResponseMessage for success or *schema.ErrorResponse for errors.
+// Returns a concrete schema response for success or *schema.ErrorResponse for errors.
 func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage, peer string) any {
 	if reqMsg == nil {
 		var parsed schema.X1RequestMessage
@@ -2030,9 +2030,29 @@ func parseDeliveryType(dt string) DeliveryType {
 	}
 }
 
-// buildOKResponse creates a successful X1 response.
+// buildOKResponse acknowledges synchronous completion using the operation's
+// concrete response type. An unmapped operation cannot establish success.
 func (s *Server) buildOKResponse(reqMsg *schema.X1RequestMessage, messageType string) any {
-	return s.responseMessage(reqMsg)
+	base := s.responseMessage(reqMsg)
+	const completed = "AcknowledgedAndCompleted"
+	switch messageType {
+	case MessageTypeCreateDestination:
+		return &schema.CreateDestinationResponse{X1ResponseMessage: base, OK: completed}
+	case MessageTypeModifyDestination:
+		return &schema.ModifyDestinationResponse{X1ResponseMessage: base, OK: completed}
+	case MessageTypeRemoveDestination:
+		return &schema.RemoveDestinationResponse{X1ResponseMessage: base, OK: completed}
+	case MessageTypePing:
+		return &schema.PingResponse{X1ResponseMessage: base, OK: completed}
+	case MessageTypeActivateTask:
+		return &schema.ActivateTaskResponse{X1ResponseMessage: base, OK: completed}
+	case MessageTypeDeactivateTask:
+		return &schema.DeactivateTaskResponse{X1ResponseMessage: base, OK: completed}
+	case MessageTypeModifyTask:
+		return &schema.ModifyTaskResponse{X1ResponseMessage: base, OK: completed}
+	default:
+		return s.buildErrorResponse(reqMsg, messageType, ErrorCodeGenericError, "unsupported success response type")
+	}
 }
 
 func (s *Server) responseMessage(reqMsg *schema.X1RequestMessage) *schema.X1ResponseMessage {

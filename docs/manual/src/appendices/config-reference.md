@@ -1071,3 +1071,23 @@ li:
 ```
 
 This fragment supplements the protected LI deployment; it does not initialize keys or stores. Include the local source ID only when that source participates, and map every eligible source/interface/domain under `processor.voip.media_rules.sources` or `tap.voip.media_rules.sources`. The remote LI profile uses signed policy version 2, scoped media grants plus exact authenticated rules, verified mTLS, encrypted policy/raw stores and reliable packet delivery. It rejects `signalling_policy: all`; media-only grants do not authorize initial SIP. See [Distributed Media Selection](../part3-distributed/media-selection.md#media-li-compatibility).
+
+## LI delivery encoding {#li-delivery-encoding}
+
+LI-enabled `process`, `tap`, and all tap protocol subcommands share the root-level keys below. Explicit flags override environment variables and YAML; unknown values fail startup. These independent settings remain fixed for the encoder instance.
+
+| YAML key                            | CLI flag                              | Environment variable                         | Values                      | Default     |
+| ----------------------------------- | ------------------------------------- | -------------------------------------------- | --------------------------- | ----------- |
+| `li.delivery.timestamp_format`      | `--li-delivery-timestamp-format`      | `LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT`      | `legacy-12`, `etsi-8`       | `legacy-12` |
+| `li.delivery.matched_target_format` | `--li-delivery-matched-target-format` | `LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT` | `bare`, `target-identifier` | `bare`      |
+
+<!-- i18n:skip -->
+
+```yaml
+li:
+  delivery:
+    timestamp_format: legacy-12
+    matched_target_format: bare
+```
+
+`etsi-8` rejects seconds outside `0..4294967295`, while allowing valid fractions within the final second. `target-identifier` emits typed XML only for one unambiguous admitted target; multi-target and untyped legacy username tasks omit optional attribute 17. Other serialization failures fail encoding without fallback. Defaults preserve existing bytes, including RADIUS attribute-17 absence. Queue and journal replay retain original encoded bytes after configuration changes or rollback. Verify receiver support before enabling either option and retain legacy support while older records remain deliverable. See [Delivery encoding and migration](../part5-advanced/lawful-interception.md#li-delivery-encoding-and-migration).

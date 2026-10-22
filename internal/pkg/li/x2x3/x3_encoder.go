@@ -75,6 +75,7 @@ type X3Encoder struct {
 	sequencer             *Sequencer
 	domainID              string
 	nfID                  string
+	timestampFormat       TimestampFormat
 	lastSeq               atomic.Uint32
 	captureSourceMetadata atomic.Bool
 
@@ -92,14 +93,29 @@ func NewX3Encoder() *X3Encoder {
 }
 
 func NewX3EncoderWithSequencer(sequencer *Sequencer, domainID, nfID string) *X3Encoder {
+	return newX3Encoder(sequencer, domainID, nfID, TimestampFormatLegacy12)
+}
+
+// NewX3EncoderWithTimestampFormat validates and fixes the output timestamp
+// format for this encoder's lifetime.
+func NewX3EncoderWithTimestampFormat(sequencer *Sequencer, domainID, nfID string, format TimestampFormat) (*X3Encoder, error) {
+	selected, err := ParseTimestampFormat(string(format))
+	if err != nil {
+		return nil, err
+	}
+	return newX3Encoder(sequencer, domainID, nfID, selected), nil
+}
+
+func newX3Encoder(sequencer *Sequencer, domainID, nfID string, format TimestampFormat) *X3Encoder {
 	if sequencer == nil {
 		sequencer = NewSequencer(0)
 	}
 	return &X3Encoder{
-		attrBuilder: NewAttributeBuilder(),
-		sequencer:   sequencer,
-		domainID:    domainID,
-		nfID:        nfID,
+		attrBuilder:     NewAttributeBuilder(),
+		sequencer:       sequencer,
+		domainID:        domainID,
+		nfID:            nfID,
+		timestampFormat: format,
 		bufPool: sync.Pool{
 			New: func() interface{} {
 				// Pre-allocate buffer for typical RTP packet + PDU overhead
@@ -236,7 +252,11 @@ func (e *X3Encoder) addCommonAttributesWithSequence(pdu *PDU, pkt *types.PacketD
 		pdu.AddAttribute(attribute)
 	}
 	// Timestamp from packet capture
-	pdu.AddAttribute(e.attrBuilder.Timestamp(pkt.Timestamp))
+	timestamp, err := e.attrBuilder.TimestampWithFormat(pkt.Timestamp, e.timestampFormat)
+	if err != nil {
+		return fmt.Errorf("encode X3 timestamp: %w", err)
+	}
+	pdu.AddAttribute(timestamp)
 
 	if e.domainID != "" {
 		pdu.AddAttribute(e.attrBuilder.DomainID(e.domainID))

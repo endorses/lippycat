@@ -124,6 +124,8 @@ type Config struct {
 	LIEnabled                       bool // Enable LI processing
 	LITaskFilterDistributionScope   string
 	LIDeliveryCaptureSourceMetadata bool
+	LIDeliveryTimestampFormat       string
+	LIDeliveryMatchedTargetFormat   string
 	LIHandover                      li.HandoverConfig
 	LIRADIUSScope                   radius.ScopeBinding
 	LIRADIUSMACProfile              string

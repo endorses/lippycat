@@ -11,15 +11,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 func mustAddr(s string) netip.Addr {
 	return netip.MustParseAddr(s)
 }
 
-// X2/X3 golden conformance vectors (ETSI TS 103 221-2). lippycat must encode
-// to exactly these bytes and decode them back into equivalent PDUs, which keeps
-// the wire format stable for standards-compliant peers.
+// X2/X3 compatibility vectors preserve the original 12-octet timestamp and bare
+// matched-target format. They are not clause 5.3.10 standard timestamp vectors.
+// Separate etsi-8 vectors below pin the opt-in standard timestamp layout.
 
 func loadVector(t *testing.T, name string) []byte {
 	t.Helper()
@@ -218,5 +219,112 @@ func TestGoldenVectors_Decode(t *testing.T) {
 	}
 	if seq, err := ack.KeepaliveSequence(); err != nil || seq != 42 {
 		t.Errorf("keepalive ack sequence = %d, err = %v; want 42", seq, err)
+	}
+}
+
+// These complete synthetic etsi-8 frames were packed separately using Python's
+// struct module. Exercise production encoders rather than fixture-only builders.
+func TestGoldenVectorsStandardTimestamp(t *testing.T) {
+	timestamp := time.Unix(1700000000, 123456789)
+	x2, err := NewX2EncoderWithTimestampFormat(nil, "", "", TimestampFormatETSI8)
+	require.NoError(t, err)
+	x2pdu, err := x2.EncodeIRIWithPolicyAndCorrelationID(conformancePacket(timestamp, false), goldenXID, SIPContentFull, goldenCorr)
+	require.NoError(t, err)
+	x3, err := NewX3EncoderWithTimestampFormat(nil, "", "", TimestampFormatETSI8)
+	require.NoError(t, err)
+	x3pdu, err := x3.EncodeCCWithCorrelationID(conformancePacket(timestamp, true), goldenXID, goldenCorr)
+	require.NoError(t, err)
+	rad, err := NewRADIUSEncoderWithTimestampFormat(nil, "", "", "", TimestampFormatETSI8)
+	require.NoError(t, err)
+	observation := radiusEncoderObservation(t)
+	observation.Capture.Timestamp = timestamp
+	radpdu, err := rad.Encode(observation, goldenXID, goldenCorr)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name string
+		pdu  *PDU
+	}{
+		{"x2_sip_invite_etsi8.hex", x2pdu},
+		{"x3_rtp_etsi8.hex", x3pdu},
+		{"radius_x2_etsi8.hex", radpdu},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wire, err := tc.pdu.MarshalBinary()
+			require.NoError(t, err)
+			require.Equal(t, loadVector(t, tc.name), wire)
+			var decoded PDU
+			require.NoError(t, decoded.UnmarshalBinary(wire))
+			attr := FindAttribute(decoded.Attributes, AttrTimestamp)
+			require.NotNil(t, attr)
+			require.Len(t, attr.Value, StandardTimestampSize)
+			parsed, err := NewAttributeParser().ParseTimestamp(attr)
+			require.NoError(t, err)
+			require.Equal(t, timestamp, parsed)
+			reencoded, err := decoded.MarshalBinary()
+			require.NoError(t, err)
+			require.Equal(t, wire, reencoded)
+		})
+	}
+}
+
+// Tagged identifiers remain literal inputs here: the LI domain serializer and
+// admission path are tested in their owning packages. These independent wire
+// fixtures pin the attribute framing and escaped UTF-8 content for both widths.
+func TestGoldenVectorsTaggedMatchedTarget(t *testing.T) {
+	timestamp := time.Unix(1700000000, 123456789)
+	for _, tc := range []struct {
+		format TimestampFormat
+		suffix string
+		size   int
+	}{
+		{TimestampFormatLegacy12, "legacy12", LegacyTimestampSize},
+		{TimestampFormatETSI8, "etsi8", StandardTimestampSize},
+	} {
+		t.Run(tc.suffix, func(t *testing.T) {
+			x2, err := NewX2EncoderWithTimestampFormat(nil, "", "", tc.format)
+			require.NoError(t, err)
+			x2pdu, err := x2.EncodeIRIWithPolicyAndCorrelationID(conformancePacket(timestamp, false), goldenXID, SIPContentFull, goldenCorr)
+			require.NoError(t, err)
+			x3, err := NewX3EncoderWithTimestampFormat(nil, "", "", tc.format)
+			require.NoError(t, err)
+			x3pdu, err := x3.EncodeCCWithCorrelationID(conformancePacket(timestamp, true), goldenXID, goldenCorr)
+			require.NoError(t, err)
+			rad, err := NewRADIUSEncoderWithTimestampFormat(nil, "", "", "", tc.format)
+			require.NoError(t, err)
+			observation := radiusEncoderObservation(t)
+			observation.Capture.Timestamp = timestamp
+			radpdu, err := rad.Encode(observation, goldenXID, goldenCorr)
+			require.NoError(t, err)
+			for _, product := range []struct {
+				name   string
+				pdu    *PDU
+				target string
+			}{
+				{"x2_sip_invite", x2pdu, "<sipUri>sip:alice&amp;ops@example.test</sipUri>"},
+				{"x3_rtp", x3pdu, "<sipUri>sip:alice&amp;ops@example.test</sipUri>"},
+				{"radius_x2", radpdu, "<nai>alice&amp;ops@example.test</nai>"},
+			} {
+				t.Run(product.name, func(t *testing.T) {
+					product.pdu.AddAttribute(NewAttributeBuilder().MatchedTargetIdentifier(product.target))
+					wire, err := product.pdu.MarshalBinary()
+					require.NoError(t, err)
+					require.Equal(t, loadVector(t, product.name+"_tagged_"+tc.suffix+".hex"), wire)
+					var decoded PDU
+					require.NoError(t, decoded.UnmarshalBinary(wire))
+					targets := FindAllAttributes(decoded.Attributes, AttrMatchedTargetIdentifier)
+					require.Len(t, targets, 1)
+					require.Equal(t, product.target, string(targets[0].Value))
+					attr := FindAttribute(decoded.Attributes, AttrTimestamp)
+					require.NotNil(t, attr)
+					require.Len(t, attr.Value, tc.size)
+					parsed, err := NewAttributeParser().ParseTimestamp(attr)
+					require.NoError(t, err)
+					require.Equal(t, timestamp, parsed)
+					reencoded, err := decoded.MarshalBinary()
+					require.NoError(t, err)
+					require.Equal(t, wire, reencoded)
+				})
+			}
+		})
 	}
 }

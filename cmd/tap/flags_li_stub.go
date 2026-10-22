@@ -17,6 +17,8 @@ import (
 type LIConfig struct {
 	TaskFilterDistributionScope   string
 	DeliveryCaptureSourceMetadata bool
+	DeliveryTimestampFormat       string
+	DeliveryMatchedTargetFormat   string
 	CallCorrelation               li.CallCorrelationConfig
 	Enabled                       bool
 	X1ListenAddr                  string

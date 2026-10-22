@@ -3,15 +3,24 @@ package x2x3
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"math"
 	"net/netip"
 	"time"
 )
 
 // Attribute size constants.
 const (
-	// TimestampSize is the size of a POSIX timespec timestamp (seconds + nanoseconds).
-	// 8 bytes for seconds (int64) + 4 bytes for nanoseconds (int32) = 12 bytes
-	TimestampSize = 12
+	// StandardTimestampSize is the clause 5.3.10 layout: uint32 seconds and
+	// uint32 nanoseconds, both in network byte order.
+	StandardTimestampSize = 8
+
+	// LegacyTimestampSize is lippycat's original layout: int64 seconds and
+	// uint32 nanoseconds, both in network byte order.
+	LegacyTimestampSize = 12
+
+	// TimestampSize retains the legacy size for existing callers.
+	TimestampSize = LegacyTimestampSize
 
 	// IPv4Size is the size of an IPv4 address.
 	IPv4Size = 4
@@ -38,17 +47,34 @@ var (
 	ErrInvalidIPv4       = errors.New("invalid IPv4 address")
 	ErrInvalidIPv6       = errors.New("invalid IPv6 address")
 	ErrInvalidTimestamp  = errors.New("invalid timestamp data")
+	ErrTimestampRange    = errors.New("timestamp outside selected format range")
+	ErrTimestampFormat   = errors.New("invalid timestamp format")
 	ErrInvalidAttrLength = errors.New("invalid attribute length")
 )
 
-// Timestamp represents a POSIX.1-2017 timespec timestamp.
-//
-// Wire format (12 bytes, big-endian):
-//
-//	Offset  Size    Field
-//	------  ----    -----
-//	0       8       Seconds since Unix epoch (int64)
-//	8       4       Nanoseconds (int32, 0-999999999)
+// TimestampFormat selects the timestamp layout for newly encoded product.
+type TimestampFormat string
+
+const (
+	TimestampFormatLegacy12 TimestampFormat = "legacy-12"
+	TimestampFormatETSI8    TimestampFormat = "etsi-8"
+)
+
+// ParseTimestampFormat validates a format and supplies the compatibility default
+// when no format was configured.
+func ParseTimestampFormat(value string) (TimestampFormat, error) {
+	switch TimestampFormat(value) {
+	case "", TimestampFormatLegacy12:
+		return TimestampFormatLegacy12, nil
+	case TimestampFormatETSI8:
+		return TimestampFormatETSI8, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrTimestampFormat, value)
+	}
+}
+
+// Timestamp represents Unix seconds and a fraction of a second. The reader
+// accepts both clause 5.3.10's 8-octet layout and the legacy 12-octet layout.
 type Timestamp struct {
 	Seconds     int64
 	Nanoseconds int32
@@ -67,21 +93,58 @@ func (ts Timestamp) Time() time.Time {
 	return time.Unix(ts.Seconds, int64(ts.Nanoseconds))
 }
 
-// MarshalBinary encodes the timestamp to binary format.
+// MarshalBinary preserves the legacy 12-octet encoding for existing callers.
 func (ts Timestamp) MarshalBinary() ([]byte, error) {
-	buf := make([]byte, TimestampSize)
+	return ts.MarshalBinaryWithFormat(TimestampFormatLegacy12)
+}
+
+// MarshalBinaryWithFormat validates and encodes the selected timestamp layout.
+func (ts Timestamp) MarshalBinaryWithFormat(format TimestampFormat) ([]byte, error) {
+	selected, err := ParseTimestampFormat(string(format))
+	if err != nil {
+		return nil, err
+	}
+	if ts.Nanoseconds < 0 || ts.Nanoseconds >= 1_000_000_000 {
+		return nil, ErrInvalidTimestamp
+	}
+	if selected == TimestampFormatETSI8 {
+		if ts.Seconds < 0 || ts.Seconds > math.MaxUint32 {
+			return nil, ErrTimestampRange
+		}
+		buf := make([]byte, StandardTimestampSize)
+		binary.BigEndian.PutUint32(buf[0:4], uint32(ts.Seconds))
+		binary.BigEndian.PutUint32(buf[4:8], uint32(ts.Nanoseconds))
+		return buf, nil
+	}
+	return ts.marshalLegacyBinary(), nil
+}
+
+func (ts Timestamp) marshalLegacyBinary() []byte {
+	buf := make([]byte, LegacyTimestampSize)
 	binary.BigEndian.PutUint64(buf[0:8], uint64(ts.Seconds))
 	binary.BigEndian.PutUint32(buf[8:12], uint32(ts.Nanoseconds))
-	return buf, nil
+	return buf
 }
 
 // UnmarshalBinary decodes the timestamp from binary format.
 func (ts *Timestamp) UnmarshalBinary(data []byte) error {
-	if len(data) < TimestampSize {
+	var seconds int64
+	var nanos uint32
+	switch len(data) {
+	case StandardTimestampSize:
+		seconds = int64(binary.BigEndian.Uint32(data[0:4]))
+		nanos = binary.BigEndian.Uint32(data[4:8])
+	case LegacyTimestampSize:
+		seconds = int64(binary.BigEndian.Uint64(data[0:8]))
+		nanos = binary.BigEndian.Uint32(data[8:12])
+	default:
 		return ErrInvalidTimestamp
 	}
-	ts.Seconds = int64(binary.BigEndian.Uint64(data[0:8]))
-	ts.Nanoseconds = int32(binary.BigEndian.Uint32(data[8:12]))
+	if nanos >= 1_000_000_000 {
+		return ErrInvalidTimestamp
+	}
+	ts.Seconds = seconds
+	ts.Nanoseconds = int32(nanos)
 	return nil
 }
 
@@ -96,11 +159,22 @@ func NewAttributeBuilder() *AttributeBuilder {
 	return &AttributeBuilder{}
 }
 
-// Timestamp creates a timestamp attribute from a time.Time value.
+// Timestamp creates a legacy timestamp attribute from a time.Time value.
 func (b *AttributeBuilder) Timestamp(t time.Time) TLVAttribute {
 	ts := NewTimestamp(t)
-	data, _ := ts.MarshalBinary() // Cannot fail for valid Timestamp
-	return TLVAttribute{Type: AttrTimestamp, Value: data}
+	// time.Time always supplies normalized nanoseconds and int64 seconds, so
+	// the legacy layout has no fallible conversion.
+	return TLVAttribute{Type: AttrTimestamp, Value: ts.marshalLegacyBinary()}
+}
+
+// TimestampWithFormat creates a timestamp attribute without silently truncating
+// out-of-range seconds or changing the selected format.
+func (b *AttributeBuilder) TimestampWithFormat(t time.Time, format TimestampFormat) (TLVAttribute, error) {
+	data, err := NewTimestamp(t).MarshalBinaryWithFormat(format)
+	if err != nil {
+		return TLVAttribute{}, err
+	}
+	return TLVAttribute{Type: AttrTimestamp, Value: data}, nil
 }
 
 // TimestampNow creates a timestamp attribute with the current time.

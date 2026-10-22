@@ -91,6 +91,12 @@ func (p *Processor) deliverLIRADIUS(task *li.InterceptTask, observation *radius.
 		logger.Warn("RADIUS X2 encoding failed", "error", err)
 		return
 	}
+	if err := p.addLIMatchedTarget(pdu, task); err != nil {
+		liX2Errors.Add(1)
+		p.radiusLIStats.EncodingErrors++
+		logger.Warn("RADIUS X2 matched target encoding failed", "error", err)
+		return
+	}
 	raw, err := pdu.MarshalBinary()
 	if err != nil {
 		liX2Errors.Add(1)

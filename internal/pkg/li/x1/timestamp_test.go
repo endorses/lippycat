@@ -111,8 +111,9 @@ func TestQualifiedMicrosecondWireMessagesValidate(t *testing.T) {
 		contains []string
 	}{
 		{
-			name:     "bare OK response",
+			name:     "typed Ping response",
 			response: server.buildOKResponse(requestMessage, MessageTypePing),
+			contains: []string{`xsi:type="PingResponse"`, "<oK>AcknowledgedAndCompleted</oK>"},
 		},
 		{
 			name: "task details response",

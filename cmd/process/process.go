@@ -522,6 +522,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIEnabled = liConfig.Enabled
 		config.LITaskFilterDistributionScope = liConfig.TaskFilterDistributionScope
 		config.LIDeliveryCaptureSourceMetadata = liConfig.DeliveryCaptureSourceMetadata
+		config.LIDeliveryTimestampFormat = liConfig.DeliveryTimestampFormat
+		config.LIDeliveryMatchedTargetFormat = liConfig.DeliveryMatchedTargetFormat
 		config.LICallCorrelation = liConfig.CallCorrelation
 		config.LIX1ListenAddr = liConfig.X1ListenAddr
 		config.LIX1TLSCertFile = liConfig.X1TLSCertFile

@@ -132,6 +132,11 @@ var _ li.FilterPusher = (*processorFilterPusher)(nil)
 // liStoragePreparation retains authenticated owners across New and Start.
 // Runtime globals are published only after the complete constructor succeeds.
 type liStoragePreparation struct {
+	sequencer           *x2x3.Sequencer
+	x2Encoder           *x2x3.X2Encoder
+	x3Encoder           *x2x3.X3Encoder
+	radiusEncoder       *x2x3.RADIUSEncoder
+	matchedTargetFormat li.MatchedTargetFormat
 	correlationContext  uuid.UUID
 	correlationStop     chan struct{}
 	correlationDone     chan struct{}
@@ -282,10 +287,10 @@ func (p *Processor) initLIRuntime() {
 	}
 
 	// Initialize X2/X3 encoders
-	liSequencer = x2x3.NewSequencer(0)
-	liX2Encoder = x2x3.NewX2EncoderWithSequencer(liSequencer, "", p.config.ProcessorID)
-	liX3Encoder = x2x3.NewX3EncoderWithSequencer(liSequencer, "", p.config.ProcessorID)
-	liRADIUSEncoder = x2x3.NewRADIUSEncoder(liSequencer, "", p.config.ProcessorID, p.config.ProcessorID)
+	liSequencer = p.liStorage.sequencer
+	liX2Encoder = p.liStorage.x2Encoder
+	liX3Encoder = p.liStorage.x3Encoder
+	liRADIUSEncoder = p.liStorage.radiusEncoder
 	liX2Encoder.SetCaptureSourceMetadata(p.config.LIDeliveryCaptureSourceMetadata)
 	liX3Encoder.SetCaptureSourceMetadata(p.config.LIDeliveryCaptureSourceMetadata)
 	liRADIUSEncoder.SetCaptureSourceMetadata(p.config.LIDeliveryCaptureSourceMetadata)
@@ -389,20 +394,26 @@ func (p *Processor) initLIRuntime() {
 					"error", err,
 				)
 			} else if pdu != nil {
-				liX2Encoded.Add(1)
-				attrBuilder := x2x3.NewAttributeBuilder()
 				// Matched target identifier (ETSI attr 17) and Payload Direction.
 				// Only set when the task has a single target, so the identity is
 				// unambiguous; with multiple targets the MDF falls back to the XID
 				// and the direction stays Unknown.
 				if len(task.Targets) == 1 {
-					pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(task.Targets[0].Value))
+					if err := p.addLIMatchedTarget(pdu, task); err != nil {
+						liX2Errors.Add(1)
+						logger.Warn("X2 matched target encoding failed", "error", err)
+						return
+					}
 					pdu.Header.PayloadDirection = liMediaDirection.PayloadDirection(task.XID, task.Targets[0], pkt)
 				}
 				data, err := pdu.MarshalBinary()
 				if err != nil {
+					liX2Errors.Add(1)
 					logger.Warn("X2 PDU marshal error", "xid", task.XID, "error", err)
-				} else if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
+					return
+				}
+				liX2Encoded.Add(1)
+				if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
 					if err := liDeliveryClient.SendX2WithMetadataAndPublication(task.XID, task.DestinationIDs, data, metadata, func() {
 						p.publishLICorrelation(decision)
 						if claim != nil {
@@ -474,7 +485,11 @@ func (p *Processor) initLIRuntime() {
 				return
 			}
 			if len(task.Targets) == 1 {
-				pdu.AddAttribute(x2x3.NewAttributeBuilder().MatchedTargetIdentifier(task.Targets[0].Value))
+				if err := p.addLIMatchedTarget(pdu, task); err != nil {
+					liX3Errors.Add(1)
+					logger.Warn("X3 matched target encoding failed", "error", err)
+					return
+				}
 				pdu.Header.PayloadDirection = liMediaDirection.PayloadDirection(task.XID, task.Targets[0], pkt)
 			}
 			data, err := pdu.MarshalBinary()
@@ -566,6 +581,12 @@ func (p *Processor) validateLIConfiguration() error {
 	if p.liManager == nil {
 		return nil
 	}
+	if _, err := x2x3.ParseTimestampFormat(p.config.LIDeliveryTimestampFormat); err != nil {
+		return fmt.Errorf("invalid LI timestamp format: %w", err)
+	}
+	if _, err := li.ParseMatchedTargetFormat(p.config.LIDeliveryMatchedTargetFormat); err != nil {
+		return fmt.Errorf("invalid LI matched target format: %w", err)
+	}
 	if err := p.liDeliveryConfig().Validate(); err != nil {
 		return fmt.Errorf("invalid LI delivery limits: %w", err)
 	}
@@ -597,6 +618,9 @@ func (p *Processor) prepareLIStorage() error {
 }
 
 func (p *Processor) prepareLIStorageOnce() error {
+	if err := p.prepareLIWireFormats(); err != nil {
+		return err
+	}
 	// Construct the transport without starting connections or delivery workers.
 	if p.config.LIDeliveryTLSCertFile != "" && p.config.LIDeliveryTLSKeyFile != "" {
 		destConfig := delivery.DefaultConfig()

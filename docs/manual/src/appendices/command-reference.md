@@ -276,32 +276,34 @@ startup to fail.
 
 See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) for details.
 
-| Flag                                      | Type     | Default | Description                                                                             |
-| ----------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------- |
-| `--li-enabled`                            | bool     | `false` | Enable Lawful Interception support                                                      |
-| `--li-x1-listen`                          | string   |         | X1 (ADMF) HTTPS listen address                                                          |
-| `--li-x1-tls-cert`                        | string   |         | X1 server TLS certificate                                                               |
-| `--li-x1-tls-key`                         | string   |         | X1 server TLS private key                                                               |
-| `--li-x1-tls-ca`                          | string   |         | **Required when LI is enabled.** CA certificate used to verify ADMF client certificates |
-| `--li-delivery-tls-cert`                  | string   |         | X2/X3 delivery client certificate                                                       |
-| `--li-delivery-tls-key`                   | string   |         | X2/X3 delivery client private key                                                       |
-| `--li-delivery-tls-ca`                    | string   |         | X2/X3 delivery CA certificate (MDF verification)                                        |
-| `--li-delivery-queue-size`                | int      | `10000` | Maximum queued X2/X3 PDUs per destination                                               |
-| `--li-delivery-send-timeout`              | duration | `5s`    | Timeout for each delivery write                                                         |
-| `--li-delivery-reconnect-initial-backoff` | duration | `500ms` | Initial MDF reconnect backoff                                                           |
-| `--li-delivery-reconnect-max-backoff`     | duration | `5s`    | Maximum MDF reconnect backoff                                                           |
-| `--li-delivery-keepalive-idle`            | duration | `15s`   | Idle time before TCP keepalive probes                                                   |
-| `--li-delivery-keepalive-interval`        | duration | `5s`    | TCP keepalive probe interval                                                            |
-| `--li-delivery-keepalive-count`           | int      | `3`     | Failed probes before disconnect                                                         |
-| `--li-delivery-shutdown-timeout`          | duration | `10s`   | Maximum LI queue flush time during shutdown                                             |
-| `--li-admf-endpoint`                      | string   |         | ADMF HTTPS endpoint URL                                                                 |
-| `--li-admf-tls-cert`                      | string   |         | Client certificate for ADMF connection                                                  |
-| `--li-admf-tls-key`                       | string   |         | Client private key for ADMF connection                                                  |
-| `--li-admf-tls-ca`                        | string   |         | CA certificate for ADMF server verification                                             |
-| `--li-admf-keepalive`                     | duration | `30s`   | ADMF keepalive interval (0 = disabled)                                                  |
-| `--li-admf-sync-on-startup`               | bool     | `true`  | Query ADMF for state on startup                                                         |
-| `--li-admf-sync-timeout`                  | duration | `30s`   | Timeout for startup state sync                                                          |
-| `--li-admf-reconcile-interval`            | duration | `5m`    | Periodic ADMF reconciliation interval (0 = disabled)                                    |
+| Flag                                      | Type     | Default     | Description                                                                             |
+| ----------------------------------------- | -------- | ----------- | --------------------------------------------------------------------------------------- |
+| `--li-enabled`                            | bool     | `false`     | Enable Lawful Interception support                                                      |
+| `--li-x1-listen`                          | string   |             | X1 (ADMF) HTTPS listen address                                                          |
+| `--li-x1-tls-cert`                        | string   |             | X1 server TLS certificate                                                               |
+| `--li-x1-tls-key`                         | string   |             | X1 server TLS private key                                                               |
+| `--li-x1-tls-ca`                          | string   |             | **Required when LI is enabled.** CA certificate used to verify ADMF client certificates |
+| `--li-delivery-tls-cert`                  | string   |             | X2/X3 delivery client certificate                                                       |
+| `--li-delivery-tls-key`                   | string   |             | X2/X3 delivery client private key                                                       |
+| `--li-delivery-tls-ca`                    | string   |             | X2/X3 delivery CA certificate (MDF verification)                                        |
+| `--li-delivery-timestamp-format`          | string   | `legacy-12` | Timestamp encoding: `legacy-12` or `etsi-8`; independent startup setting.               |
+| `--li-delivery-matched-target-format`     | string   | `bare`      | Matched target encoding: `bare` or `target-identifier`; independent startup setting.    |
+| `--li-delivery-queue-size`                | int      | `10000`     | Maximum queued X2/X3 PDUs per destination                                               |
+| `--li-delivery-send-timeout`              | duration | `5s`        | Timeout for each delivery write                                                         |
+| `--li-delivery-reconnect-initial-backoff` | duration | `500ms`     | Initial MDF reconnect backoff                                                           |
+| `--li-delivery-reconnect-max-backoff`     | duration | `5s`        | Maximum MDF reconnect backoff                                                           |
+| `--li-delivery-keepalive-idle`            | duration | `15s`       | Idle time before TCP keepalive probes                                                   |
+| `--li-delivery-keepalive-interval`        | duration | `5s`        | TCP keepalive probe interval                                                            |
+| `--li-delivery-keepalive-count`           | int      | `3`         | Failed probes before disconnect                                                         |
+| `--li-delivery-shutdown-timeout`          | duration | `10s`       | Maximum LI queue flush time during shutdown                                             |
+| `--li-admf-endpoint`                      | string   |             | ADMF HTTPS endpoint URL                                                                 |
+| `--li-admf-tls-cert`                      | string   |             | Client certificate for ADMF connection                                                  |
+| `--li-admf-tls-key`                       | string   |             | Client private key for ADMF connection                                                  |
+| `--li-admf-tls-ca`                        | string   |             | CA certificate for ADMF server verification                                             |
+| `--li-admf-keepalive`                     | duration | `30s`       | ADMF keepalive interval (0 = disabled)                                                  |
+| `--li-admf-sync-on-startup`               | bool     | `true`      | Query ADMF for state on startup                                                         |
+| `--li-admf-sync-timeout`                  | duration | `30s`       | Timeout for startup state sync                                                          |
+| `--li-admf-reconcile-interval`            | duration | `5m`        | Periodic ADMF reconciliation interval (0 = disabled)                                    |
 
 ---
 

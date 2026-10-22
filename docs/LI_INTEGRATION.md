@@ -20,6 +20,75 @@ the server, ADMF client, fixtures, and peer compatibility tests are upgraded
 together. Confirm ADMF peers accept V1.22.1 responses and notifications before
 cutover; remove V1.13.1 compatibility only in a coordinated release.
 
+## X2/X3 encoding compatibility and migration
+
+LI-enabled `process` and `tap` (including every tap protocol subcommand) accept
+two independent encoding settings. Both are validated at startup and remain fixed
+for the encoder instance. Unknown values fail startup; delivery failures do not
+trigger format negotiation or an automatic fallback.
+
+| CLI flag                              | Root-level YAML key                 | Values                      | Default     |
+| ------------------------------------- | ----------------------------------- | --------------------------- | ----------- |
+| `--li-delivery-timestamp-format`      | `li.delivery.timestamp_format`      | `legacy-12`, `etsi-8`       | `legacy-12` |
+| `--li-delivery-matched-target-format` | `li.delivery.matched_target_format` | `bare`, `target-identifier` | `bare`      |
+
+The corresponding environment variables are
+`LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT` and
+`LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT`. Explicit CLI flags override
+environment variables and YAML. These keys are separate from `processor.li` and
+`tap.li` settings. A synthetic configuration fragment preserving the defaults is:
+
+```yaml
+li:
+  delivery:
+    timestamp_format: legacy-12
+    matched_target_format: bare
+```
+
+`legacy-12` retains the existing 12-octet timestamp extension. `etsi-8` emits
+attribute 9 as unsigned 32-bit seconds followed by unsigned 32-bit nanoseconds in
+network byte order, as specified by TS 103 221-2 clause 5.3.10. Standard output
+accepts seconds from `0` through `4294967295`, including a valid fractional part
+within the final second. Negative or overflowing seconds fail encoding; no
+truncation, replacement time, omitted timestamp, or legacy fallback is used.
+The reader accepts exactly 8 or 12 octets and rejects nanoseconds at or above
+`1000000000` in either layout.
+
+`bare` preserves the existing single-target SIP X2/RTP X3 value and keeps
+attribute 17 absent from RADIUS X2. `target-identifier` emits the XML contents of
+the provisioned X1 `TargetIdentifier`, with its type, proper escaping, and required
+namespaces, without an outer `targetIdentifier` wrapper or XML declaration. For
+example, a synthetic SIP target becomes
+`<sipUri>sip:alice@example.invalid</sipUri>`. Typed output is available only when
+one admitted target is unambiguous, including RADIUS X2. It deliberately omits
+attribute 17 for multi-target tasks and for legacy username targets without a
+recoverable X1 schema type. Other serialization failures fail encoding without
+falling back to a bare value. These settings do not expand accepted target types
+or change authorization, scope, direction, correlation, or task selection.
+
+Release the dual-layout reader and concrete X1 success-response fixes first,
+then the opt-in settings with their legacy defaults. Verify receiver support for
+both timestamp layouts and both target representations before enabling either
+standard output independently. After receiver verification, these options can be
+added to an otherwise complete synthetic deployment command:
+
+```bash
+lc process --config /etc/lippycat/example.yaml \
+  --li-delivery-timestamp-format etsi-8 \
+  --li-delivery-matched-target-format target-identifier
+```
+
+The same options apply to `lc tap` and its protocol subcommands. Queued and
+journaled frames retain their original encoded bytes through fan-out, recovery,
+and authorized replay; changing either setting affects newly encoded product
+only. A receiver can therefore see mixed legacy and standard traffic, including
+after rollback. Resetting a setting does not rewrite a backlog. Keep receiver
+support for legacy representations for the full lifetime of older records that
+remain eligible for delivery; retaining that support longer is allowed. Any
+future default change requires a separate release decision and explicit receiver
+readiness confirmation. No X1 revision upgrade or selective IRI policy support is
+introduced by these fixes.
+
 ## X2/X3 correlation compatibility invariant
 
 With optional call-leg correlation disabled, the wire-level X2/X3 correlation ID is the FNV-1a
@@ -651,7 +720,12 @@ processor:
 
 ## X1 Interface (Administration)
 
-The X1 interface provides task and destination management.
+The X1 interface provides task and destination management. Successful
+`CreateDestination`, `ModifyDestination`, `RemoveDestination`, `Ping`,
+`ActivateTask`, `DeactivateTask`, and `ModifyTask` requests return their concrete
+response type and exactly one `oK` value of `AcknowledgedAndCompleted`. The server
+acknowledges synchronous completion; X1 protocol errors remain typed XML
+responses over HTTP 200.
 
 ### Supported Operations
 

@@ -407,6 +407,32 @@ Hunters automatically receive filter updates via the filter subscription mechani
 
 ## Security
 
+### LI delivery encoding
+
+LI-enabled commands accept `--li-delivery-timestamp-format legacy-12|etsi-8`
+(default `legacy-12`) and
+`--li-delivery-matched-target-format bare|target-identifier` (default `bare`).
+They are independent startup settings. Their root-level YAML keys are
+`li.delivery.timestamp_format` and `li.delivery.matched_target_format`;
+environment overrides are `LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT` and
+`LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT`. Explicit flags take precedence.
+Unknown values fail startup.
+
+`etsi-8` emits the standard 8-octet timestamp and rejects seconds outside
+`0..4294967295`; valid fractions within the final second remain supported.
+`target-identifier` emits typed, escaped X1 target XML only for one unambiguous
+admitted target. Multi-target and untyped legacy username tasks omit optional
+attribute 17. Other serialization failures fail encoding without fallback.
+The default preserves the existing 12-octet timestamps, bare SIP/RTP targets, and
+RADIUS attribute-17 absence.
+
+Upgrade and verify receivers before enabling either format. Queued and journaled
+frames keep their original bytes through replay and rollback, so receivers must
+accept mixed formats for the full lifetime of deliverable older records. Future
+default changes require a separate receiver-readiness decision. See
+[encoding compatibility and migration](../../docs/LI_INTEGRATION.md#x2x3-encoding-compatibility-and-migration)
+for a configuration example and rollout order.
+
 ### Lawful Interception X1 mTLS
 
 LI builds host the X1 administration endpoint when `--li-enabled` is set. X1

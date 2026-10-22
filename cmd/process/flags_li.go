@@ -28,6 +28,8 @@ var (
 	// LI (Lawful Interception) flags - requires -tags li build
 	liTaskFilterDistributionScope   string
 	liDeliveryCaptureSourceMetadata bool
+	liDeliveryTimestampFormat       string
+	liDeliveryMatchedTargetFormat   string
 	liEnabled                       bool
 	liX1ListenAddr                  string
 	liX1TLSCertFile                 string
@@ -92,6 +94,8 @@ type LIConfig struct {
 	callCorrelationError          error
 	TaskFilterDistributionScope   string
 	DeliveryCaptureSourceMetadata bool
+	DeliveryTimestampFormat       string
+	DeliveryMatchedTargetFormat   string
 	Enabled                       bool
 	X1ListenAddr                  string
 	X1TLSCertFile                 string
@@ -164,6 +168,8 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&liEnabled, "li-enabled", false, "Enable ETSI LI (Lawful Interception) support (requires -tags li build)")
 	cmd.Flags().StringVar(&liTaskFilterDistributionScope, "li-task-filter-distribution-scope", "", "Task filter distribution: distributed (default) or local_only")
 	cmd.Flags().BoolVar(&liDeliveryCaptureSourceMetadata, "li-delivery-capture-source-metadata", false, "Include versioned lippycat capture-source metadata in LI output")
+	cmd.Flags().StringVar(&liDeliveryTimestampFormat, "li-delivery-timestamp-format", "legacy-12", "X2/X3 timestamp encoding: legacy-12 or etsi-8")
+	cmd.Flags().StringVar(&liDeliveryMatchedTargetFormat, "li-delivery-matched-target-format", "bare", "X2/X3 matched-target encoding: bare or target-identifier")
 	cmd.Flags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
 	cmd.Flags().StringVar(&liX1TLSCertFile, "li-x1-tls-cert", "", "Path to X1 server TLS certificate")
 	cmd.Flags().StringVar(&liX1TLSKeyFile, "li-x1-tls-key", "", "Path to X1 server TLS key")
@@ -228,6 +234,10 @@ func BindLIViperFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("processor.li.enabled", cmd.Flags().Lookup("li-enabled"))
 	_ = viper.BindEnv("li.task_filter_distribution_scope", "LIPPYCAT_LI_TASK_FILTER_DISTRIBUTION_SCOPE")
 	_ = viper.BindEnv("li.delivery.capture_source_metadata", "LIPPYCAT_LI_DELIVERY_CAPTURE_SOURCE_METADATA")
+	_ = viper.BindEnv("li.delivery.timestamp_format", "LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT")
+	_ = viper.BindEnv("li.delivery.matched_target_format", "LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT")
+	viper.SetDefault("li.delivery.timestamp_format", "legacy-12")
+	viper.SetDefault("li.delivery.matched_target_format", "bare")
 	_ = viper.BindPFlag("processor.li.x1_listen_addr", cmd.Flags().Lookup("li-x1-listen"))
 	_ = viper.BindPFlag("processor.li.x1_tls_cert", cmd.Flags().Lookup("li-x1-tls-cert"))
 	_ = viper.BindPFlag("processor.li.x1_tls_key", cmd.Flags().Lookup("li-x1-tls-key"))
@@ -313,6 +323,8 @@ func GetLIConfig() *LIConfig {
 		callCorrelationError:                  correlationErr,
 		TaskFilterDistributionScope:           cmdutil.GetStringConfig("li.task_filter_distribution_scope", liTaskFilterDistributionScope),
 		DeliveryCaptureSourceMetadata:         getLICaptureSourceMetadata(),
+		DeliveryTimestampFormat:               getLIDeliveryEncodingFormat("li.delivery.timestamp_format", "li-delivery-timestamp-format", liDeliveryTimestampFormat),
+		DeliveryMatchedTargetFormat:           getLIDeliveryEncodingFormat("li.delivery.matched_target_format", "li-delivery-matched-target-format", liDeliveryMatchedTargetFormat),
 		Enabled:                               cmdutil.GetBoolConfig("processor.li.enabled", liEnabled),
 		X1ListenAddr:                          cmdutil.GetStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
 		X1TLSCertFile:                         cmdutil.GetStringConfig("processor.li.x1_tls_cert", liX1TLSCertFile),
@@ -573,4 +585,13 @@ func getLICaptureSourceMetadata() bool {
 		return liDeliveryCaptureSourceMetadata
 	}
 	return viper.GetBool("li.delivery.capture_source_metadata")
+}
+
+// getLIDeliveryEncodingFormat gives this command's explicit flags precedence
+// over shared configuration without consulting another command's flag bindings.
+func getLIDeliveryEncodingFormat(key, flagName, flagValue string) string {
+	if liSelectionSettingsCommand != nil && liSelectionSettingsCommand.Flags().Changed(flagName) {
+		return flagValue
+	}
+	return viper.GetString(key)
 }

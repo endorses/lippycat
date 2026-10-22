@@ -283,7 +283,8 @@ const (
 	// AttrSequenceNumber contains a 4-byte (uint32) sequence number.
 	AttrSequenceNumber AttributeType = 8
 
-	// AttrTimestamp contains a POSIX timespec (seconds + nanoseconds).
+	// AttrTimestamp contains clause 5.3.10's 8-octet timestamp, or lippycat's
+	// legacy 12-octet timestamp when compatibility output is selected.
 	AttrTimestamp AttributeType = 9
 
 	// AttrSourceIPv4 contains a 4-byte IPv4 address.

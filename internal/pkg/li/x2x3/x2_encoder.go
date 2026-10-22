@@ -4,6 +4,7 @@ package x2x3
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"net/netip"
 	"strings"
@@ -40,6 +41,7 @@ type X2Encoder struct {
 	sequencer             *Sequencer
 	domainID              string
 	nfID                  string
+	timestampFormat       TimestampFormat
 	lastSeq               atomic.Uint32
 	captureSourceMetadata atomic.Bool
 }
@@ -54,14 +56,29 @@ func NewX2Encoder() *X2Encoder {
 }
 
 func NewX2EncoderWithSequencer(sequencer *Sequencer, domainID, nfID string) *X2Encoder {
+	return newX2Encoder(sequencer, domainID, nfID, TimestampFormatLegacy12)
+}
+
+// NewX2EncoderWithTimestampFormat validates and fixes the output timestamp
+// format for this encoder's lifetime.
+func NewX2EncoderWithTimestampFormat(sequencer *Sequencer, domainID, nfID string, format TimestampFormat) (*X2Encoder, error) {
+	selected, err := ParseTimestampFormat(string(format))
+	if err != nil {
+		return nil, err
+	}
+	return newX2Encoder(sequencer, domainID, nfID, selected), nil
+}
+
+func newX2Encoder(sequencer *Sequencer, domainID, nfID string, format TimestampFormat) *X2Encoder {
 	if sequencer == nil {
 		sequencer = NewSequencer(0)
 	}
 	return &X2Encoder{
-		attrBuilder: NewAttributeBuilder(),
-		sequencer:   sequencer,
-		domainID:    domainID,
-		nfID:        nfID,
+		attrBuilder:     NewAttributeBuilder(),
+		sequencer:       sequencer,
+		domainID:        domainID,
+		nfID:            nfID,
+		timestampFormat: format,
 	}
 }
 
@@ -139,7 +156,11 @@ func (e *X2Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) erro
 		pdu.AddAttribute(attribute)
 	}
 	// Timestamp from packet capture (attribute 9)
-	pdu.AddAttribute(e.attrBuilder.Timestamp(pkt.Timestamp))
+	timestamp, err := e.attrBuilder.TimestampWithFormat(pkt.Timestamp, e.timestampFormat)
+	if err != nil {
+		return fmt.Errorf("encode SIP X2 timestamp: %w", err)
+	}
+	pdu.AddAttribute(timestamp)
 	if e.domainID != "" {
 		pdu.AddAttribute(e.attrBuilder.DomainID(e.domainID))
 	}

@@ -37781,3 +37781,297 @@ msgstr ""
 "desk@voice.example.com` unterscheidet sich von "
 "`sip:alice@voice.example.com`. Es ist keine Abfrage nach dem Host wie "
 "`sip:alice@voice.example.com?subject=example`."
+
+#: src/part5-advanced/lawful-interception.md:309
+msgid ""
+"Successful `CreateDestination`, `ModifyDestination`, `RemoveDestination`, "
+"`Ping`, `ActivateTask`, `DeactivateTask`, and `ModifyTask` requests return "
+"their concrete response type with exactly one `oK` value of "
+"`AcknowledgedAndCompleted`. These acknowledgments confirm synchronous "
+"completion. X1 errors remain typed XML responses over HTTP 200. The "
+"supported X1 revision window and declared V1.22.1 revision remain unchanged."
+msgstr ""
+"Erfolgreiche Anfragen vom Typ `CreateDestination`, `ModifyDestination`, "
+"`RemoveDestination`, `Ping`, `ActivateTask`, `DeactivateTask` und "
+"`ModifyTask` geben den jeweiligen konkreten Antworttyp mit genau einem "
+"`oK`-Wert `AcknowledgedAndCompleted` zurück. Diese Bestätigungen bestätigen "
+"den synchronen Abschluss. X1-Fehler bleiben typisierte XML-Antworten über "
+"HTTP 200. Das unterstützte X1-Revisionsfenster und die deklarierte Revision "
+"V1.22.1 bleiben unverändert."
+
+#: src/part5-advanced/lawful-interception.md:584
+msgid ""
+"Delivery encoding and migration"
+msgstr ""
+"Kodierung der Ausleitung und Migration"
+
+#: src/part5-advanced/lawful-interception.md:586
+msgid ""
+"LI-enabled `process`, `tap`, and every tap protocol subcommand accept two "
+"independent startup settings. Unknown values fail startup. Explicit CLI "
+"flags override environment variables and YAML, and delivery failures never "
+"trigger automatic format negotiation or fallback."
+msgstr ""
+"`process`, `tap` und alle Tap-Protokollunterbefehle mit LI-Unterstützung "
+"akzeptieren zwei unabhängige Starteinstellungen. Unbekannte Werte verhindern"
+" den Start. Explizite CLI-Flags haben Vorrang vor Umgebungsvariablen und "
+"YAML. Ausleitungsfehler lösen niemals eine automatische Formataushandlung "
+"oder einen Rückfall aus."
+
+#: src/part5-advanced/lawful-interception.md:588
+#: src/appendices/config-reference.md:1079
+msgid ""
+"CLI flag"
+msgstr ""
+"CLI-Flag"
+
+#: src/part5-advanced/lawful-interception.md:588
+msgid ""
+"Root-level YAML key"
+msgstr ""
+"YAML-Schlüssel auf Wurzelebene"
+
+#: src/part5-advanced/lawful-interception.md:588
+#: src/appendices/config-reference.md:1079
+msgid ""
+"Values"
+msgstr ""
+"Werte"
+
+#: src/part5-advanced/lawful-interception.md:590
+#: src/appendices/command-reference.md:289
+#: src/appendices/config-reference.md:1081
+msgid ""
+"`--li-delivery-timestamp-format`"
+msgstr ""
+"`--li-delivery-timestamp-format`"
+
+#: src/part5-advanced/lawful-interception.md:590
+#: src/appendices/config-reference.md:1081
+msgid ""
+"`li.delivery.timestamp_format`"
+msgstr ""
+"`li.delivery.timestamp_format`"
+
+#: src/part5-advanced/lawful-interception.md:590
+#: src/appendices/config-reference.md:1081
+msgid ""
+"`legacy-12`, `etsi-8`"
+msgstr ""
+"`legacy-12`, `etsi-8`"
+
+#: src/part5-advanced/lawful-interception.md:590
+#: src/appendices/command-reference.md:289
+#: src/appendices/config-reference.md:1081
+msgid ""
+"`legacy-12`"
+msgstr ""
+"`legacy-12`"
+
+#: src/part5-advanced/lawful-interception.md:591
+#: src/appendices/command-reference.md:290
+#: src/appendices/config-reference.md:1082
+msgid ""
+"`--li-delivery-matched-target-format`"
+msgstr ""
+"`--li-delivery-matched-target-format`"
+
+#: src/part5-advanced/lawful-interception.md:591
+#: src/appendices/config-reference.md:1082
+msgid ""
+"`li.delivery.matched_target_format`"
+msgstr ""
+"`li.delivery.matched_target_format`"
+
+#: src/part5-advanced/lawful-interception.md:591
+#: src/appendices/config-reference.md:1082
+msgid ""
+"`bare`, `target-identifier`"
+msgstr ""
+"`bare`, `target-identifier`"
+
+#: src/part5-advanced/lawful-interception.md:591
+#: src/appendices/command-reference.md:290
+#: src/appendices/config-reference.md:1082
+msgid ""
+"`bare`"
+msgstr ""
+"`bare`"
+
+#: src/part5-advanced/lawful-interception.md:593
+msgid ""
+"Environment overrides are `LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT` and "
+"`LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT`. These keys are separate from "
+"`processor.li` and `tap.li`. This synthetic fragment preserves the existing "
+"defaults:"
+msgstr ""
+"Umgebungsvariablen zur Überschreibung sind "
+"`LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT` und "
+"`LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT`. Diese Schlüssel sind von "
+"`processor.li` und `tap.li` getrennt. Dieses synthetische Fragment bewahrt "
+"die bisherigen Standardwerte:"
+
+#: src/part5-advanced/lawful-interception.md:604
+msgid ""
+"`legacy-12` preserves the existing 12-octet timestamp extension. `etsi-8` "
+"writes attribute 9 as unsigned 32-bit seconds and nanoseconds in network "
+"byte order. Seconds must be in `0..4294967295`; valid fractions within the "
+"final second remain supported. Negative or overflowing seconds fail encoding"
+" without truncation, replacement, omission, or fallback. The timestamp "
+"reader accepts exactly 8 or 12 octets and rejects nanoseconds at or above "
+"`1000000000` in either layout."
+msgstr ""
+"`legacy-12` bewahrt die bisherige Zeitstempelerweiterung mit 12 Oktetten. "
+"`etsi-8` schreibt Attribut 9 als vorzeichenlose 32-Bit-Sekunden und "
+"-Nanosekunden in Netzwerk-Byte-Reihenfolge. Sekunden müssen in "
+"`0..4294967295` liegen; gültige Bruchteile innerhalb der letzten Sekunde "
+"werden weiterhin unterstützt. Negative oder überlaufende Sekunden führen zu "
+"einem Kodierungsfehler ohne Abschneiden, Ersetzen, Weglassen oder Rückfall. "
+"Der Zeitstempelleser akzeptiert exakt 8 oder 12 Oktette und lehnt "
+"Nanosekunden ab `1000000000` in beiden Formaten ab."
+
+#: src/part5-advanced/lawful-interception.md:606
+msgid ""
+"`bare` preserves bare single-target SIP X2/RTP X3 values and RADIUS X2 "
+"attribute-17 absence. `target-identifier` writes typed, escaped XML contents"
+" of the provisioned X1 `TargetIdentifier`, with required namespaces, without"
+" an outer `targetIdentifier` wrapper or XML declaration. It applies only to "
+"one unambiguous admitted target, including RADIUS X2. Multi-target tasks and"
+" legacy username targets without a recoverable X1 type omit optional "
+"attribute 17. Other serialization errors fail encoding without a bare-value "
+"fallback. Accepted target types, authorization, scope, direction, and "
+"correlation remain unchanged."
+msgstr ""
+"`bare` bewahrt einfache Werte einzelner Ziele in SIP X2/RTP X3 und das "
+"Fehlen von Attribut 17 in RADIUS X2. `target-identifier` schreibt den "
+"typisierten, XML-geschützten Inhalt des provisionierten "
+"X1-`TargetIdentifier` mit erforderlichen Namensräumen, ohne äußeres "
+"`targetIdentifier`-Element oder XML-Deklaration. Dies gilt nur für genau ein"
+" eindeutig zugeordnetes zugelassenes Ziel, einschließlich RADIUS X2. Bei "
+"Aufgaben mit mehreren Zielen und älteren Benutzernamenzielen ohne "
+"rekonstruierbaren X1-Typ entfällt das optionale Attribut 17. Andere "
+"Serialisierungsfehler führen zu einem Kodierungsfehler ohne Rückfall auf "
+"einen einfachen Wert. Akzeptierte Zieltypen, Autorisierung, Geltungsbereich,"
+" Richtung und Korrelation bleiben unverändert."
+
+#: src/part5-advanced/lawful-interception.md:608
+msgid ""
+"Release the dual-layout timestamp reader and concrete X1 responses first, "
+"followed by the opt-in settings with legacy defaults. Verify receivers "
+"accept both timestamp layouts and both target representations before "
+"enabling either standard output independently. After verification, these "
+"flags can be added to an otherwise complete synthetic deployment command; "
+"the same flags work with `tap` and its protocol subcommands:"
+msgstr ""
+"Veröffentlichen Sie zuerst den Zeitstempelleser für beide Formate und die "
+"konkreten X1-Antworten, danach die optionalen Einstellungen mit den "
+"bisherigen Standardwerten. Prüfen Sie, ob Empfänger beide Zeitstempelformate"
+" und beide Zieldarstellungen akzeptieren, bevor Sie eine der "
+"Standardausgaben unabhängig aktivieren. Nach der Prüfung können diese Flags "
+"zu einem ansonsten vollständigen synthetischen Bereitstellungsbefehl "
+"hinzugefügt werden; dieselben Flags funktionieren mit `tap` und seinen "
+"Protokollunterbefehlen:"
+
+#: src/part5-advanced/lawful-interception.md:618
+msgid ""
+"Queued and journaled frames keep their original encoded bytes through "
+"fan-out, recovery, and authorized replay. A setting change affects newly "
+"encoded product only. Receivers must handle mixed legacy and standard "
+"traffic, including after rollback: resetting a setting does not rewrite a "
+"backlog. Keep legacy receiver support for the full lifetime of older records"
+" that remain deliverable; longer compatibility is allowed. Changing either "
+"default requires a separate decision and explicit receiver-readiness "
+"confirmation. These fixes do not add X1 V1.23.1 or selective IRI policy "
+"support."
+msgstr ""
+"Frames in Warteschlangen und Journalen behalten ihre ursprünglichen "
+"kodierten Bytes bei Verteilung, Wiederherstellung und autorisierter "
+"Wiedergabe. Eine Einstellungsänderung betrifft nur neu kodierte Produkte. "
+"Empfänger müssen gemischten Verkehr im bisherigen und im Standardformat "
+"verarbeiten, auch nach einer Rücknahme: Das Zurücksetzen einer Einstellung "
+"schreibt keinen Rückstau um. Bewahren Sie die Unterstützung bisheriger "
+"Formate beim Empfänger während der gesamten Lebensdauer älterer noch "
+"ausleitbarer Datensätze; längere Kompatibilität ist zulässig. Eine Änderung "
+"eines Standardwerts erfordert eine separate Entscheidung und eine "
+"ausdrückliche Bestätigung der Empfängerbereitschaft. Diese Korrekturen "
+"ergänzen weder X1 V1.23.1 noch Unterstützung für selektive IRI-Richtlinien."
+
+#: src/appendices/command-reference.md:289
+msgid ""
+"Timestamp encoding: `legacy-12` or `etsi-8`; independent startup setting."
+msgstr ""
+"Zeitstempelkodierung: `legacy-12` oder `etsi-8`; unabhängige "
+"Starteinstellung."
+
+#: src/appendices/command-reference.md:290
+msgid ""
+"Matched target encoding: `bare` or `target-identifier`; independent startup "
+"setting."
+msgstr ""
+"Kodierung des zugeordneten Ziels: `bare` oder `target-identifier`; "
+"unabhängige Starteinstellung."
+
+#: src/appendices/config-reference.md:1075
+msgid ""
+"LI delivery encoding"
+msgstr ""
+"Kodierung der LI-Ausleitung"
+
+#: src/appendices/config-reference.md:1077
+msgid ""
+"LI-enabled `process`, `tap`, and all tap protocol subcommands share the "
+"root-level keys below. Explicit flags override environment variables and "
+"YAML; unknown values fail startup. These independent settings remain fixed "
+"for the encoder instance."
+msgstr ""
+"`process`, `tap` und alle Tap-Protokollunterbefehle mit LI-Unterstützung "
+"verwenden die folgenden gemeinsamen Schlüssel auf Wurzelebene. Explizite "
+"Flags haben Vorrang vor Umgebungsvariablen und YAML; unbekannte Werte "
+"verhindern den Start. Diese unabhängigen Einstellungen bleiben für die "
+"Encoderinstanz fest."
+
+#: src/appendices/config-reference.md:1079
+msgid ""
+"Environment variable"
+msgstr ""
+"Umgebungsvariable"
+
+#: src/appendices/config-reference.md:1081
+msgid ""
+"`LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT`"
+msgstr ""
+"`LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT`"
+
+#: src/appendices/config-reference.md:1082
+msgid ""
+"`LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT`"
+msgstr ""
+"`LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT`"
+
+#: src/appendices/config-reference.md:1093
+msgid ""
+"`etsi-8` rejects seconds outside `0..4294967295`, while allowing valid "
+"fractions within the final second. `target-identifier` emits typed XML only "
+"for one unambiguous admitted target; multi-target and untyped legacy "
+"username tasks omit optional attribute 17. Other serialization failures fail"
+" encoding without fallback. Defaults preserve existing bytes, including "
+"RADIUS attribute-17 absence. Queue and journal replay retain original "
+"encoded bytes after configuration changes or rollback. Verify receiver "
+"support before enabling either option and retain legacy support while older "
+"records remain deliverable. See [Delivery encoding and "
+"migration](../part5-advanced/lawful-interception.md#li-delivery-encoding-and-migration)."
+msgstr ""
+"`etsi-8` lehnt Sekunden außerhalb von `0..4294967295` ab und erlaubt gültige"
+" Bruchteile innerhalb der letzten Sekunde. `target-identifier` gibt "
+"typisiertes XML nur für genau ein eindeutig zugeordnetes zugelassenes Ziel "
+"aus; bei Aufgaben mit mehreren Zielen und untypisierten älteren "
+"Benutzernamenzielen entfällt das optionale Attribut 17. Andere "
+"Serialisierungsfehler führen zu einem Kodierungsfehler ohne Rückfall. "
+"Standardwerte bewahren die bisherigen Bytes einschließlich des Fehlens von "
+"Attribut 17 bei RADIUS. Wiedergaben aus Warteschlangen und Journalen "
+"behalten nach Konfigurationsänderungen oder Rücknahmen die ursprünglichen "
+"kodierten Bytes. Prüfen Sie vor dem Aktivieren einer Option die "
+"Empfängerunterstützung und bewahren Sie die Unterstützung bisheriger "
+"Formate, solange ältere Datensätze ausleitbar bleiben. Siehe [Kodierung der "
+"Ausleitung und "
+"Migration](../part5-advanced/lawful-interception.md#li-delivery-encoding-and-migration)."

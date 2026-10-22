@@ -2800,6 +2800,7 @@ func TestServer_ContainerContinuesAfterErrorAndRejectsNestedMessage(t *testing.T
 	require.Equal(t, http.StatusOK, w.Code)
 	responseBody := w.Body.String()
 	require.Contains(t, responseBody, "nested request containers not supported")
+	require.Contains(t, responseBody, `xsi:type="PingResponse"`)
 	require.Contains(t, responseBody, badID.String())
 	require.Contains(t, responseBody, goodID.String())
 	require.Less(t, bytes.Index(w.Body.Bytes(), []byte(badID.String())), bytes.Index(w.Body.Bytes(), []byte(goodID.String())))

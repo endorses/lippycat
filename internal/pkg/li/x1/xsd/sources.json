@@ -1,0 +1,52 @@
+[
+  {
+    "file": "TS_103_221_01.xsd",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103221-1/1.23.1/103221-1/TS_103_221_01.xsd",
+    "sha256": "d45aa978296a9331dcdf5a1eacadd29c95e0eb17191325372d2b677df27b1c74"
+  },
+  {
+    "file": "TS_103_280.xsd",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103120/1.24.1/103280/TS_103_280.xsd",
+    "sha256": "1ddcee37e9d9e8cbc279b67cfa76b37e9b4d06931fa40c3da382ac3955e11af9"
+  },
+  {
+    "file": "ts_103120_IRIPolicy.xsd",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103120/1.24.1/103120/schema/xsd/ts_103120_IRIPolicy.xsd",
+    "sha256": "8d52b4f9001957981594ae40bf69e76ef0c8809d0b1c36018192d50784a4c475"
+  },
+  {
+    "file": "ts_103120_Common.xsd",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103120/1.24.1/103120/schema/xsd/ts_103120_Common.xsd",
+    "sha256": "660a38a72fd440cc3e93bf6619ae6ff3cfadc5f4b44c84bcd45b0dd3edb88076"
+  },
+  {
+    "file": "ts_103120_Core.xsd",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103120/1.24.1/103120/schema/xsd/ts_103120_Core.xsd",
+    "sha256": "50e36a1aa8834c316f058872ffd2133870e5d4a24148f65da794f4cfaeb9dd67"
+  },
+  {
+    "file": "ts_103120_Config.xsd",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103120/1.24.1/103120/schema/xsd/ts_103120_Config.xsd",
+    "sha256": "8ffd38496f59e2ef6b2002b41e8fa313deea2c50c9d9f2e768f500e2cc23771b"
+  },
+  {
+    "file": "ts_103120_Dictionaries.xsd",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103120/1.24.1/103120/dictionaries/ts_103120_Dictionaries.xsd",
+    "sha256": "9a0eee79fc35d878ce0cc907961ff62253da320dadde7b97ba3ab46197a39ed9"
+  },
+  {
+    "file": "xmldsig-core-schema.xsd",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103120/1.24.1/testing/deps/xmldsig/xmldsig-core-schema.xsd",
+    "sha256": "35cf8197da812c85e40d57891b35c94187569ed474a2dac813ce5090dafcd35c"
+  },
+  {
+    "file": "ts_103120_ETSIDictionaryDefinitions.xml",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103120/1.24.1/103120/dictionaries/ts_103120_ETSIDictionaryDefinitions.xml",
+    "sha256": "d9df9fa42ca35219f63c40a17833d80822be4a447c53d5559f64ca92b83c5a24"
+  },
+  {
+    "file": "TS_103_221_01_HashedID.xsd",
+    "source": "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/spec/103221-1/1.23.1/103221-1/TS_103_221_01_HashedID.xsd",
+    "sha256": "3279bf6317dc50a5eec75c8b720fe95dcb98270f3eab46808592a7cb5b1edb4b"
+  }
+]

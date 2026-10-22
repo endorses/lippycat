@@ -28,6 +28,7 @@ var (
 	// LI (Lawful Interception) flags - requires -tags li build
 	liTaskFilterDistributionScope   string
 	liDeliveryCaptureSourceMetadata bool
+	liIRIPolicyProfileFile          string
 	liDeliveryTimestampFormat       string
 	liDeliveryMatchedTargetFormat   string
 	liEnabled                       bool
@@ -94,6 +95,7 @@ type LIConfig struct {
 	callCorrelationError          error
 	TaskFilterDistributionScope   string
 	DeliveryCaptureSourceMetadata bool
+	IRIPolicyProfileFile          string
 	DeliveryTimestampFormat       string
 	DeliveryMatchedTargetFormat   string
 	Enabled                       bool
@@ -168,6 +170,7 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&liEnabled, "li-enabled", false, "Enable ETSI LI (Lawful Interception) support (requires -tags li build)")
 	cmd.Flags().StringVar(&liTaskFilterDistributionScope, "li-task-filter-distribution-scope", "", "Task filter distribution: distributed (default) or local_only")
 	cmd.Flags().BoolVar(&liDeliveryCaptureSourceMetadata, "li-delivery-capture-source-metadata", false, "Include versioned lippycat capture-source metadata in LI output")
+	cmd.Flags().StringVar(&liIRIPolicyProfileFile, "li-iri-policy-profile", "", "JSON profile for national IRI event mappings and POI facts")
 	cmd.Flags().StringVar(&liDeliveryTimestampFormat, "li-delivery-timestamp-format", "legacy-12", "X2/X3 timestamp encoding: legacy-12 or etsi-8")
 	cmd.Flags().StringVar(&liDeliveryMatchedTargetFormat, "li-delivery-matched-target-format", "bare", "X2/X3 matched-target encoding: bare or target-identifier")
 	cmd.Flags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
@@ -234,6 +237,7 @@ func BindLIViperFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("processor.li.enabled", cmd.Flags().Lookup("li-enabled"))
 	_ = viper.BindEnv("li.task_filter_distribution_scope", "LIPPYCAT_LI_TASK_FILTER_DISTRIBUTION_SCOPE")
 	_ = viper.BindEnv("li.delivery.capture_source_metadata", "LIPPYCAT_LI_DELIVERY_CAPTURE_SOURCE_METADATA")
+	_ = viper.BindEnv("li.iri_policy_profile", "LIPPYCAT_LI_IRI_POLICY_PROFILE")
 	_ = viper.BindEnv("li.delivery.timestamp_format", "LIPPYCAT_LI_DELIVERY_TIMESTAMP_FORMAT")
 	_ = viper.BindEnv("li.delivery.matched_target_format", "LIPPYCAT_LI_DELIVERY_MATCHED_TARGET_FORMAT")
 	viper.SetDefault("li.delivery.timestamp_format", "legacy-12")
@@ -323,6 +327,7 @@ func GetLIConfig() *LIConfig {
 		callCorrelationError:                  correlationErr,
 		TaskFilterDistributionScope:           cmdutil.GetStringConfig("li.task_filter_distribution_scope", liTaskFilterDistributionScope),
 		DeliveryCaptureSourceMetadata:         getLICaptureSourceMetadata(),
+		IRIPolicyProfileFile:                  getLIDeliveryEncodingFormat("li.iri_policy_profile", "li-iri-policy-profile", liIRIPolicyProfileFile),
 		DeliveryTimestampFormat:               getLIDeliveryEncodingFormat("li.delivery.timestamp_format", "li-delivery-timestamp-format", liDeliveryTimestampFormat),
 		DeliveryMatchedTargetFormat:           getLIDeliveryEncodingFormat("li.delivery.matched_target_format", "li-delivery-matched-target-format", liDeliveryMatchedTargetFormat),
 		Enabled:                               cmdutil.GetBoolConfig("processor.li.enabled", liEnabled),

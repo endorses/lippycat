@@ -5,11 +5,12 @@ package li
 import (
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/li/iripolicy"
 	"github.com/google/uuid"
 )
 
 const (
-	StateSchemaVersion    = 2
+	StateSchemaVersion    = 3
 	MaxStateSnapshotBytes = 32 << 20
 	MaxStateTasks         = 65_536
 	MaxStateDestinations  = 4_096
@@ -32,6 +33,7 @@ type StateSnapshot struct {
 	RADIUSCorrelationStateFile string                 `json:"radius_correlation_state_file,omitempty"`
 	Tasks                      []*InterceptTask       `json:"tasks"`
 	Destinations               []*StateDestination    `json:"destinations"`
+	GenericObjects             []iripolicy.Object     `json:"generic_objects"`
 	CleanupNeeded              map[uuid.UUID][]string `json:"cleanup_needed"`
 	Generations                map[uuid.UUID]uint64   `json:"generations"`
 	Intents                    []*StateIntent         `json:"intents"`
@@ -90,6 +92,8 @@ type StateIntent struct {
 	CleanupFilterIDs     []string          `json:"cleanup_filter_ids"`
 	RevocationIDs        []uuid.UUID       `json:"revocation_ids"`
 	Failed               bool              `json:"failed"`
+	// IncludeX2 explicitly withdraws signaling when policy authorization changes.
+	IncludeX2 bool `json:"include_x2,omitempty"`
 }
 
 type StateRevocationScope string

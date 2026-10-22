@@ -4,6 +4,7 @@ package li
 
 import (
 	"errors"
+	"github.com/endorses/lippycat/internal/pkg/li/iripolicy"
 	"os"
 	"time"
 
@@ -145,6 +146,9 @@ func (m *Manager) snapshotAdministrativeLocked() *StateSnapshot {
 		RADIUSCorrelationStateFile: m.radiusCorrelationPin,
 		Tasks:                      []*InterceptTask{}, Destinations: []*StateDestination{}, CleanupNeeded: map[uuid.UUID][]string{}, Generations: map[uuid.UUID]uint64{},
 		Intents: m.stateIntents, Revocations: m.stateRevocations}
+	m.iriMu.RLock()
+	s.GenericObjects = iripolicy.CloneObjects(m.iriObjects)
+	m.iriMu.RUnlock()
 	m.registry.mu.RLock()
 	for id, generation := range m.registry.generations {
 		s.Generations[id] = generation

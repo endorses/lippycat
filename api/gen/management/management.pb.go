@@ -3095,8 +3095,10 @@ type ProcessorStats struct {
 	MediaRules        *MediaRuleStatus        `protobuf:"bytes,22,opt,name=media_rules,json=mediaRules,proto3" json:"media_rules,omitempty"`
 	PacketDuplicates  *PacketDuplicateStatus  `protobuf:"bytes,23,opt,name=packet_duplicates,json=packetDuplicates,proto3" json:"packet_duplicates,omitempty"`
 	LearnedRules      *LearnedRuleStatus      `protobuf:"bytes,24,opt,name=learned_rules,json=learnedRules,proto3" json:"learned_rules,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Selective IRI policy graph and decisions. No policy or target content.
+	LiIriPolicy   *LIIRIPolicyStats `protobuf:"bytes,25,opt,name=li_iri_policy,json=liIriPolicy,proto3" json:"li_iri_policy,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ProcessorStats) Reset() {
@@ -3293,6 +3295,13 @@ func (x *ProcessorStats) GetPacketDuplicates() *PacketDuplicateStatus {
 func (x *ProcessorStats) GetLearnedRules() *LearnedRuleStatus {
 	if x != nil {
 		return x.LearnedRules
+	}
+	return nil
+}
+
+func (x *ProcessorStats) GetLiIriPolicy() *LIIRIPolicyStats {
+	if x != nil {
+		return x.LiIriPolicy
 	}
 	return nil
 }
@@ -8888,6 +8897,90 @@ func (x *RawPacketStatus) GetPolicyRevision() uint64 {
 	return 0
 }
 
+type LIIRIPolicyStats struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Objects          uint64                 `protobuf:"varint,1,opt,name=objects,proto3" json:"objects,omitempty"`
+	Policies         uint64                 `protobuf:"varint,2,opt,name=policies,proto3" json:"policies,omitempty"`
+	Rules            uint64                 `protobuf:"varint,3,opt,name=rules,proto3" json:"rules,omitempty"`
+	ConfirmedObjects uint64                 `protobuf:"varint,4,opt,name=confirmed_objects,json=confirmedObjects,proto3" json:"confirmed_objects,omitempty"`
+	Suppressed       uint64                 `protobuf:"varint,5,opt,name=suppressed,proto3" json:"suppressed,omitempty"`
+	EvaluationErrors uint64                 `protobuf:"varint,6,opt,name=evaluation_errors,json=evaluationErrors,proto3" json:"evaluation_errors,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *LIIRIPolicyStats) Reset() {
+	*x = LIIRIPolicyStats{}
+	mi := &file_management_proto_msgTypes[76]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LIIRIPolicyStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LIIRIPolicyStats) ProtoMessage() {}
+
+func (x *LIIRIPolicyStats) ProtoReflect() protoreflect.Message {
+	mi := &file_management_proto_msgTypes[76]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LIIRIPolicyStats.ProtoReflect.Descriptor instead.
+func (*LIIRIPolicyStats) Descriptor() ([]byte, []int) {
+	return file_management_proto_rawDescGZIP(), []int{76}
+}
+
+func (x *LIIRIPolicyStats) GetObjects() uint64 {
+	if x != nil {
+		return x.Objects
+	}
+	return 0
+}
+
+func (x *LIIRIPolicyStats) GetPolicies() uint64 {
+	if x != nil {
+		return x.Policies
+	}
+	return 0
+}
+
+func (x *LIIRIPolicyStats) GetRules() uint64 {
+	if x != nil {
+		return x.Rules
+	}
+	return 0
+}
+
+func (x *LIIRIPolicyStats) GetConfirmedObjects() uint64 {
+	if x != nil {
+		return x.ConfirmedObjects
+	}
+	return 0
+}
+
+func (x *LIIRIPolicyStats) GetSuppressed() uint64 {
+	if x != nil {
+		return x.Suppressed
+	}
+	return 0
+}
+
+func (x *LIIRIPolicyStats) GetEvaluationErrors() uint64 {
+	if x != nil {
+		return x.EvaluationErrors
+	}
+	return 0
+}
+
 var File_management_proto protoreflect.FileDescriptor
 
 const file_management_proto_rawDesc = "" +
@@ -9112,7 +9205,7 @@ const file_management_proto_rawDesc = "" +
 	"interfaces\x18\t \x03(\tR\n" +
 	"interfaces\x12K\n" +
 	"\fcapabilities\x18\n" +
-	" \x01(\v2'.lippycat.management.HunterCapabilitiesR\fcapabilities\"\x81\f\n" +
+	" \x01(\v2'.lippycat.management.HunterCapabilitiesR\fcapabilities\"\xcc\f\n" +
 	"\x0eProcessorStats\x12#\n" +
 	"\rtotal_hunters\x18\x01 \x01(\rR\ftotalHunters\x12'\n" +
 	"\x0fhealthy_hunters\x18\x02 \x01(\rR\x0ehealthyHunters\x12'\n" +
@@ -9142,7 +9235,8 @@ const file_management_proto_rawDesc = "" +
 	"\vmedia_rules\x18\x16 \x01(\v2$.lippycat.management.MediaRuleStatusR\n" +
 	"mediaRules\x12W\n" +
 	"\x11packet_duplicates\x18\x17 \x01(\v2*.lippycat.management.PacketDuplicateStatusR\x10packetDuplicates\x12K\n" +
-	"\rlearned_rules\x18\x18 \x01(\v2&.lippycat.management.LearnedRuleStatusR\flearnedRules\"\xb0\x03\n" +
+	"\rlearned_rules\x18\x18 \x01(\v2&.lippycat.management.LearnedRuleStatusR\flearnedRules\x12I\n" +
+	"\rli_iri_policy\x18\x19 \x01(\v2%.lippycat.management.LIIRIPolicyStatsR\vliIriPolicy\"\xb0\x03\n" +
 	"\x0fMediaRuleStatus\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x14\n" +
 	"\x05ready\x18\x02 \x01(\bR\x05ready\x12\x1e\n" +
@@ -9770,7 +9864,16 @@ const file_management_proto_rawDesc = "" +
 	"duplicates\x12\x18\n" +
 	"\adropped\x18\v \x01(\x04R\adropped\x12\x12\n" +
 	"\x04late\x18\f \x01(\x04R\x04late\x12'\n" +
-	"\x0fpolicy_revision\x18\r \x01(\x04R\x0epolicyRevision*j\n" +
+	"\x0fpolicy_revision\x18\r \x01(\x04R\x0epolicyRevision\"\xd8\x01\n" +
+	"\x10LIIRIPolicyStats\x12\x18\n" +
+	"\aobjects\x18\x01 \x01(\x04R\aobjects\x12\x1a\n" +
+	"\bpolicies\x18\x02 \x01(\x04R\bpolicies\x12\x14\n" +
+	"\x05rules\x18\x03 \x01(\x04R\x05rules\x12+\n" +
+	"\x11confirmed_objects\x18\x04 \x01(\x04R\x10confirmedObjects\x12\x1e\n" +
+	"\n" +
+	"suppressed\x18\x05 \x01(\x04R\n" +
+	"suppressed\x12+\n" +
+	"\x11evaluation_errors\x18\x06 \x01(\x04R\x10evaluationErrors*j\n" +
 	"\x0eForwardingMode\x12\x1f\n" +
 	"\x1bFORWARDING_MODE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17FORWARDING_MODE_PACKETS\x10\x01\x12\x1a\n" +
@@ -9866,7 +9969,7 @@ func file_management_proto_rawDescGZIP() []byte {
 }
 
 var file_management_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
-var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 85)
+var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 86)
 var file_management_proto_goTypes = []any{
 	(ForwardingMode)(0),                   // 0: lippycat.management.ForwardingMode
 	(HunterStatus)(0),                     // 1: lippycat.management.HunterStatus
@@ -9953,15 +10056,16 @@ var file_management_proto_goTypes = []any{
 	(*ProcessorSelectionStatus)(nil),      // 82: lippycat.management.ProcessorSelectionStatus
 	(*RouteStatus)(nil),                   // 83: lippycat.management.RouteStatus
 	(*RawPacketStatus)(nil),               // 84: lippycat.management.RawPacketStatus
-	nil,                                   // 85: lippycat.management.LICallCorrelationStats.AdoptedEntry
-	nil,                                   // 86: lippycat.management.LICallCorrelationStats.StandaloneEntry
-	nil,                                   // 87: lippycat.management.LICallCorrelationStats.SdpEntry
-	nil,                                   // 88: lippycat.management.LICallCorrelationStats.ResponseWaitEntry
-	nil,                                   // 89: lippycat.management.LIDeliveryStats.DestinationsEntry
-	nil,                                   // 90: lippycat.management.LIDeliveryStats.DroppedByReasonEntry
-	nil,                                   // 91: lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
-	nil,                                   // 92: lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
-	nil,                                   // 93: lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
+	(*LIIRIPolicyStats)(nil),              // 85: lippycat.management.LIIRIPolicyStats
+	nil,                                   // 86: lippycat.management.LICallCorrelationStats.AdoptedEntry
+	nil,                                   // 87: lippycat.management.LICallCorrelationStats.StandaloneEntry
+	nil,                                   // 88: lippycat.management.LICallCorrelationStats.SdpEntry
+	nil,                                   // 89: lippycat.management.LICallCorrelationStats.ResponseWaitEntry
+	nil,                                   // 90: lippycat.management.LIDeliveryStats.DestinationsEntry
+	nil,                                   // 91: lippycat.management.LIDeliveryStats.DroppedByReasonEntry
+	nil,                                   // 92: lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
+	nil,                                   // 93: lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
+	nil,                                   // 94: lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
 }
 var file_management_proto_depIdxs = []int32{
 	13,  // 0: lippycat.management.HunterRegistration.capabilities:type_name -> lippycat.management.HunterCapabilities
@@ -10018,97 +10122,98 @@ var file_management_proto_depIdxs = []int32{
 	37,  // 51: lippycat.management.ProcessorStats.media_rules:type_name -> lippycat.management.MediaRuleStatus
 	41,  // 52: lippycat.management.ProcessorStats.packet_duplicates:type_name -> lippycat.management.PacketDuplicateStatus
 	38,  // 53: lippycat.management.ProcessorStats.learned_rules:type_name -> lippycat.management.LearnedRuleStatus
-	39,  // 54: lippycat.management.LearnedRuleStatus.capabilities:type_name -> lippycat.management.LearnedRuleCapabilityStatus
-	40,  // 55: lippycat.management.LearnedRuleCapabilityStatus.qualifiers:type_name -> lippycat.management.LearnedRuleQualifierStatus
-	85,  // 56: lippycat.management.LICallCorrelationStats.adopted:type_name -> lippycat.management.LICallCorrelationStats.AdoptedEntry
-	86,  // 57: lippycat.management.LICallCorrelationStats.standalone:type_name -> lippycat.management.LICallCorrelationStats.StandaloneEntry
-	87,  // 58: lippycat.management.LICallCorrelationStats.sdp:type_name -> lippycat.management.LICallCorrelationStats.SdpEntry
-	48,  // 59: lippycat.management.LICallCorrelationStats.storage:type_name -> lippycat.management.StorageStatus
-	88,  // 60: lippycat.management.LICallCorrelationStats.response_wait:type_name -> lippycat.management.LICallCorrelationStats.ResponseWaitEntry
-	43,  // 61: lippycat.management.LIReconciliationStats.failures:type_name -> lippycat.management.LIReconciliationFailure
-	48,  // 62: lippycat.management.ProcessorStorageStats.filters:type_name -> lippycat.management.StorageStatus
-	48,  // 63: lippycat.management.ProcessorStorageStats.li_state:type_name -> lippycat.management.StorageStatus
-	49,  // 64: lippycat.management.StorageStatus.key_usage:type_name -> lippycat.management.EncryptionUsageStats
-	89,  // 65: lippycat.management.LIDeliveryStats.destinations:type_name -> lippycat.management.LIDeliveryStats.DestinationsEntry
-	53,  // 66: lippycat.management.LIDeliveryStats.x2_journal:type_name -> lippycat.management.LIJournalStats
-	90,  // 67: lippycat.management.LIDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedByReasonEntry
-	91,  // 68: lippycat.management.LIDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
-	53,  // 69: lippycat.management.LIDeliveryStats.x3_journal:type_name -> lippycat.management.LIJournalStats
-	92,  // 70: lippycat.management.LIDestinationDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
-	54,  // 71: lippycat.management.LIDestinationDeliveryStats.x2_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
-	54,  // 72: lippycat.management.LIDestinationDeliveryStats.x3_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
-	93,  // 73: lippycat.management.LIDestinationDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
-	48,  // 74: lippycat.management.LIJournalStats.storage:type_name -> lippycat.management.StorageStatus
-	58,  // 75: lippycat.management.ListHuntersResponse.hunters:type_name -> lippycat.management.AvailableHunter
-	1,   // 76: lippycat.management.AvailableHunter.status:type_name -> lippycat.management.HunterStatus
-	13,  // 77: lippycat.management.AvailableHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
-	61,  // 78: lippycat.management.TopologyResponse.processor:type_name -> lippycat.management.ProcessorNode
-	2,   // 79: lippycat.management.ProcessorNode.status:type_name -> lippycat.management.ProcessorStatus
-	35,  // 80: lippycat.management.ProcessorNode.hunters:type_name -> lippycat.management.ConnectedHunter
-	61,  // 81: lippycat.management.ProcessorNode.downstream_processors:type_name -> lippycat.management.ProcessorNode
-	6,   // 82: lippycat.management.ProcessorNode.node_type:type_name -> lippycat.management.NodeType
-	7,   // 83: lippycat.management.TopologyUpdate.update_type:type_name -> lippycat.management.TopologyUpdateType
-	64,  // 84: lippycat.management.TopologyUpdate.hunter_connected:type_name -> lippycat.management.HunterConnectedEvent
-	65,  // 85: lippycat.management.TopologyUpdate.hunter_disconnected:type_name -> lippycat.management.HunterDisconnectedEvent
-	66,  // 86: lippycat.management.TopologyUpdate.processor_connected:type_name -> lippycat.management.ProcessorConnectedEvent
-	67,  // 87: lippycat.management.TopologyUpdate.processor_disconnected:type_name -> lippycat.management.ProcessorDisconnectedEvent
-	68,  // 88: lippycat.management.TopologyUpdate.hunter_status_changed:type_name -> lippycat.management.HunterStatusChangedEvent
-	35,  // 89: lippycat.management.HunterConnectedEvent.hunter:type_name -> lippycat.management.ConnectedHunter
-	61,  // 90: lippycat.management.ProcessorConnectedEvent.processor:type_name -> lippycat.management.ProcessorNode
-	1,   // 91: lippycat.management.HunterStatusChangedEvent.old_status:type_name -> lippycat.management.HunterStatus
-	1,   // 92: lippycat.management.HunterStatusChangedEvent.new_status:type_name -> lippycat.management.HunterStatus
-	72,  // 93: lippycat.management.MediaAdmissionStatus.scopes:type_name -> lippycat.management.MediaAdmissionScope
-	73,  // 94: lippycat.management.MediaAdmissionScope.uncertainty:type_name -> lippycat.management.MediaAdmissionUncertainty
-	74,  // 95: lippycat.management.CaptureSelectionGrant.scopes:type_name -> lippycat.management.CaptureSelectionScope
-	8,   // 96: lippycat.management.CaptureSelectionGrant.purpose:type_name -> lippycat.management.CaptureSelectionPurpose
-	21,  // 97: lippycat.management.PolicySnapshot.filters:type_name -> lippycat.management.Filter
-	76,  // 98: lippycat.management.PolicySnapshot.selection_grants:type_name -> lippycat.management.CaptureSelectionGrant
-	77,  // 99: lippycat.management.SignedPolicySnapshot.snapshot:type_name -> lippycat.management.PolicySnapshot
-	21,  // 100: lippycat.management.PolicyPublication.filters:type_name -> lippycat.management.Filter
-	52,  // 101: lippycat.management.LIDeliveryStats.DestinationsEntry.value:type_name -> lippycat.management.LIDestinationDeliveryStats
-	9,   // 102: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
-	11,  // 103: lippycat.management.ManagementService.RegisterProcessor:input_type -> lippycat.management.ProcessorRegistration
-	16,  // 104: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
-	19,  // 105: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
-	19,  // 106: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
-	33,  // 107: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
-	21,  // 108: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
-	27,  // 109: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
-	56,  // 110: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
-	59,  // 111: lippycat.management.ManagementService.GetTopology:input_type -> lippycat.management.TopologyRequest
-	62,  // 112: lippycat.management.ManagementService.SubscribeTopology:input_type -> lippycat.management.TopologySubscribeRequest
-	30,  // 113: lippycat.management.ManagementService.UpdateFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterRequest
-	31,  // 114: lippycat.management.ManagementService.DeleteFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterDeleteRequest
-	32,  // 115: lippycat.management.ManagementService.GetFiltersFromProcessor:input_type -> lippycat.management.ProcessorFilterQuery
-	28,  // 116: lippycat.management.ManagementService.RequestAuthToken:input_type -> lippycat.management.AuthTokenRequest
-	79,  // 117: lippycat.management.FilterPolicyService.GetSnapshot:input_type -> lippycat.management.PolicySnapshotRequest
-	79,  // 118: lippycat.management.FilterPolicyService.SubscribeSnapshots:input_type -> lippycat.management.PolicySnapshotRequest
-	78,  // 119: lippycat.management.FilterPolicyService.ApplySnapshot:input_type -> lippycat.management.SignedPolicySnapshot
-	80,  // 120: lippycat.management.FilterPolicyService.PublishSnapshot:input_type -> lippycat.management.PolicyPublication
-	14,  // 121: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
-	12,  // 122: lippycat.management.ManagementService.RegisterProcessor:output_type -> lippycat.management.ProcessorRegistrationResponse
-	18,  // 123: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
-	20,  // 124: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
-	25,  // 125: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
-	34,  // 126: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
-	26,  // 127: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
-	26,  // 128: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
-	57,  // 129: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
-	60,  // 130: lippycat.management.ManagementService.GetTopology:output_type -> lippycat.management.TopologyResponse
-	63,  // 131: lippycat.management.ManagementService.SubscribeTopology:output_type -> lippycat.management.TopologyUpdate
-	26,  // 132: lippycat.management.ManagementService.UpdateFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
-	26,  // 133: lippycat.management.ManagementService.DeleteFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
-	20,  // 134: lippycat.management.ManagementService.GetFiltersFromProcessor:output_type -> lippycat.management.FilterResponse
-	29,  // 135: lippycat.management.ManagementService.RequestAuthToken:output_type -> lippycat.management.AuthorizationToken
-	78,  // 136: lippycat.management.FilterPolicyService.GetSnapshot:output_type -> lippycat.management.SignedPolicySnapshot
-	78,  // 137: lippycat.management.FilterPolicyService.SubscribeSnapshots:output_type -> lippycat.management.SignedPolicySnapshot
-	81,  // 138: lippycat.management.FilterPolicyService.ApplySnapshot:output_type -> lippycat.management.PolicyReceipt
-	78,  // 139: lippycat.management.FilterPolicyService.PublishSnapshot:output_type -> lippycat.management.SignedPolicySnapshot
-	121, // [121:140] is the sub-list for method output_type
-	102, // [102:121] is the sub-list for method input_type
-	102, // [102:102] is the sub-list for extension type_name
-	102, // [102:102] is the sub-list for extension extendee
-	0,   // [0:102] is the sub-list for field type_name
+	85,  // 54: lippycat.management.ProcessorStats.li_iri_policy:type_name -> lippycat.management.LIIRIPolicyStats
+	39,  // 55: lippycat.management.LearnedRuleStatus.capabilities:type_name -> lippycat.management.LearnedRuleCapabilityStatus
+	40,  // 56: lippycat.management.LearnedRuleCapabilityStatus.qualifiers:type_name -> lippycat.management.LearnedRuleQualifierStatus
+	86,  // 57: lippycat.management.LICallCorrelationStats.adopted:type_name -> lippycat.management.LICallCorrelationStats.AdoptedEntry
+	87,  // 58: lippycat.management.LICallCorrelationStats.standalone:type_name -> lippycat.management.LICallCorrelationStats.StandaloneEntry
+	88,  // 59: lippycat.management.LICallCorrelationStats.sdp:type_name -> lippycat.management.LICallCorrelationStats.SdpEntry
+	48,  // 60: lippycat.management.LICallCorrelationStats.storage:type_name -> lippycat.management.StorageStatus
+	89,  // 61: lippycat.management.LICallCorrelationStats.response_wait:type_name -> lippycat.management.LICallCorrelationStats.ResponseWaitEntry
+	43,  // 62: lippycat.management.LIReconciliationStats.failures:type_name -> lippycat.management.LIReconciliationFailure
+	48,  // 63: lippycat.management.ProcessorStorageStats.filters:type_name -> lippycat.management.StorageStatus
+	48,  // 64: lippycat.management.ProcessorStorageStats.li_state:type_name -> lippycat.management.StorageStatus
+	49,  // 65: lippycat.management.StorageStatus.key_usage:type_name -> lippycat.management.EncryptionUsageStats
+	90,  // 66: lippycat.management.LIDeliveryStats.destinations:type_name -> lippycat.management.LIDeliveryStats.DestinationsEntry
+	53,  // 67: lippycat.management.LIDeliveryStats.x2_journal:type_name -> lippycat.management.LIJournalStats
+	91,  // 68: lippycat.management.LIDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedByReasonEntry
+	92,  // 69: lippycat.management.LIDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
+	53,  // 70: lippycat.management.LIDeliveryStats.x3_journal:type_name -> lippycat.management.LIJournalStats
+	93,  // 71: lippycat.management.LIDestinationDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
+	54,  // 72: lippycat.management.LIDestinationDeliveryStats.x2_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
+	54,  // 73: lippycat.management.LIDestinationDeliveryStats.x3_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
+	94,  // 74: lippycat.management.LIDestinationDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
+	48,  // 75: lippycat.management.LIJournalStats.storage:type_name -> lippycat.management.StorageStatus
+	58,  // 76: lippycat.management.ListHuntersResponse.hunters:type_name -> lippycat.management.AvailableHunter
+	1,   // 77: lippycat.management.AvailableHunter.status:type_name -> lippycat.management.HunterStatus
+	13,  // 78: lippycat.management.AvailableHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
+	61,  // 79: lippycat.management.TopologyResponse.processor:type_name -> lippycat.management.ProcessorNode
+	2,   // 80: lippycat.management.ProcessorNode.status:type_name -> lippycat.management.ProcessorStatus
+	35,  // 81: lippycat.management.ProcessorNode.hunters:type_name -> lippycat.management.ConnectedHunter
+	61,  // 82: lippycat.management.ProcessorNode.downstream_processors:type_name -> lippycat.management.ProcessorNode
+	6,   // 83: lippycat.management.ProcessorNode.node_type:type_name -> lippycat.management.NodeType
+	7,   // 84: lippycat.management.TopologyUpdate.update_type:type_name -> lippycat.management.TopologyUpdateType
+	64,  // 85: lippycat.management.TopologyUpdate.hunter_connected:type_name -> lippycat.management.HunterConnectedEvent
+	65,  // 86: lippycat.management.TopologyUpdate.hunter_disconnected:type_name -> lippycat.management.HunterDisconnectedEvent
+	66,  // 87: lippycat.management.TopologyUpdate.processor_connected:type_name -> lippycat.management.ProcessorConnectedEvent
+	67,  // 88: lippycat.management.TopologyUpdate.processor_disconnected:type_name -> lippycat.management.ProcessorDisconnectedEvent
+	68,  // 89: lippycat.management.TopologyUpdate.hunter_status_changed:type_name -> lippycat.management.HunterStatusChangedEvent
+	35,  // 90: lippycat.management.HunterConnectedEvent.hunter:type_name -> lippycat.management.ConnectedHunter
+	61,  // 91: lippycat.management.ProcessorConnectedEvent.processor:type_name -> lippycat.management.ProcessorNode
+	1,   // 92: lippycat.management.HunterStatusChangedEvent.old_status:type_name -> lippycat.management.HunterStatus
+	1,   // 93: lippycat.management.HunterStatusChangedEvent.new_status:type_name -> lippycat.management.HunterStatus
+	72,  // 94: lippycat.management.MediaAdmissionStatus.scopes:type_name -> lippycat.management.MediaAdmissionScope
+	73,  // 95: lippycat.management.MediaAdmissionScope.uncertainty:type_name -> lippycat.management.MediaAdmissionUncertainty
+	74,  // 96: lippycat.management.CaptureSelectionGrant.scopes:type_name -> lippycat.management.CaptureSelectionScope
+	8,   // 97: lippycat.management.CaptureSelectionGrant.purpose:type_name -> lippycat.management.CaptureSelectionPurpose
+	21,  // 98: lippycat.management.PolicySnapshot.filters:type_name -> lippycat.management.Filter
+	76,  // 99: lippycat.management.PolicySnapshot.selection_grants:type_name -> lippycat.management.CaptureSelectionGrant
+	77,  // 100: lippycat.management.SignedPolicySnapshot.snapshot:type_name -> lippycat.management.PolicySnapshot
+	21,  // 101: lippycat.management.PolicyPublication.filters:type_name -> lippycat.management.Filter
+	52,  // 102: lippycat.management.LIDeliveryStats.DestinationsEntry.value:type_name -> lippycat.management.LIDestinationDeliveryStats
+	9,   // 103: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
+	11,  // 104: lippycat.management.ManagementService.RegisterProcessor:input_type -> lippycat.management.ProcessorRegistration
+	16,  // 105: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
+	19,  // 106: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
+	19,  // 107: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
+	33,  // 108: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
+	21,  // 109: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
+	27,  // 110: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
+	56,  // 111: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
+	59,  // 112: lippycat.management.ManagementService.GetTopology:input_type -> lippycat.management.TopologyRequest
+	62,  // 113: lippycat.management.ManagementService.SubscribeTopology:input_type -> lippycat.management.TopologySubscribeRequest
+	30,  // 114: lippycat.management.ManagementService.UpdateFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterRequest
+	31,  // 115: lippycat.management.ManagementService.DeleteFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterDeleteRequest
+	32,  // 116: lippycat.management.ManagementService.GetFiltersFromProcessor:input_type -> lippycat.management.ProcessorFilterQuery
+	28,  // 117: lippycat.management.ManagementService.RequestAuthToken:input_type -> lippycat.management.AuthTokenRequest
+	79,  // 118: lippycat.management.FilterPolicyService.GetSnapshot:input_type -> lippycat.management.PolicySnapshotRequest
+	79,  // 119: lippycat.management.FilterPolicyService.SubscribeSnapshots:input_type -> lippycat.management.PolicySnapshotRequest
+	78,  // 120: lippycat.management.FilterPolicyService.ApplySnapshot:input_type -> lippycat.management.SignedPolicySnapshot
+	80,  // 121: lippycat.management.FilterPolicyService.PublishSnapshot:input_type -> lippycat.management.PolicyPublication
+	14,  // 122: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
+	12,  // 123: lippycat.management.ManagementService.RegisterProcessor:output_type -> lippycat.management.ProcessorRegistrationResponse
+	18,  // 124: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
+	20,  // 125: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
+	25,  // 126: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
+	34,  // 127: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
+	26,  // 128: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
+	26,  // 129: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
+	57,  // 130: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
+	60,  // 131: lippycat.management.ManagementService.GetTopology:output_type -> lippycat.management.TopologyResponse
+	63,  // 132: lippycat.management.ManagementService.SubscribeTopology:output_type -> lippycat.management.TopologyUpdate
+	26,  // 133: lippycat.management.ManagementService.UpdateFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
+	26,  // 134: lippycat.management.ManagementService.DeleteFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
+	20,  // 135: lippycat.management.ManagementService.GetFiltersFromProcessor:output_type -> lippycat.management.FilterResponse
+	29,  // 136: lippycat.management.ManagementService.RequestAuthToken:output_type -> lippycat.management.AuthorizationToken
+	78,  // 137: lippycat.management.FilterPolicyService.GetSnapshot:output_type -> lippycat.management.SignedPolicySnapshot
+	78,  // 138: lippycat.management.FilterPolicyService.SubscribeSnapshots:output_type -> lippycat.management.SignedPolicySnapshot
+	81,  // 139: lippycat.management.FilterPolicyService.ApplySnapshot:output_type -> lippycat.management.PolicyReceipt
+	78,  // 140: lippycat.management.FilterPolicyService.PublishSnapshot:output_type -> lippycat.management.SignedPolicySnapshot
+	122, // [122:141] is the sub-list for method output_type
+	103, // [103:122] is the sub-list for method input_type
+	103, // [103:103] is the sub-list for extension type_name
+	103, // [103:103] is the sub-list for extension extendee
+	0,   // [0:103] is the sub-list for field type_name
 }
 
 func init() { file_management_proto_init() }
@@ -10129,7 +10234,7 @@ func file_management_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_management_proto_rawDesc), len(file_management_proto_rawDesc)),
 			NumEnums:      9,
-			NumMessages:   85,
+			NumMessages:   86,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

@@ -26,6 +26,8 @@ type SnapshotSyncStatus struct {
 	LastAttempt                        time.Time
 	TaskFailures                       uint64
 	DestinationFailures                uint64
+	GenericObjectFailures              uint64
+	GenericObjectMembershipComplete    bool
 	TotalFailures                      uint64
 	Failures                           []SnapshotFailure
 	FailuresTruncated                  uint64

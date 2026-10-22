@@ -23,6 +23,8 @@ type admfSnapshot struct {
 	tasks, destinations                                     map[uuid.UUID]bool
 	duplicateTasks, duplicateDestinations                   map[uuid.UUID]bool
 	taskMembershipUncertain, destinationMembershipUncertain bool
+	iriRequired, iriMembershipUncertain                     bool
+	iriConvErrors                                           int
 	convErrors, destinationConvErrors                       int
 	rejectedTasks                                           map[uuid.UUID]int
 	referencedDestinations                                  map[uuid.UUID]bool
@@ -45,7 +47,7 @@ func (s *admfSnapshot) destinationsComplete() bool { return !s.destinationMember
 // Filter sweeps additionally require successful definition application. Local
 // filters for a listed but malformed definition cannot be inferred orphaned.
 func (s *admfSnapshot) complete() bool {
-	return s.tasksComplete() && s.destinationsComplete() && s.convErrors == 0 && s.destinationConvErrors == 0
+	return s.tasksComplete() && s.destinationsComplete() && s.convErrors == 0 && s.destinationConvErrors == 0 && (!s.iriRequired || !s.iriMembershipUncertain && s.iriConvErrors == 0)
 }
 
 func (s *admfSnapshot) fail(kind, category string, index int, id uuid.UUID) {
@@ -61,6 +63,9 @@ func (s *admfSnapshot) fail(kind, category string, index int, id uuid.UUID) {
 	case "destination":
 		s.destinationConvErrors++
 		s.status.DestinationFailures++
+	case "object":
+		s.iriConvErrors++
+		s.status.GenericObjectFailures++
 	}
 	// Hash writes cannot fail. Encoding only bounded fixed categories and UUIDs
 	// keeps bookkeeping independent of untrusted response text.
@@ -141,6 +146,13 @@ func enumerateADMFSnapshot(resp *schema.GetAllDetailsResponse) *admfSnapshot {
 // snapshotMu must be held by the caller across fetch and application.
 func (m *Manager) applyADMFSnapshotEntries(resp *schema.GetAllDetailsResponse, startup bool) (*admfSnapshot, int, int) {
 	snapshot := enumerateADMFSnapshot(resp)
+	blockedPolicyTasks := m.beginIRISnapshotBarrier(resp)
+	confirmedPolicyTasks := make(map[uuid.UUID]bool)
+	defer m.finishIRISnapshotBarrier(blockedPolicyTasks, confirmedPolicyTasks, snapshot)
+	objectsReady := m.applyIRIObjectSnapshot(resp, snapshot)
+	if m.iriSnapshotAppliedHook != nil {
+		m.iriSnapshotAppliedHook()
+	}
 	confirmedDestinations := make(map[uuid.UUID]bool)
 	var taskCount, destCount int
 	if resp.ListOfDestinationResponseDetails != nil {
@@ -187,6 +199,11 @@ func (m *Manager) applyADMFSnapshotEntries(resp *schema.GetAllDetailsResponse, s
 				continue
 			}
 			task := converted.Task
+			if len(task.IRIPolicyReferences) > 0 && !objectsReady {
+				snapshot.rejectedTasks[id] = len(task.Targets)
+				snapshot.fail("task", "unconfirmed_policy_graph", index, id)
+				continue
+			}
 			converted.confirmedDestinations = confirmedDestinations
 			m.bindRADIUSDeployment(task)
 			radiusTask := IsRADIUSTask(task)
@@ -237,6 +254,7 @@ func (m *Manager) applyADMFSnapshotEntries(resp *schema.GetAllDetailsResponse, s
 				continue
 			}
 			taskCount++
+			confirmedPolicyTasks[id] = true
 		}
 	}
 	return snapshot, taskCount, destCount
@@ -268,7 +286,7 @@ func (m *Manager) publishSnapshotStatus(snapshot *admfSnapshot, source string) {
 		if previous.Attempts > 0 && status.fingerprint == previous.fingerprint {
 			status.WarningsSuppressed++
 		} else {
-			logger.Warn("ADMF snapshot reconciliation incomplete", "source", source, "task_failures", status.TaskFailures, "destination_failures", status.DestinationFailures, "failures", status.Failures, "failures_truncated", status.FailuresTruncated, "task_orphans_suppressed", status.TaskOrphanRemovalSuppressed, "destination_orphans_suppressed", status.DestinationOrphanRemovalSuppressed)
+			logger.Warn("ADMF snapshot reconciliation incomplete", "source", source, "task_failures", status.TaskFailures, "destination_failures", status.DestinationFailures, "generic_object_failures", status.GenericObjectFailures, "failures", status.Failures, "failures_truncated", status.FailuresTruncated, "task_orphans_suppressed", status.TaskOrphanRemovalSuppressed, "destination_orphans_suppressed", status.DestinationOrphanRemovalSuppressed)
 		}
 	} else if previous.TotalFailures > 0 || previous.TaskOrphanRemovalSuppressed || previous.DestinationOrphanRemovalSuppressed {
 		logger.Info("ADMF snapshot reconciliation recovered", "source", source)

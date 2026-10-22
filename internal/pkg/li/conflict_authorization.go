@@ -17,6 +17,10 @@ func resolveConflictAuthorization(held, snapshot *InterceptTask, confirmed map[u
 	if held.Definition.ConflictDisarmed {
 		return nil, held.Definition.ConflictReason
 	}
+	// Ordered first-match policies cannot be intersected by retaining one list.
+	if !equivalentIRIPolicyDefinition(held, snapshot) {
+		return nil, "no_common_iri_policy"
+	}
 	common := cloneInterceptTask(held)
 	common.Definition.Conflict = true
 	common.Definition.ConflictReason = "common_scope"

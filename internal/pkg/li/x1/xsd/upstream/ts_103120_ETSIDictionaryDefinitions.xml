@@ -1,0 +1,948 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Dictionaries xmlns="http://uri.etsi.org/03280/common/2019/10/Dictionaries">
+    <Dictionary>
+        <!--ObjectType: see Clause 6.4.8 Table 6.14 -->
+        <Owner>ETSI</Owner>
+        <Name>ObjectType</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>Authorisation</Value>
+                <Meaning>An Authorisation Object as defined in section 7.2</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Document</Value>
+                <Meaning>A Document Object as defined in section 7.3</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Notification</Value>
+                <Meaning>A Notification Object as defined in section 7.4</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Task</Value>
+                <Meaning>An LI Task Object as defined in section 8.2</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>LDTask</Value>
+                <Meaning>An LD Task Object as defined in section 8.3</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>LPTask</Value>
+                <Meaning>An LP Task Object as defined in section 8.4</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Delivery</Value>
+                <Meaning>A Delivery Object as defined in section 10</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--AuthorisationLegalType: see Clause 7.2.3 Table 7.4 -->
+        <Owner>ETSI</Owner>
+        <Name>AuthorisationLegalType</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>Manual</Value>
+                <Meaning>The implementation should consult the AuthorisationManualInformation field for details on the type of legal Authorisation</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--AuthorisationPriority: see Clause 7.2.4 Table 7.5 -->
+        <Owner>ETSI</Owner>
+        <Name>AuthorisationPriority</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>High</Value>
+                <Meaning>An Authorisation has high priority</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Routine</Value>
+                <Meaning>The Authorisation has a routine priority</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--AuthorisationStatus: see Clause 7.2.5 Table 7.6 -->
+        <Owner>ETSI</Owner>
+        <Name>AuthorisationStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingApproval</Value>
+                <Meaning>Authorisation is still waiting approval from one or more relevant parties</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>EmergencyApproval</Value>
+                <Meaning>The Authorisation has been approved under emergency procedures</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Approved</Value>
+                <Meaning>The Authorisation has been approved by the relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Authorisation has been explicitly denied or rejected by one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Suspended</Value>
+                <Meaning>The Authorisation has been suspended temporarily</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Authorisation has been permanently cancelled</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Expired</Value>
+                <Meaning>The expiry date for this Authorisation has passed, meaning that the Authorisation has lapsed.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Invalid</Value>
+                <Meaning>The Authorisation is not active due to a problem with the current information populated in the Authorisation Object.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>CreatingForCSP</Value>
+                <Meaning>The LEA is in the process of creating the Authorisation with the CSP (i.e. in the process of uploading the relevant components). For example, it could be used as described in H.3.3</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>SubmittedToCSP</Value>
+                <Meaning>The LEA has now uploaded all the relevant objects for this Authorisation to the CSP e.g. it could be used as described in H.3.3. This is intended to convey that the LEA has submitted all the relevant to this Authorisation and the CSP can now proceed.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>AwaitingUpdateApproval</Value>
+                <Meaning>The Authorisation is waiting for the approval of an update (e.g. waiting for the validation of associated DocumentObjects of an extension).</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--AuthorisationDesiredStatus: see Clause 7.2.6 Table 7.7 -->
+        <Owner>ETSI</Owner>
+        <Name>AuthorisationDesiredStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingApproval</Value>
+                <Meaning>Authorisation is still waiting approval from one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>EmergencyApproval</Value>
+                <Meaning>The Authorisation has been approved under emergency procedures</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Approved</Value>
+                <Meaning>The Authorisation has been approved by the relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Authorisation has been explicitly denied or rejected by one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Suspended</Value>
+                <Meaning>The Authorisation has been suspended temporarily</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Authorisation has been permanently cancelled</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Expired</Value>
+                <Meaning>The expiry date for this Authorisation has passed, meaning that the Authorisation has lapsed.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>CreatingForCSP</Value>
+                <Meaning>The LEA is in the process of creating the Authorisation with the CSP (i.e. in the process of uploading the relevant components). For example, it could be used as described in H.3.3</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>SubmittedToCSP</Value>
+                <Meaning>The LEA has now uploaded all the relevant objects for this Authorisation to the CSP e.g. it could be used as described in H.3.3. This is intended to convey that the LEA has submitted all the relevant to this Authorisation and the CSP can now proceed</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--AuthorisationFlags: see Clause 7.2.12 Table 7.9 -->
+        <Owner>ETSI</Owner>
+        <Name>AuthorisationFlag</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>IsEmergency</Value>
+                <Meaning>Indicates if the authorisation was issued under nationally-defined emergency procedures (e.g. orally). The circumstances and consequences for setting the field shall be defined by the relevant national profile</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IsConsensual</Value>
+                <Meaning>Indicates that the current authorisation is for consensual interception. This may alter the process or documentation accompanying the authorisation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IsTest</Value>
+                <Meaning>Indicates that the current authorisation is given for test purposes. This may alter the process or documentation accompanying the authorisation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IsDataAvailable</Value>
+                <Meaning>Indicates that the current Task shall disclose only the existence of data that matches the criteria in the LDRequestDetails.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--AuthorisationTypeOfCase: see Clause 7.2.14 Table 7.10-->
+        <Owner>ETSI</Owner>
+        <Name>AuthorisationTypeOfCase</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>ChildExploitationOrChildSexualAbuse</Value>
+                <Meaning>The case relates to a child exploitation or child sexual abuse investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Corruption</Value>
+                <Meaning>The case relates to a corruption investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cybercrime</Value>
+                <Meaning>The case relates to a cybercrime investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Defamation</Value>
+                <Meaning>The case relates to a defamation investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>DrugsOrDrugTrafficking</Value>
+                <Meaning>The case relates to a drugs or drug trafficking investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>HarassmentOrThreatToPersonalSafety</Value>
+                <Meaning>The case relates to a harassment or threat to personal safety investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>HateSpeech</Value>
+                <Meaning>The case relates to a hate speech investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>HumanTrafficking</Value>
+                <Meaning>The case relates to a human trafficking investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>MissingPerson</Value>
+                <Meaning>The case relates to a missing person investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>MoneyLaundering</Value>
+                <Meaning>The case relates to a money laundering investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>OtherFinancialCrimeOrFraud</Value>
+                <Meaning>The case relates to a financial crime or fraud investigation, other than money laundering</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>SexualAbuseOrExploitation</Value>
+                <Meaning>The case relates to a sexual abuse or exploitation investigation, other than those relating to minors</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Theft</Value>
+                <Meaning>The case relates to a theft investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TerrorismOrThreatToPublicSafety</Value>
+                <Meaning>The case relates to a terrorism or threat to public safety investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>ViolenceOrCrimeAgainstAPerson</Value>
+                <Meaning>The case relates to a violent crime or crime against a person investigation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Other</Value>
+                <Meaning>The case relates to an investigation that does not fall under any other type of case</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>NotSpecified</Value>
+                <Meaning>The type of case is not specified or not provided by the LEA</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--DocumentStatus: see Clause 7.3.4 Table 7.13 -->
+        <Owner>ETSI</Owner>
+        <Name>DocumentStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingApproval</Value>
+                <Meaning>The Document is still waiting approval from one or more relevant parties</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Approved</Value>
+                <Meaning>The Document has been approved by the relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Document has been explicitly denied or rejected by one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Suspended</Value>
+                <Meaning>The Document has been suspended temporarily</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Document has been permanently cancelled</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Expired</Value>
+                <Meaning>The expiry date for this Document has passed.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Invalid</Value>
+                <Meaning>The Document is invalid due to a problem with the current information populated in the Document Object.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--DocumentDesiredStatus: see Clause 7.3.5 Table 7.14 -->
+        <Owner>ETSI</Owner>
+        <Name>DocumentDesiredStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingApproval</Value>
+                <Meaning>The Document is still waiting approval from one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Approved</Value>
+                <Meaning>The Document has been approved by the relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Document has been explicitly denied or rejected by one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Suspended</Value>
+                <Meaning>The Document has been suspended temporarily</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Document has been permanently cancelled</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Expired</Value>
+                <Meaning>The expiry date for this Document has passed.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--DocumentType: see Clause 7.3.7 Table 7.16 -->
+        <Owner>ETSI</Owner>
+        <Name>DocumentType</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>Warrant</Value>
+                <Meaning>This Document represents a legal warrant</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TakedownRefinement</Value>
+                <Meaning>This Document provides additional information required to fully identify the material subject to a Takedown request (see clause 8).</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--NotificationType: see Clause 7.4.3 Table 7.20 -->
+        <Owner>ETSI</Owner>
+        <Name>NotificationType</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>General</Value>
+                <Meaning>A general notification that a change has occurred with the specified Objects</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--TrafficAction: see Clause 7.6.3 Table 7.25-->
+        <Owner>ETSI</Owner>
+        <Name>TrafficAction</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>PDSR</Value>
+                <Meaning>Traffic that matches this policy is delivered as Packet Data Summary Reports</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>PDHR</Value>
+                <Meaning>Traffic that matches this policy is delivered as Packet Data Header Reports</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>NotDelivered</Value>
+                <Meaning>Traffic that matches this policy is not delivered</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Delivered</Value>
+                <Meaning>Traffic that matches the policy is delivered</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Truncate</Value>
+                <Meaning>Deliver only the specified number of the first octets of each datagram</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--TaskStatus: see Clause 8.2.3 Table 8.2 -->
+        <Owner>ETSI</Owner>
+        <Name>TaskStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingApproval</Value>
+                <Meaning>The Task is still waiting approval from one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>AwaitingProvisioning</Value>
+                <Meaning>The Task is approved, but is not yet provisioned in the LI system</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Active</Value>
+                <Meaning>The Task is active and can produce LI traffic</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Task has been explicitly denied or rejected by one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Suspended</Value>
+                <Meaning>The Task has been suspended temporarily</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Task has been permanently cancelled</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Expired</Value>
+                <Meaning>The Task date for this Document has passed, meaning that the Task has lapsed</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Error</Value>
+                <Meaning>The Task is not active due to a problem with the underlying LI system</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Invalid</Value>
+                <Meaning>The Task is not active due to a problem with the current information populated in the Task Object</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--TaskDesiredStatus: see Clause 8.2.4 Table 8.3 -->
+        <Owner>ETSI</Owner>
+        <Name>TaskDesiredStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingApproval</Value>
+                <Meaning>The Task is still waiting approval from one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>AwaitingProvisioning</Value>
+                <Meaning>The Task is approved, but is not yet provisioned in the LI system</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Active</Value>
+                <Meaning>The Task is active and can produce LI traffic</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Task has been explicitly denied or rejected by one or more relevant authorities</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Suspended</Value>
+                <Meaning>The Task has been suspended temporarily</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Task has been permanently cancelled</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Expired</Value>
+                <Meaning>The Task date for this Document has passed, meaning that the Task has lapsed</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--TaskServiceType: see Clause 8.2.6.4 Table 8.9 -->
+        <Owner>ETSI</Owner>
+        <Name>TaskServiceType</Name>
+        <DictionaryEntries/>
+        <!--No definition so far -->
+    </Dictionary>
+    <Dictionary>
+        <!--TaskDeliveryType: see Clause 8.2.7 Table 8.10 -->
+        <Owner>ETSI</Owner>
+        <Name>TaskDeliveryType</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>IRIOnly</Value>
+                <Meaning>Only IRI is delivered</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>CCOnly</Value>
+                <Meaning>Only CC is delivered</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IRIandCC</Value>
+                <Meaning>Both IRI and CC is delivered</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--HandoverFormat: see Clause 8.2.8.4 Table 8.13 -->
+        <Owner>ETSI</Owner>
+        <Name>HandoverFormat</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>TS102232-2</Value>
+                <Meaning>Handed over in TS 102 232 part 2 format</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS102232-3</Value>
+                <Meaning>Handed over in TS 102 232 part 3 format</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS102232-4</Value>
+                <Meaning>Handed over in TS 102 232 part 4 format</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS102232-5</Value>
+                <Meaning>Handed over in TS 102 232 part 5 format</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS102232-6</Value>
+                <Meaning>Handed over in TS 102 232 part 6 format</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS102232-7</Value>
+                <Meaning>Handed over in TS 102 232 part 7 format</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS103707</Value>
+                <Meaning>Handed over as ETSI TS 103 707, using the DeliveryObject as described in clause 10</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS103976</Value>
+                <Meaning>Handed over as ETSI TS 103 976 format</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--TaskFlag: see Clause 8.2.12 Table 8.14 -->
+        <Owner>ETSI</Owner>
+        <Name>TaskFlag</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>IsTest</Value>
+                <Meaning>Indicates that the current Task is for test purposes. This may alter the process or documentation accompanying the authorisation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IsEmergency</Value>
+                <Meaning>Indicates if the LI Task was issued under nationally-defined emergency procedures. The circumstances and consequences for setting the field shall be defined by the relevant national profile (see clause B.1.3)</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IsNonLocal</Value>
+                <Meaning>Indicates that the current Task shall be intercepted as a non-local identity.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IsLocal</Value>
+                <Meaning>Indicates that the current Task shall be intercepted as local identity. If both the IsNonLocal and IsLocal flag are absent, the Task shall be intercepted as a local identity unless otherwise agreed.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--LDTaskStatus: see Clause 8.3.3 Table 8.16 -->
+        <Owner>ETSI</Owner>
+        <Name>LDTaskStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingApproval</Value>
+                <Meaning>The Task is still awaiting approval from one or more relevant authorities.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>AwaitingDisclosure</Value>
+                <Meaning>The Task is approved by the relevant authorities, but is not yet approved and/or processed by the LD system.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Disclosed</Value>
+                <Meaning>The Task has been processed and the product has been disclosed by the LD system.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>DisclosureNotAvailable</Value>
+                <Meaning>The Task has been processed and the CSP has determined there is no product available to disclose.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Task has been explicitly denied or rejected by one or more relevant authorities or by the CSP.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Task has been permanently cancelled.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Error</Value>
+                <Meaning>The Task has not been processed due to a problem with the underlying LD system.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Invalid</Value>
+                <Meaning>The Task is not active due to a problem with the current information populated in the Task Object.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--LDTaskDesiredStatus: see Clause 8.3.4 Table 8.17 -->
+        <Owner>ETSI</Owner>
+        <Name>LDTaskDesiredStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingApproval</Value>
+                <Meaning>The Task is still awaiting approval from one or more relevant authorities.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>AwaitingDisclosure</Value>
+                <Meaning>The Task is approved by the relevant authorities, but is not yet approved and/or processed by the LD system.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Disclosed</Value>
+                <Meaning>The Task has been processed and the product has been disclosed by the LD system.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Task has been explicitly denied or rejected by one or more relevant authorities or by the CSP.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Task has been permanently cancelled.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--RequestType: see Clause 8.3.5.2 Table 8.19 -->
+        <Owner>ETSI</Owner>
+        <Name>RequestType</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>SubscriberData</Value>
+                <Meaning>Refers to subscriber data in the European Production or Preservation order</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>UserIdentifyingData</Value>
+                <Meaning>Refers to data requested for the sole purpose of identifying a user in the European Production or Preservation order</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TrafficData</Value>
+                <Meaning>Refers to traffic data in the European Production or Preservation order</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>StoredContentData</Value>
+                <Meaning>Refers to content data in the European Production or Preservation order</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>SubscriberDataAndUserIdentifyingData</Value>
+                <Meaning>Refers to both 'subscriber data' and 'data requested for the sole purpose of identifying the user' in the European Production or Preservation Order.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TrafficDataAndStoredContentData</Value>
+                <Meaning>Refers to both 'traffic data' and 'content data' in the European Production or Preservation order.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Other</Value>
+                <Meaning>Used in all other cases</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--LDHandoverFormat: see Clause 8.3.6.3 Table 8.24 -->
+        <Owner>ETSI</Owner>
+        <Name>LDHandoverFormat</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>TS102657</Value>
+                <Meaning>Handed over in ETSI TS 102 657 format, using HI-B</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>EncapsulatedTS102657</Value>
+                <Meaning>Handed over as ETSI TS 102 657 format using the DeliveryObject as described in clause 10</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS103120</Value>
+                <Meaning>Handed over using the DeliveryObject as described in clause 10</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS103705</Value>
+                <Meaning>Handed over as ETSI TS 103 705, using the DeliveryObject as described in clause 10</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS103707</Value>
+                <Meaning>Handed over as ETSI TS 103 707, using the DeliveryObject as described in clause 10</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--LDTaskFlag: see Clause 8.3.7 Table 8.25 -->
+        <Owner>ETSI</Owner>
+        <Name>LDTaskFlag</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>IsTest</Value>
+                <Meaning>Indicates that the current Task is for test purposes. This may alter the process or documentation accompanying the authorisation</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IsEmergency</Value>
+                <Meaning>Indicates if the LD Task was issued under nationally-defined emergency procedures. The circumstances and consequences for setting the field shall be defined by the relevant national profile (see clause B.1.3)</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IsNonLocal</Value>
+                <Meaning>Indicates that the current Task shall disclose information about a non-local identity.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>IsLocal</Value>
+                <Meaning>Indicates that the current Task shall disclose information about a local identity. If both the IsNonLocal and IsLocal flag are absent, the identity provided within the Task shall be considered as a local identity unless otherwise agreed.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--LPTaskStatus: see Clause 8.4.2 Table 8.26 -->
+        <Owner>ETSI</Owner>
+        <Name>LPTaskStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingPreservation</Value>
+                <Meaning>The Task is approved, but is not yet processed by the LD system.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Preserved</Value>
+                <Meaning>The Task has been processed and the data has been preserved by the LP system.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>PreservationNotAvailable</Value>
+                <Meaning>The Task has been processed and the CSP has determined there is no data available to preserve.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Task has been explicitly denied or rejected by one or more relevant authorities or by the CSP.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Task has been permanently cancelled.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Expired</Value>
+                <Meaning>The retention period of the preserved data has expired.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Error</Value>
+                <Meaning>The Task has not been processed due to a problem with the underlying LP system.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Invalid</Value>
+                <Meaning>The Task has not been processed due to a problem with the current information populated in the Task Object.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--LPTaskDesiredStatus: see Clause 8.4.3 Table 8.29 -->
+        <Owner>ETSI</Owner>
+        <Name>LPTaskDesiredStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>AwaitingPreservation</Value>
+                <Meaning>The Task is approved by the relevant authorities, but the Task has not yet been approved and/or actioned by the CSP.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Preserved</Value>
+                <Meaning>The Task has been processed and the data has been preserved by the LP system.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Task has been permanently cancelled.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--LIWorkflowEndpoint: see Clause 6.4.11.4 Table 6.23 -->
+        <Owner>ETSI</Owner>
+        <Name>LIWorkflowEndpoint</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>NewAuthorisation</Value>
+                <Meaning>Implementer supports the "New Authorisation" Endpoint.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>AuthorisationExtension</Value>
+                <Meaning>Implementer supports the "Authorisation Extension" Endpoint.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>AuthorisationCancellation</Value>
+                <Meaning>Implementer supports the "Authorisation Cancellation" Endpoint.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TaskAddition</Value>
+                <Meaning>Implementer supports the "Task Addition" Endpoint.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TaskCancellation</Value>
+                <Meaning>Implementer supports the "Task Cancellation" Endpoint.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>ChangeOfDelivery</Value>
+                <Meaning>Implementer supports the "Change of Delivery" Endpoint.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--LPWorkflowEndpoint: see Clause 6.4.11.5 Table 6.25 -->
+        <Owner>ETSI</Owner>
+        <Name>LPWorkflowEndpoint</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>NewPreservation</Value>
+                <Meaning>Implementer supports the "New Preservation" Endpoint.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>PreservationExtension</Value>
+                <Meaning>Implementer supports the "Preservation Extension" Endpoint.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>PreservationCancellation</Value>
+                <Meaning>Implementer supports the "Preservation Cancellation" Endpoint.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--ManifestSpecification: see Clause 10.2.2 Table 10.3 -->
+        <Owner>ETSI</Owner>
+        <Name>ManifestSpecification</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>TS102657-ASN.1</Value>
+                <Meaning>Delivery according to ETSI TS 102 657 using ASN.1 encoding</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS102657-XML</Value>
+                <Meaning>Delivery according to ETSI TS 102 657 using XML encoding</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS103705</Value>
+                <Meaning>Delivery according to ETSI TS 103 705, using JSON encoding</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS103707</Value>
+                <Meaning>Delivery according to ETSI TS 103 707</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>TS103976</Value>
+                <Meaning>Delivery according to ETSI TS 103 976, using JSON encoding</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--DeliveryStatus: see Clause 10.2.4 Table 10.8 -->
+        <Owner>ETSI</Owner>
+        <Name>DeliveryStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>Available</Value>
+                <Meaning>The Delivery object is available</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Acknowledged</Value>
+                <Meaning>The Delivery object details have been acknowledged</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Expired</Value>
+                <Meaning>The data related to the Delivery is no longer available due to expiry</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Error</Value>
+                <Meaning>The Delivery object or underlying data has an error</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Received</Value>
+                <Meaning>The data related to the Delivery object has been received</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--DeliveryDesiredStatus: see Clause 10.2.5 Table 10.9 -->
+        <Owner>ETSI</Owner>
+        <Name>DeliveryDesiredStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>Available</Value>
+                <Meaning>The Delivery object is available</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Acknowledged</Value>
+                <Meaning>The Delivery object details have been acknowledged</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Error</Value>
+                <Meaning>The Delivery object or underlying data had an error whilst handling</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Received</Value>
+                <Meaning>The data related to the Delivery object has been received</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--NFType: see Clause 7.8.2.2.2 Table 7.30 -->
+        <Owner>ETSI</Owner>
+        <Name>NFType</Name>
+        <DictionaryEntries/>
+        <!--No definition so far -->
+    </Dictionary>
+    <Dictionary>
+        <!--IRIEvents: see Clause 7.8.2.3.3 Table 7.32 -->
+        <Owner>ETSI</Owner>
+        <Name>IRIEvents</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>All</Value>
+                <Meaning>All IRI Events</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--IRIAction: see Clause 7.8.3 Table 7.34-->
+        <Owner>ETSI</Owner>
+        <Name>IRIAction</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>NotDelivered</Value>
+                <Meaning>IRI that matches this policy is not delivered</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Delivered</Value>
+                <Meaning>IRI that matches the policy is delivered</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--IRIAction: see Table 8.33-->
+        <Owner>ETSI</Owner>
+        <Name>TDTaskStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>Pending</Value>
+                <Meaning>The Task has been acknowledged by the provider but has not yet been handled.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Resolved</Value>
+                <Meaning>The Task has been processed and appropriate actions have been taken (e.g. the relevant material has been taken down). If not all the requested material was taken down, the Explanation field should be populated (e.g. this could include the situation that material was only taken down in certain geographical areas). </Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Rejected</Value>
+                <Meaning>The Task has been denied or rejected by the CSP. The provider shall, where appropriate, give an explanation about why this was done.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Error</Value>
+                <Meaning>The Task has not been processed as it is technically not compliant with the present document.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+    <Dictionary>
+        <!--IRIAction: see Table 8.33-->
+        <Owner>ETSI</Owner>
+        <Name>TDTaskDesiredStatus</Name>
+        <DictionaryEntries>
+            <DictionaryEntry>
+                <Value>Pending</Value>
+                <Meaning>The Task has been acknowledged by the provider but has not yet been handled.</Meaning>
+            </DictionaryEntry>
+            <DictionaryEntry>
+                <Value>Cancelled</Value>
+                <Meaning>The Task has not been processed as it is technically not compliant with the present document.</Meaning>
+            </DictionaryEntry>
+        </DictionaryEntries>
+    </Dictionary>
+</Dictionaries>

@@ -22,6 +22,8 @@ import (
 // which the NE cannot produce any lawful-interception product.
 var ErrUnsupportedDeliveryCombination = errors.New("unsupported target and delivery combination")
 
+const maxIRIPolicyTaskReferences = 256
+
 // DeliveryType specifies what content should be delivered for an intercept task.
 type DeliveryType int
 
@@ -175,6 +177,13 @@ type InterceptTask struct {
 	// DestinationIDs references the Destination objects for X2/X3 delivery.
 	// These are DIDs (Destination Identifiers) that map to Destination structs.
 	DestinationIDs []uuid.UUID
+
+	// IRIPolicyReferences preserves the provisioned evaluation order.
+	IRIPolicyReferences []uuid.UUID `json:",omitempty"`
+	// IRIPolicySourceGenerations binds delivery to immutable policy definitions.
+	IRIPolicySourceGenerations map[uuid.UUID]uint64 `json:",omitempty"`
+	// IRIPolicyProfileRevision binds classifier configuration to authorization.
+	IRIPolicyProfileRevision string `json:",omitempty"`
 
 	// DeliveryType specifies whether to deliver X2 (IRI), X3 (CC), or both.
 	DeliveryType DeliveryType

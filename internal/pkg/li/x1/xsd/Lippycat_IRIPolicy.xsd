@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Project-owned deployment adapter. This namespace is not an ETSI namespace. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+ xmlns:x1="http://uri.etsi.org/03221/X1/2017/10"
+ xmlns:iri="http://uri.etsi.org/03120/common/2026/01/IRIPolicy"
+ targetNamespace="urn:lippycat:li:x1:iri-policy:1" elementFormDefault="qualified">
+ <xs:import namespace="http://uri.etsi.org/03221/X1/2017/10" schemaLocation="TS_103_221_01.xsd"/>
+ <xs:import namespace="http://uri.etsi.org/03120/common/2026/01/IRIPolicy" schemaLocation="ts_103120_IRIPolicy.xsd"/>
+ <xs:complexType name="IRIPolicyObject"><xs:complexContent><xs:extension base="x1:GenericObject"><xs:sequence><xs:group ref="iri:IRIPolicyObjectGroup"/></xs:sequence></xs:extension></xs:complexContent></xs:complexType>
+ <xs:complexType name="IRIRuleObject"><xs:complexContent><xs:extension base="x1:GenericObject"><xs:sequence><xs:group ref="iri:IRIRuleObjectGroup"/></xs:sequence></xs:extension></xs:complexContent></xs:complexType>
+</xs:schema>

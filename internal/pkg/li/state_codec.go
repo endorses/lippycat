@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/endorses/lippycat/internal/pkg/li/iripolicy"
 	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/google/uuid"
 )
@@ -37,7 +38,7 @@ type stateShape struct {
 	memory   int
 }
 
-func stateJSONSchema(legacy bool) *stateShape {
+func stateJSONSchema(legacy bool, version int) *stateShape {
 	str := &stateShape{kind: 's'}
 	uid := &stateShape{kind: 'q'}
 	num := &stateShape{kind: 'u'}
@@ -57,7 +58,14 @@ func stateJSONSchema(legacy bool) *stateShape {
 		"XID":        uid, "Targets": {kind: 'a', item: target, limit: maxStateReferences, count: 't'}, "RADIUSScope": scope, "RADIUSMACProfile": str,
 		"DestinationIDs": {kind: 'a', item: uid, limit: maxStateReferences, count: 'd'}, "DeliveryType": num, "StartTime": stamp, "EndTime": stamp,
 		"ImplicitDeactivationAllowed": boolean, "Status": num, "ActivatedAt": stamp, "DeactivatedAt": stamp, "LastError": str, "ActivationGeneration": num,
+		"IRIPolicyReferences":        {kind: 'a', item: uid, limit: maxStateReferences, count: 'd'},
+		"IRIPolicySourceGenerations": {kind: 'm', item: num, limit: MaxStateDestinations, count: 'd'}, "IRIPolicyProfileRevision": str,
 	}}
+	if legacy || version == 2 {
+		delete(task.fields, "IRIPolicyReferences")
+		delete(task.fields, "IRIPolicySourceGenerations")
+		delete(task.fields, "IRIPolicyProfileRevision")
+	}
 	destination := &stateShape{kind: 'o', memory: 160, required: []string{"did", "address", "port", "x2_enabled", "x3_enabled", "created_at"}, fields: map[string]*stateShape{
 		"did": uid, "address": str, "port": num, "x2_enabled": boolean, "x3_enabled": boolean, "protocol_type": str, "description": str, "created_at": stamp, "delivery_revision": num,
 	}}
@@ -70,6 +78,9 @@ func stateJSONSchema(legacy bool) *stateShape {
 	}}
 	for field := range intent.fields {
 		intent.required = append(intent.required, field)
+	}
+	if version >= 3 && !legacy {
+		intent.fields["include_x2"] = boolean
 	}
 	controlTime := &stateShape{kind: 'o', required: []string{"seconds", "nanos"}, fields: map[string]*stateShape{"seconds": {kind: 'i'}, "nanos": num}}
 	revocation := &stateShape{kind: 'o', memory: 256, fields: map[string]*stateShape{
@@ -86,6 +97,19 @@ func stateJSONSchema(legacy bool) *stateShape {
 		"generations":    {kind: 'm', limit: MaxStateObligations, item: num, nullable: legacy},
 	}}
 	if !legacy {
+		entry := &stateShape{kind: 'o', memory: 96, required: []string{"Owner", "Name", "Value"}, fields: map[string]*stateShape{"Owner": str, "Name": str, "Value": str}}
+		optionalEntry := *entry
+		optionalEntry.nullable = true
+		criterion := &stateShape{kind: 'o', memory: 80, required: []string{"NFTypes", "Events", "HandoverFormat"}, fields: map[string]*stateShape{
+			"NFTypes": {kind: 'a', item: entry, nullable: true, limit: 256, count: 'd'}, "Events": {kind: 'a', item: entry, nullable: true, limit: 256, count: 'd'}, "HandoverFormat": &optionalEntry}}
+		rule := &stateShape{kind: 'o', nullable: true, memory: 96, required: []string{"Criteria", "Action"}, fields: map[string]*stateShape{"Criteria": {kind: 'a', item: criterion, limit: 64, count: 'd'}, "Action": entry}}
+		ruleRef := &stateShape{kind: 'o', memory: 32, required: []string{"Order", "ObjectID"}, fields: map[string]*stateShape{"Order": num, "ObjectID": uid}}
+		policy := &stateShape{kind: 'o', nullable: true, memory: 64, required: []string{"Name", "Rules"}, fields: map[string]*stateShape{"Name": str, "Rules": {kind: 'a', item: ruleRef, limit: 256, count: 'd'}}}
+		object := &stateShape{kind: 'o', memory: 64, required: []string{"ID", "Generation", "Policy", "Rule"}, fields: map[string]*stateShape{"ID": uid, "Generation": num, "Policy": policy, "Rule": rule}}
+		if version >= 3 {
+			root.fields["generic_objects"] = &stateShape{kind: 'a', item: object, nullable: true, limit: 4096}
+			root.required = append(root.required, "generic_objects")
+		}
 		root.fields["incarnation"] = uid
 		root.fields["radius_correlation_state_file"] = str
 		root.fields["intents"] = &stateShape{kind: 'a', item: intent, limit: MaxStateObligations}
@@ -151,6 +175,12 @@ func checkStateJSON(d *json.Decoder, s *stateShape, b *stateBudget, depth int) e
 					return stateError("map identity or count limit")
 				}
 				child = s.item
+				if s.count == 'd' {
+					b.destinations++
+					if b.destinations > maxStateTotalReferences {
+						return stateError("total IRI policy source reference limit")
+					}
+				}
 			} else if child == nil {
 				return stateError("unknown field")
 			}
@@ -292,9 +322,18 @@ func decodeStateBudget(data []byte, legacy bool, budget *stateBudget) (*StateSna
 	if len(data) == 0 || len(data) > MaxStateSnapshotBytes || !stateUnicode(data) {
 		return nil, stateError("document size or encoding")
 	}
+	var header struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &header); err != nil {
+		return nil, stateError("invalid version header")
+	}
+	if legacy && header.Version != 1 || !legacy && header.Version != 2 && header.Version != StateSchemaVersion {
+		return nil, stateError("unsupported snapshot version")
+	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
-	if err := checkStateJSON(d, stateJSONSchema(legacy), budget, 0); err != nil {
+	if err := checkStateJSON(d, stateJSONSchema(legacy, header.Version), budget, 0); err != nil {
 		return nil, err
 	}
 	if _, err := d.Token(); !errors.Is(err, io.EOF) {
@@ -303,6 +342,23 @@ func decodeStateBudget(data []byte, legacy bool, budget *stateBudget) (*StateSna
 	var state StateSnapshot
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, stateError("invalid typed fields")
+	}
+	if !legacy && state.Version == 2 {
+		if len(state.GenericObjects) != 0 {
+			return nil, stateError("version 2 contains policy graph")
+		}
+		for _, task := range state.Tasks {
+			if task != nil && (len(task.IRIPolicyReferences) > 0 || len(task.IRIPolicySourceGenerations) > 0 || task.IRIPolicyProfileRevision != "") {
+				return nil, stateError("version 2 contains IRI policy task")
+			}
+		}
+		for _, intent := range state.Intents {
+			if intent != nil && (intent.IncludeX2 || intent.CandidateTask != nil && (len(intent.CandidateTask.IRIPolicyReferences) > 0 || len(intent.CandidateTask.IRIPolicySourceGenerations) > 0 || intent.CandidateTask.IRIPolicyProfileRevision != "")) {
+				return nil, stateError("version 2 contains IRI policy intent")
+			}
+		}
+		state.Version = StateSchemaVersion
+		state.GenericObjects = []iripolicy.Object{}
 	}
 	return &state, nil
 }
@@ -414,12 +470,37 @@ func validateStateTask(task *InterceptTask, b *stateBudget) error {
 	if task == nil || task.XID == uuid.Nil || task.Targets == nil || task.DestinationIDs == nil || len(task.Targets) == 0 || len(task.Targets) > maxStateReferences || len(task.DestinationIDs) == 0 || len(task.DestinationIDs) > maxStateReferences {
 		return stateError("task identity or references")
 	}
+	if len(task.IRIPolicyReferences) > maxStateReferences || len(task.IRIPolicySourceGenerations) > 4096 {
+		return stateError("IRI policy task reference limit")
+	}
+	policyIDs := make(map[uuid.UUID]bool, len(task.IRIPolicyReferences))
+	for _, id := range task.IRIPolicyReferences {
+		if id == uuid.Nil || policyIDs[id] {
+			return stateError("IRI policy task reference identity")
+		}
+		policyIDs[id] = true
+	}
+	for id, generation := range task.IRIPolicySourceGenerations {
+		if id == uuid.Nil || generation == 0 {
+			return stateError("IRI policy source identity")
+		}
+	}
+	if len(task.IRIPolicyReferences) == 0 && (len(task.IRIPolicySourceGenerations) > 0 || task.IRIPolicyProfileRevision != "") {
+		return stateError("IRI policy task binding without references")
+	}
+	if err := stateStrings(b, task.IRIPolicyProfileRevision); err != nil {
+		return err
+	}
+	if err := b.charge(80*len(task.IRIPolicySourceGenerations) + 16*len(task.IRIPolicyReferences)); err != nil {
+		return err
+	}
+	b.destinations += len(task.IRIPolicySourceGenerations) + len(task.IRIPolicyReferences)
 	d := task.Definition
 	if d.Source != "" && d.Source != DefinitionPush && d.Source != DefinitionPull && d.Source != DefinitionRestore {
 		return stateError("definition provenance")
 	}
 	switch d.ConflictReason {
-	case "", "common_scope", "expired", "empty_window", "no_common_targets", "no_confirmed_destinations", "no_common_delivery":
+	case "", "common_scope", "expired", "empty_window", "no_common_targets", "no_confirmed_destinations", "no_common_delivery", "no_common_iri_policy":
 	default:
 		return stateError("definition conflict reason")
 	}
@@ -674,6 +755,9 @@ func validateStateIntent(i *StateIntent, s *StateSnapshot, b *stateBudget) error
 	if !revokes && len(i.RevocationIDs) != 0 {
 		return stateError("nonrevoking intent references control")
 	}
+	if i.IncludeX2 && !revokes {
+		return stateError("nonrevoking intent includes X2")
+	}
 	if i.Kind == StatePurge {
 		if !nonzeroStateID(i.XID) || i.DID != nil || i.ReservedGeneration != 0 || len(i.CleanupFilterIDs) != 0 {
 			return stateError("purge task binding")
@@ -780,6 +864,9 @@ func ValidateStateSnapshot(s *StateSnapshot) error {
 		return stateError("snapshot collection limit")
 	}
 	b := &stateBudget{}
+	if err := validateStateIRIGraph(s.GenericObjects, b); err != nil {
+		return err
+	}
 	if err := stateStrings(b, s.RADIUSCorrelationStateFile); err != nil {
 		return err
 	}
@@ -960,7 +1047,7 @@ func MarshalStateSnapshot(s *StateSnapshot) ([]byte, error) {
 		return err
 	}
 	write := func(v string) error { _, err := out.Write([]byte(v)); return err }
-	if err := write(`{"version":2,"written_at":`); err != nil {
+	if err := write(`{"version":3,"written_at":`); err != nil {
 		return nil, err
 	}
 	if err := put(s.WrittenAt); err != nil {
@@ -984,8 +1071,14 @@ func MarshalStateSnapshot(s *StateSnapshot) ([]byte, error) {
 		name string
 		n    int
 		at   func(int) any
-	}{{"tasks", len(s.Tasks), func(i int) any { return s.Tasks[i] }}, {"destinations", len(s.Destinations), func(i int) any { return s.Destinations[i] }}, {"intents", len(s.Intents), func(i int) any { return s.Intents[i] }}, {"revocations", len(s.Revocations), func(i int) any { return s.Revocations[i] }}}
+	}{{"tasks", len(s.Tasks), func(i int) any { return s.Tasks[i] }}, {"destinations", len(s.Destinations), func(i int) any { return s.Destinations[i] }}, {"generic_objects", len(s.GenericObjects), func(i int) any { return s.GenericObjects[i] }}, {"intents", len(s.Intents), func(i int) any { return s.Intents[i] }}, {"revocations", len(s.Revocations), func(i int) any { return s.Revocations[i] }}}
 	for _, a := range arrays {
+		if a.name == "generic_objects" && s.GenericObjects == nil {
+			if err := write(`,"generic_objects":null`); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if err := write(`,"` + a.name + `":[`); err != nil {
 			return nil, err
 		}
@@ -1049,7 +1142,7 @@ func MarshalStateSnapshot(s *StateSnapshot) ([]byte, error) {
 	// Apply the same aggregate decode admission rule to writer output.
 	d := json.NewDecoder(bytes.NewReader(out.Bytes()))
 	d.UseNumber()
-	if err := checkStateJSON(d, stateJSONSchema(false), &stateBudget{memory: 4 * out.Len()}, 0); err != nil {
+	if err := checkStateJSON(d, stateJSONSchema(false, StateSchemaVersion), &stateBudget{memory: 4 * out.Len()}, 0); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil

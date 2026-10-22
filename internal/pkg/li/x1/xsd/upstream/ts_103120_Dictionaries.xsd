@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="http://uri.etsi.org/03280/common/2019/10/Dictionaries" targetNamespace="http://uri.etsi.org/03280/common/2019/10/Dictionaries" elementFormDefault="qualified" attributeFormDefault="unqualified">
+    <xs:element name="Dictionaries" type="Dictionaries"/>
+    <xs:complexType name="Dictionaries">
+        <xs:sequence>
+            <xs:element name="Dictionary" type="Dictionary" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="Dictionary">
+        <xs:sequence>
+            <xs:element name="Owner" type="xs:string"/>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="DictionaryEntries" type="DictionaryEntries"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="DictionaryEntries">
+        <xs:sequence>
+            <xs:element name="DictionaryEntry" type="DictionaryEntry" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="DictionaryEntry">
+        <xs:sequence>
+            <xs:element name="Value" type="xs:string"/>
+            <xs:element name="Meaning" type="xs:string"/>
+        </xs:sequence>
+    </xs:complexType>
+</xs:schema>

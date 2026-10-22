@@ -683,6 +683,15 @@ default changes require a separate receiver-readiness decision. See
 [encoding compatibility and migration](../../docs/LI_INTEGRATION.md#x2x3-encoding-compatibility-and-migration)
 for a configuration example and rollout order.
 
+### Selective IRI policies
+
+LI builds support task-level IRI policies through the X1 v1.23.1 POI capability
+profile. Optional `--li-iri-policy-profile` selects a JSON file of national event
+mappings and known POI facts; its shared YAML key is `li.iri_policy_profile` and
+environment variable is `LIPPYCAT_LI_IRI_POLICY_PROFILE`. The ADMF must use the
+project-owned generic-object adapter. See [Selective IRI policies](../../docs/LI_IRI_POLICIES.md)
+for the schema contract, examples, and restart/replay requirements.
+
 ### Lawful Interception X1 mTLS
 
 LI builds host the X1 administration endpoint when `--li-enabled` is set. X1

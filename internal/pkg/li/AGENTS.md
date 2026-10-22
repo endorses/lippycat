@@ -337,29 +337,30 @@ Offset  Size  Field
 
 **File:** `x2x3/x2_encoder.go`
 
-Encodes SIP events to IRI PDUs:
+Encodes validated raw SIP messages as X2 SIP payloads through `EncodeIRI`.
+SIP session labels are not standardized ETSI IRI event dictionary values.
 
-```go
-type X2Encoder struct {
-    nfID string  // Network Function ID
-    ipID string  // Interception Point ID
-}
+### Selective IRI policies
 
-func (e *X2Encoder) EncodeSessionBegin(xid uuid.UUID, sip *SIPInfo) ([]byte, error)
-func (e *X2Encoder) EncodeSessionAnswer(xid uuid.UUID, sip *SIPInfo) ([]byte, error)
-func (e *X2Encoder) EncodeSessionEnd(xid uuid.UUID, sip *SIPInfo) ([]byte, error)
-```
+`iripolicy/` validates bounded graphs and compiles immutable ordered evaluators.
+`iri_administration.go`, `iri_snapshot.go`, and `iri_state.go` integrate generic
+objects with task authority and encrypted state version 3. A shared update
+reserves affected task generations together and revokes old X2 and X3 before
+publishing the graph. Restored policy-dependent tasks need a complete generic
+object graph from the same ADMF snapshot; disk data alone does not authorize
+capture, delivery, or replay.
 
-**IRI Event Types:**
+The X1 v1.23.1 POI profile accepts task policy references and rejects MDF
+mediation policy references. The project-owned adapter namespace is
+`urn:lippycat:li:x1:iri-policy:1`; see `x1/xsd/README.md` for provenance and
+reproducible generation. Generic-object routes support create, full replacement,
+delete, readback, type lists, delete-all, and complete details.
 
-| Event           | SIP Trigger       | IRIType Value |
-| --------------- | ----------------- | ------------- |
-| SessionBegin    | INVITE            | 1             |
-| SessionAnswer   | 200 OK to INVITE  | 2             |
-| SessionEnd      | BYE               | 3             |
-| SessionAttempt  | CANCEL/4xx/5xx    | 4             |
-| Registration    | REGISTER          | 5             |
-| RegistrationEnd | REGISTER (Exp: 0) | 6             |
+Processor enforcement occurs after shared SIP learning but before X2 encoding,
+and before RADIUS durable correlation allocation. National event mappings and
+known POI facts come from a validated immutable JSON profile; its semantic
+revision is bound to task and replay authority. Suppression leaves authorized
+X3 media independent. See `docs/LI_IRI_POLICIES.md` for the deployment contract.
 
 ### X3 Encoder
 

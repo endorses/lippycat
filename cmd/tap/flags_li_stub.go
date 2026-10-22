@@ -17,6 +17,7 @@ import (
 type LIConfig struct {
 	TaskFilterDistributionScope   string
 	DeliveryCaptureSourceMetadata bool
+	IRIPolicyProfileFile          string
 	DeliveryTimestampFormat       string
 	DeliveryMatchedTargetFormat   string
 	CallCorrelation               li.CallCorrelationConfig

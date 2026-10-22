@@ -4,8 +4,23 @@
 
 **Repository baseline:** `b20d17c` (v0.10.1)
 
-**Decision:** defer V1.23.1; retain V1.22.1 as lippycat's declared and newest
+**Historical decision:** defer V1.23.1; retain V1.22.1 as lippycat's declared and newest
 accepted X1 revision until the work described here is complete
+
+## Implementation update (2026-10-22)
+
+This assessment records the v0.10.1 baseline. Its implementation descriptions
+and proposed release conditions are historical, not the current capability
+contract. The implemented [POI profile](../LI_IRI_POLICIES.md) and
+[implementation plan](../plans/x1-iri-policy-support.md) supersede them.
+
+Current support uses task-level policies; Annex C mediation policies belong to
+an MDF and are rejected here. The missing published X1 adapter is addressed by
+an explicit project-owned schema, not by treating HI1 objects as X1 objects.
+Administrative state is encrypted version 3, with version 2 migration. SIP is
+carried as raw X2 product; optional national event mappings classify observed
+wire facts without inventing ETSI event identifiers. No performance acceptance
+gate is inferred from this historical assessment.
 
 ## Executive summary
 

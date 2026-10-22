@@ -8,21 +8,24 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/endorses/lippycat/internal/pkg/li/iripolicy"
 	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 )
 
 func TestClassifyProtocolVersion_AcceptedWindow(t *testing.T) {
-	for minor := 13; minor <= 22; minor++ {
+	for minor := 13; minor <= 23; minor++ {
 		for _, prefix := range []string{"", "v"} {
 			version := fmt.Sprintf("%s1.%d.1", prefix, minor)
 			expected := revisionAcceptedCompatible
-			if minor == 22 {
+			if minor == 23 {
 				expected = revisionAcceptedExact
 			}
 			t.Run(version, func(t *testing.T) { assert.Equal(t, expected, classifyProtocolVersion(version)) })
@@ -33,7 +36,8 @@ func TestClassifyProtocolVersion_AcceptedWindow(t *testing.T) {
 func TestClassifyProtocolVersion_Rejections(t *testing.T) {
 	tests := map[string]revisionDisposition{
 		"1.13.0": revisionUnsupported, "v1.12.9": revisionUnsupported,
-		"1.22.2": revisionUnsupported, "v1.23.1": revisionUnsupported,
+		"1.23.2": revisionUnsupported, "v1.24.1": revisionUnsupported,
+		"1.24.1": revisionUnsupported, "v2.0.0": revisionUnsupported,
 		"1.13": revisionMalformed, "1.13.1.0": revisionMalformed,
 		"-1.13.1": revisionMalformed, "v1.-13.1": revisionMalformed,
 		"V1.13.1": revisionMalformed, " 1.13.1": revisionMalformed,
@@ -48,7 +52,7 @@ func TestClassifyProtocolVersion_Rejections(t *testing.T) {
 
 func TestServer_ProtocolRevisionErrorAndMetrics(t *testing.T) {
 	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, newMockDestinationManager(), newMockTaskManager())
-	versions := []string{"v1.22.1", "1.13.1", "", "broken", "v1.23.1"}
+	versions := []string{"v1.23.1", "1.13.1", "", "broken", "v1.24.1"}
 	for _, version := range versions {
 		body := `<pingRequest><version>` + version + `</version></pingRequest>`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
@@ -56,7 +60,7 @@ func TestServer_ProtocolRevisionErrorAndMetrics(t *testing.T) {
 		w := httptest.NewRecorder()
 		s.handleX1Request(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
-		if version == "broken" || version == "v1.23.1" {
+		if version == "broken" || version == "v1.24.1" {
 			var container struct {
 				Errors []*schema.ErrorResponse `xml:"x1ResponseMessage"`
 			}
@@ -136,4 +140,34 @@ func taskXML(xid, did uuid.UUID, full bool) string {
 		return "<taskDetails><xId>" + xid.String() + "</xId><implicitDeactivationAllowed>true</implicitDeactivationAllowed></taskDetails>"
 	}
 	return "<taskDetails><xId>" + xid.String() + "</xId><targetIdentifiers><targetIdentifier><sipUri>sip:alice@example.net</sipUri></targetIdentifier></targetIdentifiers><deliveryType>X2andX3</deliveryType><listOfDIDs><dId>" + did.String() + "</dId></listOfDIDs></taskDetails>"
+}
+
+// The declared revision must describe the schema actually used in wire tests.
+func TestProtocolVersionMatchesBundledSchema(t *testing.T) {
+	document, err := os.ReadFile("xsd/TS_103_221_01.xsd")
+	require.NoError(t, err)
+	var root struct {
+		Version string `xml:"version,attr"`
+	}
+	require.NoError(t, xml.Unmarshal(document, &root))
+	require.Equal(t, "1.23.1", root.Version)
+	require.Equal(t, root.Version, strings.TrimPrefix(DefaultProtocolVersion, "v"))
+	require.Equal(t, "v1.23.1", DefaultClientConfig().Version)
+	require.Equal(t, "v1.23.1", NewServer(ServerConfig{}, nil, nil).config.Version)
+}
+
+func TestFutureRevisionRejectsGenericObjectBeforeMutation(t *testing.T) {
+	manager := &mockObjectManager{objects: map[uuid.UUID]iripolicy.Object{}}
+	server := NewServer(ServerConfig{}, nil, nil)
+	server.objectManager = manager
+	client := &Client{config: ClientConfig{Version: "v1.24.1", NEIdentifier: "test-ne"}, admfIdentifier: "test-admf"}
+	object := testIRIRule()
+	request := &schema.CreateObjectRequest{X1RequestMessage: client.buildRequestMessage(), CreateObject: &schema.GenericObject{IRIObject: &object}}
+	wire, err := marshalWrappedRequest("CreateObjectRequest", request)
+	require.NoError(t, err)
+	responses := server.processX1RequestEnvelope(wire, "test")
+	require.Len(t, responses, 1)
+	require.Equal(t, ErrorCodeRequestSyntaxError, responses[0].(*schema.ErrorResponse).ErrorInformation.ErrorCode)
+	require.Empty(t, manager.objects)
+	require.Zero(t, manager.seen)
 }

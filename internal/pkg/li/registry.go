@@ -76,7 +76,10 @@ type TaskModification struct {
 	RADIUSScope      *radius.ScopeBinding
 	RADIUSMACProfile *string
 	// DestinationIDs replaces the destination list if non-nil.
-	DestinationIDs *[]uuid.UUID
+	DestinationIDs             *[]uuid.UUID
+	IRIPolicyReferences        *[]uuid.UUID
+	iriPolicySourceGenerations map[uuid.UUID]uint64
+	iriPolicyProfileRevision   string
 	// DeliveryType changes the delivery type if non-nil.
 	DeliveryType *DeliveryType
 	// EndTime changes the end time if non-nil.
@@ -179,7 +182,7 @@ func (r *Registry) checkExpiredTasks() {
 			if r.onExpiration == nil {
 				task.Status = TaskStatusSuspended
 			} // standalone registry gate
-			taskCopy := *task
+			taskCopy := *cloneInterceptTask(task)
 			expired = append(expired, &taskCopy)
 		}
 	}
@@ -312,6 +315,8 @@ func cloneInterceptTask(task *InterceptTask) *InterceptTask {
 	clone := *task
 	clone.Targets = append([]TargetIdentity(nil), task.Targets...)
 	clone.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	clone.IRIPolicyReferences = append([]uuid.UUID(nil), task.IRIPolicyReferences...)
+	clone.IRIPolicySourceGenerations = cloneIRISourceGenerations(task.IRIPolicySourceGenerations)
 	normalizeTaskTimes(&clone)
 	return &clone
 }
@@ -354,10 +359,7 @@ func (r *Registry) restoreNonEnforcingTask(task *InterceptTask) error {
 	// Destinations may legitimately have been removed after this task was
 	// retained. Restore its identity without enforcement; pending promotion
 	// validates destinations again before installing any filters.
-	copyTask := *task
-	copyTask.Targets = append([]TargetIdentity(nil), task.Targets...)
-	copyTask.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
-	r.tasks[task.XID] = &copyTask
+	r.tasks[task.XID] = cloneInterceptTask(task)
 	if r.generations[task.XID] < task.ActivationGeneration {
 		r.generations[task.XID] = task.ActivationGeneration
 	}
@@ -466,10 +468,7 @@ func (r *Registry) restoreTask(task *InterceptTask) error {
 	if !exists || !current.ActivatedAt.Equal(task.ActivatedAt) {
 		return fmt.Errorf("restore task XID %s: registry entry changed concurrently", task.XID)
 	}
-	copyTask := *task
-	copyTask.Targets = append([]TargetIdentity(nil), task.Targets...)
-	copyTask.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
-	r.tasks[task.XID] = &copyTask
+	r.tasks[task.XID] = cloneInterceptTask(task)
 	return nil
 }
 
@@ -507,12 +506,17 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	// Validate the complete prospective definition before changing the live
 	// task. This prevents a later invalid field from leaving earlier fields
 	// partially applied.
-	candidate := *task
+	candidate := *cloneInterceptTask(task)
 	if mod.definition != nil {
 		candidate.Definition = *mod.definition
 	}
 	candidate.Targets = append([]TargetIdentity(nil), task.Targets...)
 	candidate.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	if mod.IRIPolicyReferences != nil {
+		candidate.IRIPolicyReferences = append([]uuid.UUID(nil), (*mod.IRIPolicyReferences)...)
+		candidate.IRIPolicySourceGenerations = cloneIRISourceGenerations(mod.iriPolicySourceGenerations)
+		candidate.IRIPolicyProfileRevision = mod.iriPolicyProfileRevision
+	}
 	if mod.Targets != nil {
 		candidate.Targets = append([]TargetIdentity(nil), (*mod.Targets)...)
 	}
@@ -558,6 +562,9 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	task.Definition = candidate.Definition
 	task.RADIUSScope = candidate.RADIUSScope
 	task.RADIUSMACProfile = candidate.RADIUSMACProfile
+	task.IRIPolicyReferences = candidate.IRIPolicyReferences
+	task.IRIPolicySourceGenerations = candidate.IRIPolicySourceGenerations
+	task.IRIPolicyProfileRevision = candidate.IRIPolicyProfileRevision
 	if mod.Targets != nil {
 		task.Targets = candidate.Targets
 	}
@@ -678,7 +685,7 @@ func (r *Registry) DeactivateTask(xid uuid.UUID) error {
 
 	// Notify callback for explicit ADMF deactivation
 	if r.onDeactivation != nil {
-		taskCopy := *task
+		taskCopy := *cloneInterceptTask(task)
 		r.mu.Unlock()
 		r.onDeactivation(&taskCopy, DeactivationReasonADMF)
 		r.mu.Lock()
@@ -700,19 +707,7 @@ func (r *Registry) GetTaskDetails(xid uuid.UUID) (*InterceptTask, error) {
 		return nil, fmt.Errorf("%w: XID %s", ErrTaskNotFound, xid)
 	}
 
-	// Return a copy to prevent external modification
-	taskCopy := *task
-	// Deep copy slices
-	if task.Targets != nil {
-		taskCopy.Targets = make([]TargetIdentity, len(task.Targets))
-		copy(taskCopy.Targets, task.Targets)
-	}
-	if task.DestinationIDs != nil {
-		taskCopy.DestinationIDs = make([]uuid.UUID, len(task.DestinationIDs))
-		copy(taskCopy.DestinationIDs, task.DestinationIDs)
-	}
-
-	return &taskCopy, nil
+	return cloneInterceptTask(task), nil
 }
 
 // ListTasks iterates over all tasks in the registry.
@@ -724,7 +719,7 @@ func (r *Registry) ListTasks(fn func(task *InterceptTask) bool) {
 	defer r.mu.RUnlock()
 
 	for _, task := range r.tasks {
-		taskCopy := *task
+		taskCopy := *cloneInterceptTask(task)
 		if !fn(&taskCopy) {
 			return
 		}
@@ -741,7 +736,7 @@ func (r *Registry) GetActiveTasks() []*InterceptTask {
 	var active []*InterceptTask
 	for _, task := range r.tasks {
 		if task.Status == TaskStatusActive {
-			taskCopy := *task
+			taskCopy := *cloneInterceptTask(task)
 			active = append(active, &taskCopy)
 		}
 	}
@@ -771,6 +766,18 @@ func (r *Registry) ActiveTaskCount() int {
 
 // validateTask validates task parameters before activation.
 func (r *Registry) validateTask(task *InterceptTask) error {
+	if task != nil {
+		if len(task.IRIPolicyReferences) > maxIRIPolicyTaskReferences {
+			return fmt.Errorf("%w: IRI policy reference limit", ErrInvalidTask)
+		}
+		seen := make(map[uuid.UUID]bool, len(task.IRIPolicyReferences))
+		for _, id := range task.IRIPolicyReferences {
+			if id == uuid.Nil || seen[id] {
+				return fmt.Errorf("%w: invalid or duplicate IRI policy reference", ErrInvalidTask)
+			}
+			seen[id] = true
+		}
+	}
 	if task == nil {
 		return fmt.Errorf("%w: task is nil", ErrInvalidTask)
 	}
@@ -814,7 +821,7 @@ func (r *Registry) validateTask(task *InterceptTask) error {
 		}
 	}
 	if IsRADIUSTask(task) {
-		candidate := *task
+		candidate := *cloneInterceptTask(task)
 		if candidate.ActivationGeneration == 0 {
 			candidate.ActivationGeneration = 1
 		}
@@ -966,7 +973,7 @@ func (r *Registry) MarkTaskFailed(xid uuid.UUID, errMsg string) error {
 
 	// Notify callback for fault deactivation
 	if r.onDeactivation != nil {
-		taskCopy := *task
+		taskCopy := *cloneInterceptTask(task)
 		r.mu.Unlock()
 		r.onDeactivation(&taskCopy, DeactivationReasonFault)
 		r.mu.Lock()

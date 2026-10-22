@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/endorses/lippycat/internal/pkg/li/iripolicy"
 	"os"
 	"path/filepath"
 	"time"
@@ -197,6 +198,11 @@ func (m *Manager) restorePersistedStateLocked() (result error) {
 	m.registry.tasks, m.registry.destinations, m.registry.generations = tasks, destinations, state.Generations
 	m.registry.unconfirmedPending = unconfirmedPending
 	m.registry.mu.Unlock()
+	m.iriMu.Lock()
+	m.iriObjects = iripolicy.CloneObjects(state.GenericObjects)
+	m.iriConfirmed = make(map[uuid.UUID]bool)
+	m.iriCompiled = nil
+	m.iriMu.Unlock()
 	m.persistedActive, m.persistenceCandidates = active, candidates
 	m.stateIntents, m.stateRevocations = state.Intents, state.Revocations
 	m.stateCleanup = make(map[uuid.UUID][]string)
@@ -213,6 +219,12 @@ func (m *Manager) restorePersistedStateLocked() (result error) {
 // insufficient. Call after Start; lifecycle state is revalidated on every call.
 func (m *Manager) ReplayTaskAuthorized(xid uuid.UUID, generation uint64) bool {
 	if !m.administrativeAdmissionReady() {
+		return false
+	}
+	m.iriMu.RLock()
+	snapshotBlocked := m.iriSnapshotBlocked[xid]
+	m.iriMu.RUnlock()
+	if snapshotBlocked {
 		return false
 	}
 	m.replayMu.RLock()

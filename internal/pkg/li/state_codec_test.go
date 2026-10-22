@@ -124,8 +124,8 @@ func TestStateCodecStrictJSON(t *testing.T) {
 	base, err := MarshalStateSnapshot(stateFixture(t))
 	require.NoError(t, err)
 	cases := map[string]string{
-		"duplicate field":       strings.Replace(string(base), `"version":2`, `"version":2,"version":2`, 1),
-		"unknown field":         strings.Replace(string(base), `"version":2`, `"version":2,"selector-secret":0`, 1),
+		"duplicate field":       strings.Replace(string(base), `"version":3`, `"version":3,"version":3`, 1),
+		"unknown field":         strings.Replace(string(base), `"version":3`, `"version":3,"selector-secret":0`, 1),
 		"wrong case":            strings.Replace(string(base), `"written_at"`, `"Written_At"`, 1),
 		"trailing document":     string(base) + `{}`,
 		"null entry":            strings.Replace(string(base), `"tasks":[`, `"tasks":[null,`, 1),

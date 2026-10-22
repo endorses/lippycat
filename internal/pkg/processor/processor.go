@@ -125,6 +125,7 @@ type Config struct {
 	LITaskFilterDistributionScope   string
 	LIDeliveryCaptureSourceMetadata bool
 	LIDeliveryTimestampFormat       string
+	LIIRIPolicyProfileFile          string
 	LIDeliveryMatchedTargetFormat   string
 	LIHandover                      li.HandoverConfig
 	LIRADIUSScope                   radius.ScopeBinding

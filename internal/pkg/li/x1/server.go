@@ -201,7 +201,9 @@ type TaskDefinitionPresence struct {
 }
 
 type Task struct {
-	DefinitionPresence *TaskDefinitionPresence
+	// IRIPolicyReferences is the ordered task-level selective IRI policy list.
+	IRIPolicyReferences []uuid.UUID
+	DefinitionPresence  *TaskDefinitionPresence
 	// XID is the unique identifier for this task (UUID v4).
 	XID uuid.UUID
 	// Targets specifies the identities to intercept.
@@ -226,6 +228,8 @@ type Task struct {
 
 // TaskModification specifies which fields to modify in a task.
 type TaskModification struct {
+	// IRIPolicyReferences replaces the ordered policy list when non-nil.
+	IRIPolicyReferences *[]uuid.UUID
 	// Targets replaces the target list if non-nil.
 	Targets *[]TargetIdentity
 	// DestinationIDs replaces the destination list if non-nil.
@@ -307,13 +311,14 @@ type TaskManager interface {
 
 // Server implements the X1 administration interface.
 type Server struct {
-	mu           sync.RWMutex
-	config       ServerConfig
-	destManager  DestinationManager
-	taskManager  TaskManager
-	httpServer   *http.Server
-	listener     net.Listener
-	shutdownOnce sync.Once
+	mu            sync.RWMutex
+	config        ServerConfig
+	destManager   DestinationManager
+	taskManager   TaskManager
+	objectManager GenericObjectManager
+	httpServer    *http.Server
+	listener      net.Listener
+	shutdownOnce  sync.Once
 
 	rateLimitersMu       sync.Mutex
 	rateLimiters         map[string]*limiterEntry
@@ -330,10 +335,12 @@ type limiterEntry struct {
 	lastSeen time.Time
 }
 
-const DefaultProtocolVersion = "v1.22.1"
+// DefaultProtocolVersion is the implemented X1 administration revision.
+const DefaultProtocolVersion = "v1.23.1"
 
 // The inbound window is based on verified wire compatibility with the bundled
-// V1.22.1 schema. It is deliberately not a general semantic-version policy.
+// V1.23.1 schema and the supported POI profile. It is deliberately not a
+// general semantic-version policy.
 const minimumProtocolVersion = "v1.13.1"
 
 type protocolRevision struct{ major, minor, patch int }
@@ -457,7 +464,14 @@ func NewServer(config ServerConfig, destManager DestinationManager, taskManager 
 		trusted = append(trusted, prefix.Masked())
 	}
 
+	var objectManager GenericObjectManager
+	if manager, ok := taskManager.(GenericObjectManager); ok {
+		objectManager = manager
+	} else if manager, ok := destManager.(GenericObjectManager); ok {
+		objectManager = manager
+	}
 	return &Server{
+		objectManager:  objectManager,
 		config:         config,
 		destManager:    destManager,
 		taskManager:    taskManager,
@@ -789,12 +803,16 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Read request body
-	body, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024)) // 10MB limit
+	body, err := io.ReadAll(io.LimitReader(r.Body, schema.MaxRequestXMLBytes+1)) // Detect an oversized body before parsing.
 	if err != nil {
 		s.sendErrorResponse(w, "", ErrorCodeGenericError, "failed to read request body")
 		return
 	}
 	defer r.Body.Close()
+	if len(body) > schema.MaxRequestXMLBytes {
+		s.sendErrorResponse(w, "", ErrorCodeRequestSyntaxError, "X1 request exceeds the body size limit")
+		return
+	}
 
 	// Create context with timeout for XML parsing
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.XMLParseTimeout)
@@ -803,14 +821,18 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 	// Parse XML with timeout protection via goroutine
 	type parseResult struct {
 		rootDetector xmlRootDetector
+		body         []byte
 		err          error
 	}
 	resultCh := make(chan parseResult, 1)
 
 	go func() {
 		var root xmlRootDetector
-		err := xml.Unmarshal(body, &root)
-		resultCh <- parseResult{root, err}
+		normalized, err := schema.NormalizeNamespacesBounded(body, schema.MaxRequestXMLBytes)
+		if err == nil {
+			err = xml.Unmarshal(normalized, &root)
+		}
+		resultCh <- parseResult{rootDetector: root, body: normalized, err: err}
 	}()
 
 	// Wait for result or timeout
@@ -822,6 +844,7 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rootDetector = result.rootDetector
+		body = result.body
 	case <-ctx.Done():
 		logger.Warn("X1 XML parsing timeout",
 			"remote", r.RemoteAddr,
@@ -845,6 +868,9 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, message := range reqContainer.RequestMessages {
+			// The historical unnamespaced requestContainer uses local operation
+			// aliases; that compatibility rule does not apply to the ETSI envelope.
+			message.LegacyContainer = reqContainer.XMLName.Space == ""
 			responses = append(responses, s.processEnvelopeMessage(message, clientIP))
 		}
 		if len(reqContainer.RequestMessages) == 0 {
@@ -853,7 +879,7 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 
 	case "X1Request":
 		// ETSI-compliant X1Request envelope with xsi:type on x1RequestMessage.
-		responses = append(responses, s.processX1RequestEnvelope(body, clientIP)...)
+		responses = append(responses, s.processNormalizedX1RequestEnvelope(body, clientIP)...)
 
 	default:
 		// Direct request (not wrapped in container) for backward compatibility.
@@ -944,15 +970,27 @@ type x1RequestEnvelope struct {
 
 // x1RequestMessageAttr captures the xsi:type attribute, admfIdentifier, and inner XML from x1RequestMessage.
 type x1RequestMessageAttr struct {
-	Type           string `xml:"type,attr"`
-	AdmfIdentifier string `xml:"admfIdentifier"`
-	InnerXML       []byte `xml:",innerxml"`
+	Type            string `xml:"http://www.w3.org/2001/XMLSchema-instance type,attr"`
+	TypeNamespace   string `xml:"-"`
+	TypeError       string `xml:"-"`
+	LegacyContainer bool   `xml:"-"`
+	AdmfIdentifier  string `xml:"admfIdentifier"`
+	InnerXML        []byte `xml:",innerxml"`
 }
 
 // processX1RequestEnvelope processes an ETSI-compliant X1Request envelope.
 // It extracts the xsi:type from x1RequestMessage and synthesizes a bare request
 // for processing by processRequestMessage.
 func (s *Server) processX1RequestEnvelope(body []byte, peer string) []any {
+	normalized, err := schema.NormalizeNamespacesBounded(body, schema.MaxRequestXMLBytes)
+	if err != nil {
+		return []any{s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "invalid XML namespace scope")}
+	}
+	return s.processNormalizedX1RequestEnvelope(normalized, peer)
+}
+
+// The HTTP handler already normalizes its entire body before any mutation.
+func (s *Server) processNormalizedX1RequestEnvelope(body []byte, peer string) []any {
 	var envelope x1RequestEnvelope
 	if err := xml.Unmarshal(body, &envelope); err != nil {
 		return []any{s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "invalid X1Request envelope: "+err.Error())}
@@ -970,6 +1008,12 @@ func (s *Server) processX1RequestEnvelope(body []byte, peer string) []any {
 func (s *Server) processEnvelopeMessage(message x1RequestMessageAttr, peer string) any {
 	requestMessage := envelopeBaseMessage(message)
 	messageType := message.Type
+	if message.TypeError == "missing xsi:type" {
+		return s.buildErrorResponse(requestMessage, "Unknown", ErrorCodeRequestSyntaxError, "missing xsi:type on x1RequestMessage")
+	}
+	if message.TypeError != "" || message.TypeNamespace != etsiX1Namespace && !(message.LegacyContainer && message.TypeNamespace == "") {
+		return s.buildErrorResponse(requestMessage, "Unknown", ErrorCodeRequestSyntaxError, "invalid request xsi:type namespace")
+	}
 	if messageType == "" {
 		return s.buildErrorResponse(requestMessage, "Unknown", ErrorCodeRequestSyntaxError, "missing xsi:type on x1RequestMessage")
 	}
@@ -1089,6 +1133,10 @@ func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMess
 	var rootDetector xmlRootDetector
 	if err := xml.Unmarshal(body, &rootDetector); err != nil {
 		return s.buildErrorResponse(reqMsg, "Unknown", ErrorCodeRequestSyntaxError, "failed to parse XML root: "+err.Error())
+	}
+
+	if response, handled := s.processGenericObjectRequest(body, reqMsg, rootDetector.XMLName.Local); handled {
+		return response
 	}
 
 	// Route to appropriate handler based on root element name
@@ -1394,6 +1442,11 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 			ErrorCodeRequestSyntaxError, "invalid mediation definition: "+err.Error())
 	}
 
+	task.IRIPolicyReferences, err = ParseIRIPolicyReferences(details.ListOfIRIPolicyReferences)
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask, ErrorCodeRequestSyntaxError, "invalid IRI policy references")
+	}
+
 	// Parse implicit deactivation allowed
 	if details.ImplicitDeactivationAllowed != nil {
 		task.ImplicitDeactivationAllowed = *details.ImplicitDeactivationAllowed
@@ -1599,6 +1652,14 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 		mod.ImplicitDeactivationAllowed = details.ImplicitDeactivationAllowed
 	}
 
+	if details.ListOfIRIPolicyReferences != nil {
+		refs, err := ParseIRIPolicyReferences(details.ListOfIRIPolicyReferences)
+		if err != nil {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask, ErrorCodeRequestSyntaxError, "invalid IRI policy references")
+		}
+		mod.IRIPolicyReferences = &refs
+	}
+
 	// Modify task
 	if err := s.taskManager.ModifyTask(xid, mod); err != nil {
 		if errors.Is(err, ErrTaskNotFound) {
@@ -1773,6 +1834,7 @@ func taskDetailsResponse(task *Task) *schema.TaskDetails {
 	if p != nil && !p.Implicit {
 		details.ImplicitDeactivationAllowed = nil
 	}
+	details.ListOfIRIPolicyReferences = iriPolicyReferenceResponse(task.IRIPolicyReferences)
 	for _, target := range task.Targets {
 		details.TargetIdentifiers.TargetIdentifier = append(details.TargetIdentifiers.TargetIdentifier, targetIdentifierResponse(target))
 	}
@@ -2036,6 +2098,14 @@ func (s *Server) buildOKResponse(reqMsg *schema.X1RequestMessage, messageType st
 	base := s.responseMessage(reqMsg)
 	const completed = "AcknowledgedAndCompleted"
 	switch messageType {
+	case "CreateObjectRequest":
+		return &schema.CreateObjectResponse{X1ResponseMessage: base, OK: completed}
+	case "ModifyObjectRequest":
+		return &schema.ModifyObjectResponse{X1ResponseMessage: base, OK: completed}
+	case "DeleteObjectRequest":
+		return &schema.DeleteObjectResponse{X1ResponseMessage: base, OK: completed}
+	case "DeleteAllObjectsRequest":
+		return &schema.DeleteAllObjectsResponse{X1ResponseMessage: base, OK: completed}
 	case MessageTypeCreateDestination:
 		return &schema.CreateDestinationResponse{X1ResponseMessage: base, OK: completed}
 	case MessageTypeModifyDestination:
@@ -2128,6 +2198,10 @@ func errorRequestType(messageType string) (string, *schema.ExtensionInformation)
 		RequestTypeModifyTask:        RequestTypeModifyTask,
 		RequestTypeGetTaskDetails:    RequestTypeGetTaskDetails,
 		RequestTypePing:              RequestTypePing,
+	}
+	for _, operation := range []string{"CreateObject", "ModifyObject", "DeleteObject", "GetObject", "ListObjectsOfType", "DeleteAllObjects", "GetAllGenericObjectDetails"} {
+		requestTypes[operation] = operation
+		requestTypes[operation+"Request"] = operation
 	}
 	if requestType, ok := requestTypes[messageType]; ok {
 		return requestType, nil

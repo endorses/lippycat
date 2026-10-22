@@ -48,8 +48,8 @@ func TestStateSharedBudgetRejectsMapExpansionBeforeTypedDecode(t *testing.T) {
 	require.Equal(t, want, got)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(16<<20), "reservation includes parser, typed map and semantic indexes")
 	for _, invalid := range [][]byte{append(bytes.Clone(data), []byte(`{}`)...),
-		bytes.Replace(data, []byte(`"version":2`), []byte(`"version":2,"PRIVATE":true`), 1),
-		bytes.Replace(data, []byte(`"version":2`), []byte(`"version":1`), 1)} {
+		bytes.Replace(data, []byte(`"version":3`), []byte(`"version":3,"PRIVATE":true`), 1),
+		bytes.Replace(data, []byte(`"version":3`), []byte(`"version":1`), 1)} {
 		got, err = UnmarshalStateSnapshotWithBudget(invalid, 16<<20)
 		require.ErrorIs(t, err, ErrStateSnapshot)
 		require.Nil(t, got)

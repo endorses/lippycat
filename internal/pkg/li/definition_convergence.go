@@ -24,6 +24,14 @@ func (m *Manager) applySnapshotDefinition(in *SnapshotTask) error {
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	task := cloneInterceptTask(in.Task)
+	bound, bindErr := m.bindIRIPolicyTaskLocked(task)
+	if bindErr != nil {
+		return bindErr
+	}
+	task = bound
+	copyInput := *in
+	copyInput.Task = task
+	in = &copyInput
 	held, err := m.registry.GetTaskDetails(task.XID)
 	if err != nil && !errors.Is(err, ErrTaskNotFound) {
 		return err
@@ -38,6 +46,26 @@ func (m *Manager) applySnapshotDefinition(in *SnapshotTask) error {
 	}
 	if held != nil && held.Definition.ConflictDisarmed {
 		return m.applyConflictAuthorizationLocked(held, in, live)
+	}
+	if held != nil && in.Completeness.Complete() && slices.Equal(held.IRIPolicyReferences, task.IRIPolicyReferences) && !equivalentIRIPolicyDefinition(held, task) {
+		comparison := cloneInterceptTask(held)
+		comparison.IRIPolicySourceGenerations = cloneIRISourceGenerations(task.IRIPolicySourceGenerations)
+		comparison.IRIPolicyProfileRevision = task.IRIPolicyProfileRevision
+		if equivalentTaskDefinition(comparison, task) {
+			if in.confirmedDestinations != nil {
+				for _, did := range task.DestinationIDs {
+					if !in.confirmedDestinations[did] {
+						return ErrDestinationNotFound
+					}
+				}
+			}
+			// Current graph/profile confirmation changes local delivery identity,
+			// while retaining the same complete ADMF task definition.
+			if live {
+				return m.promoteTaskDefinitionLocked(task)
+			}
+			return m.activateSnapshotLocked(task)
+		}
 	}
 	if !in.Completeness.Complete() {
 		if held != nil {

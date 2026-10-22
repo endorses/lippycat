@@ -51,7 +51,7 @@ func TestCapabilityMatrix_CoversEveryAcceptedSchemaElement(t *testing.T) {
 		"ListOfDIDs": "supported", "ListOfMediationDetails": "supported-partially",
 		"CorrelationID": "rejected", "ImplicitDeactivationAllowed": "supported",
 		"ProductID": "rejected", "ListOfServiceTypes": "rejected",
-		"TaskDetailsExtensions": "rejected", "ListOfTrafficPolicyReferences": "rejected",
+		"TaskDetailsExtensions": "rejected", "ListOfTrafficPolicyReferences": "rejected", "ListOfIRIPolicyReferences": "supported",
 	}
 	destination := map[string]string{
 		"DId": "supported", "FriendlyName": "supported", "DeliveryType": "supported",
@@ -60,7 +60,7 @@ func TestCapabilityMatrix_CoversEveryAcceptedSchemaElement(t *testing.T) {
 	mediation := map[string]string{
 		"LIID": "supported", "DeliveryType": "supported", "StartTime": "supported",
 		"EndTime": "supported", "ListOfDIDs": "rejected", "MediationDetailsExtensions": "rejected",
-		"ServiceScopingOptions": "rejected", "ListOfTrafficPolicyReferences": "rejected",
+		"ServiceScopingOptions": "rejected", "ListOfTrafficPolicyReferences": "rejected", "ListOfIRIPolicyReferences": "rejected",
 	}
 	assertStructMatrixComplete(t, reflect.TypeOf(schema.TaskDetails{}), task)
 	assertStructMatrixComplete(t, reflect.TypeOf(schema.DestinationDetails{}), destination)

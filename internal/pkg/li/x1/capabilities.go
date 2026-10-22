@@ -44,6 +44,9 @@ func validateTaskCapabilities(details *schema.TaskDetails, modification bool) *c
 			if mediation == nil {
 				continue
 			}
+			if mediation.ListOfIRIPolicyReferences != nil {
+				return unsupportedCapability("mediation-level IRI policy references belong to the MDF profile and are not supported by this POI")
+			}
 			if hasTrafficPolicyReferences(mediation.ListOfTrafficPolicyReferences) {
 				return unsupportedCapability("mediation entry %d uses unsupported traffic policy references", i)
 			}

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="http://uri.etsi.org/03221/X1/2017/10" xmlns:etsi103280="http://uri.etsi.org/03280/common/2017/07" xmlns:hashedID="http://uri.etsi.org/03221/X1/2017/10/HashedID" xmlns:destinationSet="http://uri.etsi.org/03221/X1/2017/10/DestinationSet" targetNamespace="http://uri.etsi.org/03221/X1/2017/10" elementFormDefault="qualified" version="1.22.1">
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="http://uri.etsi.org/03221/X1/2017/10" xmlns:etsi103280="http://uri.etsi.org/03280/common/2017/07" xmlns:hashedID="http://uri.etsi.org/03221/X1/2017/10/HashedID" xmlns:destinationSet="http://uri.etsi.org/03221/X1/2017/10/DestinationSet" targetNamespace="http://uri.etsi.org/03221/X1/2017/10" elementFormDefault="qualified" version="1.23.1">
     <xs:import namespace="http://uri.etsi.org/03280/common/2017/07" schemaLocation="TS_103_280.xsd"/>
     <xs:import namespace="http://uri.etsi.org/03221/X1/2017/10/HashedID" schemaLocation="TS_103_221_01_HashedID.xsd"/>
     <!-- Message containers -->
@@ -157,6 +157,7 @@
             <xs:element name="listOfServiceTypes" type="ListOfServiceTypes" minOccurs="0"/>
             <xs:element name="taskDetailsExtensions" type="TaskDetailsExtensions" minOccurs="0" maxOccurs="unbounded"/>
             <xs:element name="listOfTrafficPolicyReferences" type="ListOfTrafficPolicyReferences" minOccurs="0"/>
+            <xs:element name="listOfIRIPolicyReferences" type="ListOfIRIPolicyReferences" minOccurs="0"/>
         </xs:sequence>
     </xs:complexType>
     <xs:complexType name="ListOfTargetIdentifiers">
@@ -252,6 +253,7 @@
             <xs:element name="mediationDetailsExtensions" type="MediationDetailsExtensions" minOccurs="0" maxOccurs="unbounded"/>
             <xs:element name="serviceScopingOptions" type="ListOfServiceScopingOptions" minOccurs="0"/>
             <xs:element name="listOfTrafficPolicyReferences" type="ListOfTrafficPolicyReferences" minOccurs="0"/>
+            <xs:element name="listOfIRIPolicyReferences" type="ListOfIRIPolicyReferences" minOccurs="0"/>
         </xs:sequence>
     </xs:complexType>
     <xs:complexType name="ListOfServiceScopingOptions">
@@ -326,6 +328,14 @@
         </xs:sequence>
     </xs:complexType>
     <xs:simpleType name="TrafficPolicyReference">
+        <xs:restriction base="GenericObjectID"/>
+    </xs:simpleType>
+    <xs:complexType name="ListOfIRIPolicyReferences">
+        <xs:sequence>
+            <xs:element name="iRIPolicyReference" type="IRIPolicyReference" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:simpleType name="IRIPolicyReference">
         <xs:restriction base="GenericObjectID"/>
     </xs:simpleType>
     <xs:complexType name="ListOfMediationDetails">

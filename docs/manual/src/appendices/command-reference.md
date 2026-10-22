@@ -288,6 +288,7 @@ See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) 
 | `--li-delivery-tls-ca`                    | string   |             | X2/X3 delivery CA certificate (MDF verification)                                        |
 | `--li-delivery-timestamp-format`          | string   | `legacy-12` | Timestamp encoding: `legacy-12` or `etsi-8`; independent startup setting.               |
 | `--li-delivery-matched-target-format`     | string   | `bare`      | Matched target encoding: `bare` or `target-identifier`; independent startup setting.    |
+| `--li-iri-policy-profile`                 | string   |             | JSON profile for national IRI event mappings and known POI facts.                       |
 | `--li-delivery-queue-size`                | int      | `10000`     | Maximum queued X2/X3 PDUs per destination                                               |
 | `--li-delivery-send-timeout`              | duration | `5s`        | Timeout for each delivery write                                                         |
 | `--li-delivery-reconnect-initial-backoff` | duration | `500ms`     | Initial MDF reconnect backoff                                                           |

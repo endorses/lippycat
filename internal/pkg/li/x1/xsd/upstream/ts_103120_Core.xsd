@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:etsi="http://uri.etsi.org/03280/common/2017/07" xmlns:dictionaries="http://uri.etsi.org/03280/common/2019/10/Dictionaries" xmlns:common="http://uri.etsi.org/03120/common/2016/02/Common" xmlns:digsig="http://www.w3.org/2000/09/xmldsig#" xmlns:config="http://uri.etsi.org/03120/common/2024/06/Config" xmlns="http://uri.etsi.org/03120/common/2019/10/Core" targetNamespace="http://uri.etsi.org/03120/common/2019/10/Core" elementFormDefault="qualified" attributeFormDefault="unqualified">
+    <xs:import namespace="http://uri.etsi.org/03120/common/2016/02/Common"/>
+    <xs:import namespace="http://uri.etsi.org/03120/common/2024/06/Config"/>
+    <xs:import namespace="http://uri.etsi.org/03280/common/2019/10/Dictionaries"/>
+    <xs:import namespace="http://uri.etsi.org/03280/common/2017/07"/>
+    <xs:import namespace="http://www.w3.org/2000/09/xmldsig#"/>
+    <xs:element name="HI1Message" type="HI1Message"/>
+    <xs:complexType name="HI1Message">
+        <xs:sequence>
+            <xs:element name="Header" type="MessageHeader"/>
+            <xs:element name="Payload" type="MessagePayload"/>
+            <!-- nolint: accept untyped element -->
+            <xs:element name="Signature" minOccurs="0"/>
+            <!-- Use of the Signature element is discouraged – implementers are encouraged use the digsig:Signature element below instead -->
+            <xs:element ref="digsig:Signature" minOccurs="0"/>
+            <!-- nolint: The Signatures element is introduced for JSS support, and is not intended for use in XML-format instance documents.-->
+            <xs:element name="Signatures" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="MessageHeader">
+        <xs:sequence>
+            <xs:element name="SenderIdentifier" type="EndpointID"/>
+            <xs:element name="ReceiverIdentifier" type="EndpointID"/>
+            <xs:element name="TransactionIdentifier" type="etsi:UUID"/>
+            <xs:element name="Timestamp" type="etsi:QualifiedMicrosecondDateTime"/>
+            <xs:element name="Version" type="Version"/>
+            <xs:element name="WorkflowIdentifier" type="etsi:LongString" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="Version">
+        <xs:sequence>
+            <xs:element name="ETSIVersion" type="common:ETSIVersion"/>
+            <xs:element name="NationalProfileOwner" type="etsi:ShortString"/>
+            <xs:element name="NationalProfileVersion" type="etsi:ShortString"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="EndpointID">
+        <xs:sequence>
+            <xs:element name="CountryCode" type="etsi:ISOCountryCode"/>
+            <xs:element name="UniqueIdentifier" type="etsi:LongString"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="MessagePayload">
+        <xs:choice>
+            <xs:element name="RequestPayload" type="RequestPayload"/>
+            <xs:element name="ResponsePayload" type="ResponsePayload"/>
+        </xs:choice>
+    </xs:complexType>
+    <xs:complexType name="RequestPayload">
+        <xs:sequence>
+            <xs:element name="ActionRequests" type="ActionRequests"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ActionRequests">
+        <xs:sequence>
+            <xs:element name="ActionRequest" type="ActionRequest" minOccurs="1" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ResponsePayload">
+        <xs:choice>
+            <xs:element name="ActionResponses" type="ActionResponses"/>
+            <xs:element name="ErrorInformation" type="ActionUnsuccesfulInformation"/>
+        </xs:choice>
+    </xs:complexType>
+    <xs:complexType name="ActionResponses">
+        <xs:sequence>
+            <xs:element name="ActionResponse" type="ActionResponse" minOccurs="1" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ActionRequest">
+        <xs:sequence>
+            <xs:element name="ActionIdentifier" type="xs:nonNegativeInteger"/>
+            <xs:choice>
+                <xs:element name="GET" type="GETRequest"/>
+                <xs:element name="CREATE" type="CREATERequest"/>
+                <xs:element name="UPDATE" type="UPDATERequest"/>
+                <xs:element name="LIST" type="LISTRequest"/>
+                <xs:element name="DELIVER" type="DELIVERRequest"/>
+                <xs:element name="GETCSPCONFIG" type="GETCSPCONFIGRequest"/>
+            </xs:choice>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ActionResponse">
+        <xs:sequence>
+            <xs:element name="ActionIdentifier" type="xs:nonNegativeInteger"/>
+            <xs:choice>
+                <xs:element name="GETResponse" type="GETResponse"/>
+                <xs:element name="CREATEResponse" type="CREATEResponse"/>
+                <xs:element name="UPDATEResponse" type="UPDATEResponse"/>
+                <xs:element name="LISTResponse" type="LISTResponse"/>
+                <xs:element name="ErrorInformation" type="ActionUnsuccesfulInformation"/>
+                <xs:element name="DELIVERResponse" type="DELIVERResponse"/>
+                <xs:element name="GETCSPCONFIGResponse" type="GETCSPCONFIGResponse"/>
+            </xs:choice>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="GETRequest">
+        <xs:sequence>
+            <xs:element name="Identifier" type="ObjectIdentifier"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="GETResponse">
+        <xs:sequence>
+            <xs:element name="HI1Object" type="HI1Object"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="CREATERequest">
+        <xs:sequence>
+            <xs:element name="HI1Object" type="HI1Object"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="CREATEResponse">
+        <xs:sequence>
+            <xs:element name="Identifier" type="ObjectIdentifier"/>
+            <xs:element name="HI1Object" type="HI1Object" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="UPDATERequest">
+        <xs:sequence>
+            <xs:element name="HI1Object" type="HI1Object"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="UPDATEResponse">
+        <xs:sequence>
+            <xs:element name="Identifier" type="ObjectIdentifier"/>
+            <xs:element name="HI1Object" type="HI1Object" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="LISTRequest">
+        <xs:sequence>
+            <xs:element name="ObjectType" type="common:DictionaryEntry" minOccurs="0"/>
+            <xs:element name="LastChanged" type="etsi:QualifiedDateTime" minOccurs="0"/>
+            <xs:element name="LastChangedTimespan" type="common:Timespan" minOccurs="0"/>
+            <xs:element name="MaximumObjectCount" type="xs:positiveInteger" minOccurs="0"/>
+            <xs:element name="Status" type="common:DictionaryEntry" minOccurs="0"/>
+            <xs:element name="CountryCode" type="etsi:ISOCountryCode" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="LISTResponse">
+        <xs:sequence>
+            <xs:element name="ListResponseRecord" type="ListResponseRecord" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ListResponseRecord">
+        <xs:sequence>
+            <xs:element name="ObjectType" type="common:DictionaryEntry"/>
+            <xs:element name="Identifier" type="ObjectIdentifier"/>
+            <xs:element name="CountryCode" type="etsi:ISOCountryCode" minOccurs="0"/>
+            <xs:element name="OwnerIdentifier" type="etsi:ShortString" minOccurs="0"/>
+            <xs:element name="Generation" type="xs:nonNegativeInteger"/>
+            <xs:element name="ExternalIdentifier" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="LastChanged" type="etsi:QualifiedDateTime" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ActionUnsuccesfulInformation">
+        <xs:sequence>
+            <xs:element name="ErrorCode" type="xs:nonNegativeInteger"/>
+            <xs:element name="ErrorDescription" type="etsi:LongString"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="DELIVERRequest">
+        <xs:sequence>
+            <xs:element name="Identifier" type="ObjectIdentifier"/>
+            <xs:element name="HI1Object" type="HI1Object"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="DELIVERResponse">
+        <xs:sequence>
+            <xs:element name="Identifier" type="ObjectIdentifier"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="GETCSPCONFIGRequest"/>
+    <xs:complexType name="GETCSPCONFIGResponse">
+        <xs:sequence>
+            <xs:element name="LastChanged" type="etsi:QualifiedDateTime"/>
+            <xs:element name="Dictionaries" type="dictionaries:Dictionaries" minOccurs="0"/>
+            <xs:element name="TargetFormatTypeDefinitions" type="config:TargetFormatTypeDefinitions" minOccurs="0"/>
+            <xs:element name="TargetingConfigurations" type="config:TargetingConfigurations"/>
+            <xs:element name="SupportedLIWorkflowEndpoints" type="config:SupportedLIWorkflowEndpoints" minOccurs="0"/>
+            <xs:element name="SupportedLPWorkflowEndpoints" type="config:SupportedLPWorkflowEndpoints" minOccurs="0"/>
+            <xs:element name="SupportedLDWorkflowEndpoints" type="config:SupportedLDWorkflowEndpoints" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:simpleType name="ObjectIdentifier">
+        <xs:restriction base="etsi:UUID"/>
+    </xs:simpleType>
+    <xs:complexType name="HI1Object" abstract="true">
+        <xs:sequence>
+            <xs:element name="ObjectIdentifier" type="ObjectIdentifier"/>
+            <xs:element name="CountryCode" type="etsi:ISOCountryCode" minOccurs="0"/>
+            <xs:element name="OwnerIdentifier" type="etsi:ShortString" minOccurs="0"/>
+            <xs:element name="Generation" type="xs:nonNegativeInteger" minOccurs="0"/>
+            <xs:element name="ExternalIdentifier" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="AssociatedObjects" type="AssociatedObjects" minOccurs="0"/>
+            <xs:element name="LastChanged" type="etsi:QualifiedDateTime" minOccurs="0"/>
+            <xs:element name="NationalHandlingParameters" type="NationalHandlingParameters" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="AssociatedObjects">
+        <xs:sequence>
+            <xs:element name="AssociatedObject" type="ObjectIdentifier" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="NationalHandlingParameters" abstract="true">
+        <xs:sequence>
+            <xs:element name="CountryCode" type="etsi:ISOCountryCode"/>
+        </xs:sequence>
+    </xs:complexType>
+</xs:schema>

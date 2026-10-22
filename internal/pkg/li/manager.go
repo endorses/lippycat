@@ -17,6 +17,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/li/iripolicy"
 	"github.com/endorses/lippycat/internal/pkg/li/x1"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/radius"
@@ -43,6 +44,8 @@ type X1ClientConfig struct {
 
 // ManagerConfig holds configuration for the LI Manager.
 type ManagerConfig struct {
+	IRIProfile               iripolicy.Profile
+	IRIPolicyProfileRevision string
 	// TaskFilterDistributionScope is distributed (default) or local_only.
 	TaskFilterDistributionScope string
 
@@ -142,21 +145,28 @@ type PacketBatchProcessor func(tasks []*InterceptTask, pkt *types.PacketDisplay)
 //
 // The Manager is the main entry point for LI operations in the processor.
 type Manager struct {
+	iriMu                 sync.RWMutex
+	iriObjects            []iripolicy.Object
+	iriConfirmed          map[uuid.UUID]bool
+	iriCompiled           map[uuid.UUID]iriCompiledTask
+	iriSnapshotBlocked    map[uuid.UUID]bool
+	onIRIPolicyChanged    func(*InterceptTask) error
 	conflictReportMu      sync.Mutex
 	conflictReports       map[uuid.UUID]*conflictReportState
 	conflictReportWake    chan struct{}
 	conflictReportStarted bool
 	// Optional test seams are installed before concurrent use.
-	conflictReportSend func(context.Context, uuid.UUID, string) error
-	snapshotWaitHook   func()
-	definitionRepairs  atomic.Uint64
-	callbackMu         sync.RWMutex
-	onTaskModified     func(previous *InterceptTask)
-	onTaskConflict     func(previous *InterceptTask) error
-	onCommittedTask    func(current *InterceptTask)
-	stopOnce           sync.Once
-	stopped            atomic.Bool
-	mu                 sync.RWMutex
+	conflictReportSend     func(context.Context, uuid.UUID, string) error
+	snapshotWaitHook       func()
+	iriSnapshotAppliedHook func()
+	definitionRepairs      atomic.Uint64
+	callbackMu             sync.RWMutex
+	onTaskModified         func(previous *InterceptTask)
+	onTaskConflict         func(previous *InterceptTask) error
+	onCommittedTask        func(current *InterceptTask)
+	stopOnce               sync.Once
+	stopped                atomic.Bool
+	mu                     sync.RWMutex
 	// snapshotMu orders complete ADMF snapshots with X1 mutations.
 	// Inner administrative transactions, filter cleanup and delivery callbacks
 	// retain adminMu, lifecycleMu, then short registry/filter lock ordering.
@@ -263,6 +273,7 @@ type managerAtomicStats struct {
 
 // ManagerStats contains LI processing statistics.
 type ManagerStats struct {
+	IRIPolicy    IRIPolicyStats
 	Definitions  DefinitionStats
 	StartupSync  StartupSyncStatus
 	SnapshotSync SnapshotSyncStatus
@@ -329,6 +340,13 @@ func (m *Manager) AcquireTaskAdmission(xid uuid.UUID, generation uint64) (*TaskA
 		m.lifecycleMu.RUnlock()
 		return nil, false
 	}
+	m.iriMu.RLock()
+	policySnapshotBlocked := m.iriSnapshotBlocked[xid]
+	m.iriMu.RUnlock()
+	if policySnapshotBlocked {
+		m.lifecycleMu.RUnlock()
+		return nil, false
+	}
 	return &TaskAdmission{manager: m}, true
 }
 
@@ -337,6 +355,7 @@ func (m *Manager) AcquireTaskAdmission(xid uuid.UUID, generation uint64) (*TaskA
 // The deactivationCallback is called when a task is implicitly deactivated
 // (e.g., EndTime expiration). This is used to notify ADMF via X1.
 func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback) *Manager {
+	config.IRIProfile = cloneIRIProfile(config.IRIProfile)
 	recoveryCtx, recoveryCancel := context.WithCancel(context.Background())
 	m := &Manager{
 		recoveryCtx:           recoveryCtx,
@@ -687,7 +706,7 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 	}
 
 	if snapshot.status.TotalFailures > 0 {
-		return &incompleteStartupSnapshot{taskFailures: snapshot.convErrors, destinationFailures: snapshot.destinationConvErrors}
+		return &incompleteStartupSnapshot{taskFailures: snapshot.convErrors, destinationFailures: snapshot.destinationConvErrors, genericObjectFailures: snapshot.iriConvErrors}
 	}
 
 	logger.Info("ADMF state sync complete",
@@ -714,6 +733,11 @@ func (m *Manager) activateStartupTask(task *InterceptTask) error {
 	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	bound, err := m.bindIRIPolicyTaskLocked(task)
+	if err != nil {
+		return err
+	}
+	task = bound
 	if m.stateStore != nil {
 		return m.activatePersistentTaskLocked(task, true)
 	}
@@ -1309,6 +1333,13 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	if task != nil {
+		bound, err := m.bindIRIPolicyTaskLocked(task)
+		if err != nil {
+			return err
+		}
+		task = bound
+	}
 	if task != nil && !IsRADIUSTask(task) && task.Definition.Source == DefinitionPush {
 		if !task.Definition.Completeness.Complete() && m.config.ADMFCompleteTaskContract {
 			if _, err := m.registry.GetTaskDetails(task.XID); errors.Is(err, ErrTaskNotFound) {
@@ -1465,13 +1496,19 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		return fmt.Errorf("%w: conflict-disarmed task requires deactivation and complete activation", ErrModifyNotAllowed)
 	}
 	if mod != nil {
+		explicitPolicyChange := mod.IRIPolicyReferences != nil
+		boundMod, err := m.bindIRIPolicyModificationLocked(xid, mod)
+		if err != nil {
+			return err
+		}
+		mod = boundMod
 		if held, err := m.registry.GetTaskDetails(xid); err == nil && !IsRADIUSTask(held) {
 			// Resolving a narrowed conflict requires an explicitly supplied task
 			// field. Internal definition metadata does not express ADMF intent.
 			if held.Definition.Conflict && (held.Status == TaskStatusActive || held.Status == TaskStatusPending) &&
 				mod.Targets == nil && mod.DestinationIDs == nil && mod.DeliveryType == nil &&
 				mod.EndTime == nil && mod.ImplicitDeactivationAllowed == nil &&
-				mod.RADIUSScope == nil && mod.RADIUSMACProfile == nil {
+				mod.RADIUSScope == nil && mod.RADIUSMACProfile == nil && !explicitPolicyChange {
 				return fmt.Errorf("%w: resolving a narrowed conflict requires an explicit task field", ErrModifyNotAllowed)
 			}
 			copyMod := *mod
@@ -1515,6 +1552,12 @@ func (m *Manager) modifyTask(xid uuid.UUID, mod *TaskModification) error {
 		if err := m.persistStateLocked(); err != nil {
 			return errors.Join(fmt.Errorf("reserve modified generation for XID %s: %w", xid, err),
 				m.registry.restoreTask(previous))
+		}
+	}
+	if !equivalentIRIPolicyDefinition(previous, current) {
+		if err := m.notifyIRIPolicyChanged(previous); err != nil {
+			m.faultAdministrative(err)
+			return err
 		}
 	}
 
@@ -1632,6 +1675,12 @@ func (m *Manager) promotePendingTasks() {
 	})
 	for _, task := range pending {
 		if m.pendingNeedsConfirmation(task.XID) {
+			continue
+		}
+		m.iriMu.RLock()
+		snapshotBlocked := m.iriSnapshotBlocked[task.XID]
+		m.iriMu.RUnlock()
+		if snapshotBlocked {
 			continue
 		}
 		m.lifecycleMu.Lock()
@@ -2037,6 +2086,7 @@ func (m *Manager) ActivateTaskX1(task *x1.Task) error {
 	// Convert x1.Task to li.InterceptTask
 	liTask := &InterceptTask{
 		XID:                         task.XID,
+		IRIPolicyReferences:         task.IRIPolicyReferences,
 		DestinationIDs:              task.DestinationIDs,
 		StartTime:                   task.StartTime,
 		EndTime:                     task.EndTime,
@@ -2105,6 +2155,7 @@ func (m *Manager) ModifyTaskX1(xid uuid.UUID, mod *x1.TaskModification) error {
 	defer m.snapshotMu.Unlock()
 	// Convert x1.TaskModification to li.TaskModification
 	liMod := &TaskModification{
+		IRIPolicyReferences:         mod.IRIPolicyReferences,
 		DestinationIDs:              mod.DestinationIDs,
 		EndTime:                     mod.EndTime,
 		ImplicitDeactivationAllowed: mod.ImplicitDeactivationAllowed,
@@ -2166,6 +2217,7 @@ func (m *Manager) GetTaskDetailsX1(xid uuid.UUID) (*x1.Task, error) {
 
 	// Convert li.InterceptTask to x1.Task
 	task := &x1.Task{
+		IRIPolicyReferences:         liTask.IRIPolicyReferences,
 		XID:                         liTask.XID,
 		DestinationIDs:              liTask.DestinationIDs,
 		StartTime:                   liTask.StartTime,
@@ -2299,6 +2351,7 @@ func convertTaskStatusToX1(s TaskStatus) x1.TaskStatus {
 // Stats returns current LI processing statistics.
 func (m *Manager) Stats() ManagerStats {
 	return ManagerStats{
+		IRIPolicy:                   m.IRIPolicyStats(),
 		Definitions:                 m.definitionStats(),
 		StartupSync:                 m.StartupSyncStatus(),
 		SnapshotSync:                m.SnapshotSyncStatus(),
@@ -2335,7 +2388,9 @@ func (m *Manager) IsEnabled() bool {
 
 // Config returns the manager configuration.
 func (m *Manager) Config() ManagerConfig {
-	return m.config
+	config := m.config
+	config.IRIProfile = cloneIRIProfile(config.IRIProfile)
+	return config
 }
 
 // MarkTaskFailed marks a task as failed with an error message.

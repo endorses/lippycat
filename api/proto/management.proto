@@ -733,6 +733,8 @@ message ProcessorStats {
     MediaRuleStatus media_rules = 22;
     PacketDuplicateStatus packet_duplicates = 23;
     LearnedRuleStatus learned_rules = 24;
+    // Selective IRI policy graph and decisions. No policy or target content.
+    LIIRIPolicyStats li_iri_policy = 25;
 }
 
 // Fixed-cardinality current capture-control state. No selectors or call IDs.
@@ -1509,4 +1511,13 @@ message RawPacketStatus {
  uint64 dropped = 11;
  uint64 late = 12;
  uint64 policy_revision = 13;
+}
+
+message LIIRIPolicyStats {
+    uint64 objects = 1;
+    uint64 policies = 2;
+    uint64 rules = 3;
+    uint64 confirmed_objects = 4;
+    uint64 suppressed = 5;
+    uint64 evaluation_errors = 6;
 }

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:etsi="http://uri.etsi.org/03280/common/2017/07" xmlns:common="http://uri.etsi.org/03120/common/2016/02/Common" xmlns:core="http://uri.etsi.org/03120/common/2019/10/Core" xmlns="http://uri.etsi.org/03120/common/2026/01/IRIPolicy" targetNamespace="http://uri.etsi.org/03120/common/2026/01/IRIPolicy" elementFormDefault="qualified" attributeFormDefault="unqualified">
+    <xs:import namespace="http://uri.etsi.org/03120/common/2016/02/Common"/>
+    <xs:import namespace="http://uri.etsi.org/03120/common/2019/10/Core"/>
+    <xs:import namespace="http://uri.etsi.org/03280/common/2017/07"/>
+    <xs:complexType name="IRIPolicyObject">
+        <xs:complexContent>
+            <xs:extension base="core:HI1Object">
+                <xs:sequence>
+                    <xs:group ref="IRIPolicyObjectGroup"/>
+                </xs:sequence>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+    <xs:group name="IRIPolicyObjectGroup">
+        <xs:sequence>
+            <xs:element name="IRIPolicyName" type="etsi:ShortString" minOccurs="0"/>
+            <xs:element name="IRIRules" type="ListOfIRIRuleReferences" minOccurs="0"/>
+        </xs:sequence>
+    </xs:group>
+    <xs:complexType name="ListOfIRIRuleReferences">
+        <xs:sequence>
+            <xs:element name="IRIRuleReference" type="IRIRuleReference" minOccurs="1" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="IRIRuleReference">
+        <xs:sequence>
+            <xs:element name="Order" type="xs:positiveInteger"/>
+            <xs:element name="ObjectIdentifier" type="core:ObjectIdentifier"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="IRIRuleObject">
+        <xs:complexContent>
+            <xs:extension base="core:HI1Object">
+                <xs:sequence>
+                    <xs:group ref="IRIRuleObjectGroup"/>
+                </xs:sequence>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+    <xs:group name="IRIRuleObjectGroup">
+        <xs:sequence>
+            <xs:element name="Criteria" type="ListOfIRICriteria" minOccurs="0"/>
+            <xs:element name="Action" type="common:DictionaryEntry" minOccurs="0"/>
+            <xs:element name="Parameters" type="IRIActionParameters" minOccurs="0"/>
+        </xs:sequence>
+    </xs:group>
+    <xs:complexType name="ListOfIRICriteria">
+        <xs:sequence>
+            <xs:element name="Criteria" type="IRICriteria" minOccurs="1" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="IRICriteria">
+        <xs:choice>
+            <xs:element name="NFTypeCriteria" type="NFTypeCriteria"/>
+            <xs:element name="IRIEventCriteria" type="IRIEventCriteria"/>
+            <xs:element name="HandoverFormatCriteria" type="HandoverFormatCriteria"/>
+        </xs:choice>
+    </xs:complexType>
+    <xs:complexType name="NFTypeCriteria">
+        <xs:sequence>
+            <xs:element name="NFType" type="common:DictionaryEntry" minOccurs="1" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="IRIEventCriteria">
+        <xs:sequence>
+            <xs:element name="IRIEvents" type="common:DictionaryEntry" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="HandoverFormatCriteria">
+        <xs:sequence>
+            <xs:element name="HandoverFormats" type="common:DictionaryEntry" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="IRIActionParameters">
+        <xs:choice>
+        </xs:choice>
+    </xs:complexType>
+</xs:schema>

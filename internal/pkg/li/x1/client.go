@@ -682,6 +682,22 @@ func (c *Client) GetAllTaskDetails(ctx context.Context) (*schema.GetAllTaskDetai
 	return &resp, nil
 }
 
+// GetAllGenericObjectDetails queries the complete generic-object state.
+func (c *Client) GetAllGenericObjectDetails(ctx context.Context) (*schema.GetAllGenericObjectDetailsResponse, error) {
+	if c.stopped.Load() {
+		return nil, ErrClientStopped
+	}
+	req := &schema.GetAllGenericObjectDetailsRequest{X1RequestMessage: c.buildRequestMessage()}
+	var resp schema.GetAllGenericObjectDetailsResponse
+	if err := c.sendQueryRequestWithRetry(ctx, "GetAllGenericObjectDetailsRequest", req, &resp); err != nil {
+		return nil, err
+	}
+	if resp.ListOfGenericObjectResponseDetails == nil {
+		return nil, ErrIncompleteGetAllDetailsResponse
+	}
+	return &resp, nil
+}
+
 // buildRequestMessage creates the base X1 request message.
 func (c *Client) buildRequestMessage() *schema.X1RequestMessage {
 	now := formatQualifiedMicrosecondDateTime(time.Now())
@@ -797,8 +813,9 @@ type responseContainer struct {
 
 // rawXML captures raw XML content for deferred unmarshaling.
 type rawXML struct {
-	Attrs []xml.Attr `xml:",any,attr"`
-	Inner []byte     `xml:",innerxml"`
+	XMLName xml.Name
+	Attrs   []xml.Attr `xml:",any,attr"`
+	Inner   []byte     `xml:",innerxml"`
 }
 
 // sendQueryRequestWithRetry sends an X1 query request with exponential backoff retry
@@ -873,9 +890,13 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 	defer httpResp.Body.Close()
 
 	// Read response body.
-	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 1024*1024)) // 1MB limit
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, schema.MaxResponseXMLBytes+1)) // Detect an oversized response.
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if len(respBody) > schema.MaxResponseXMLBytes {
+		return errors.New("X1 query response exceeds the body size limit")
 	}
 
 	// Check HTTP status.
@@ -887,6 +908,11 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 		"status", httpResp.StatusCode,
 		"body_length", len(respBody),
 	)
+
+	respBody, err = schema.NormalizeNamespacesBounded(respBody, schema.MaxResponseXMLBytes)
+	if err != nil {
+		return fmt.Errorf("invalid response XML namespace scope: %w", err)
+	}
 
 	// Detect root element to handle top-level ErrorResponse from some ADMFs.
 	var rootDetector struct {
@@ -917,6 +943,28 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 		return nil
 	}
 
+	expectedType := strings.TrimSuffix(rootElement, "Request") + "Response"
+	switch rootDetector.XMLName.Local {
+	case "X1Response", "responseContainer":
+		if len(container.RawMessages) != 1 && len(container.ErrorResponses) == 0 {
+			return errors.New("invalid X1 query response envelope")
+		}
+		if len(container.RawMessages) == 1 {
+			if err := validateQueryResponseType(container.RawMessages[0], expectedType); err != nil {
+				return err
+			}
+		}
+	case expectedType:
+		var direct rawXML
+		if err := xml.Unmarshal(respBody, &direct); err != nil {
+			return err
+		}
+		if err := validateQueryResponseType(direct, expectedType); err != nil {
+			return err
+		}
+	default:
+		return errors.New("unexpected X1 query response element")
+	}
 	// Check for error responses.
 	if len(container.ErrorResponses) > 0 {
 		errResp := container.ErrorResponses[0]
@@ -1021,6 +1069,8 @@ func (c *Client) refreshRequestMessage(req any) {
 		request.X1RequestMessage = base
 	case *schema.GetAllTaskDetailsRequest:
 		request.X1RequestMessage = base
+	case *schema.GetAllGenericObjectDetailsRequest:
+		request.X1RequestMessage = base
 	}
 }
 
@@ -1110,7 +1160,7 @@ func (c *Client) sendRequest(ctx context.Context, rootElement string, req any) e
 	defer resp.Body.Close()
 
 	// Read response body.
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // 1MB limit
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, schema.MaxResponseXMLBytes+1)) // Detect an oversized acknowledgment.
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1120,6 +1170,9 @@ func (c *Client) sendRequest(ctx context.Context, rootElement string, req any) e
 		return fmt.Errorf("HTTP status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	if len(respBody) > schema.MaxResponseXMLBytes {
+		return errors.New("X1 acknowledgment exceeds the body size limit")
+	}
 	if err := validateReportAcknowledgment(xmlData, respBody, rootElement); err != nil {
 		if errors.Is(err, ErrADMFError) {
 			return err
@@ -1154,4 +1207,32 @@ func (c *Client) IsConnected() bool {
 // Config returns the client configuration.
 func (c *Client) Config() ClientConfig {
 	return c.config
+}
+
+// validateQueryResponseType resolves QName values after inherited declarations
+// have been made explicit. Untyped legacy responses remain supported.
+func validateQueryResponseType(message rawXML, expected string) error {
+	if message.XMLName.Space != "" && message.XMLName.Space != etsiX1Namespace {
+		return errors.New("invalid X1 query response namespace")
+	}
+	typed := false
+	for _, attr := range message.Attrs {
+		if attr.Name.Local == "type" {
+			if attr.Name.Space != schema.XSINamespace {
+				return errors.New("invalid X1 query response type attribute")
+			}
+			typed = true
+		}
+	}
+	if !typed {
+		return nil
+	}
+	typ, err := schema.ResolveType(xml.StartElement{Name: message.XMLName, Attr: message.Attrs})
+	if err != nil {
+		return err
+	}
+	if typ.Space != etsiX1Namespace || typ.Local != expected && typ.Local != "ErrorResponse" {
+		return errors.New("unexpected X1 query response type")
+	}
+	return nil
 }

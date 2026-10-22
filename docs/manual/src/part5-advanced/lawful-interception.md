@@ -68,6 +68,16 @@ The flow works as follows:
 4. The processor encodes matched SIP signaling and enabled, authorized protocol metadata as X2 IRI PDUs, and RTP media as X3 CC PDUs.
 5. The delivery client sends encoded PDUs to the designated MDF endpoints over TLS.
 
+## Selective IRI policies {#selective-iri-policies}
+
+The X1 v1.23.1 POI capability profile applies task-level IRI policies to SIP and RADIUS X2 generation. Rules run in order; the first matching rule determines delivery, and no match leaves delivery unchanged. Mediation-level policy references are rejected because their HI2/HI3 scope belongs to an MDF. Suppressing IRI preserves the signaling learning needed for authorized X3 media.
+
+The published X1 schema has no adapter for the TS 103 120 IRI objects. Policy provisioning therefore requires the ADMF to use lippycat's documented adapter namespace `urn:lippycat:li:x1:iri-policy:1`. The built-in event criterion is `ETSI / IRIEvents / All`. Optional national event mappings and known POI facts use `--li-iri-policy-profile` on LI-enabled process/tap commands; the JSON profile is validated at startup and remains fixed until restart.
+
+Policy changes revoke queued X2 and X3 from affected old task generations before publishing new authority. Encrypted administrative state version 3 stores the objects; version 2 migrates on the next successful write. After restart, policy-dependent tasks and replay require the complete object graph and task definitions from the same ADMF snapshot. Missing or malformed object lists cannot authorize delivery. Preserve prior encrypted state and keys if rollback to an older binary is required.
+
+Processor status exposes `li_iri_policy` object counts and separate suppression and evaluation-error counters. See the [selective IRI deployment profile](https://github.com/endorses/lippycat/blob/main/docs/LI_IRI_POLICIES.md) for JSON examples, dictionaries, schema validation, and interoperability requirements.
+
 ## Build Requirements {#build-requirements}
 
 LI support is controlled by the `li` build tag. Standard builds exclude all LI code through dead code elimination -- no LI types, handlers, or configuration paths exist in non-LI binaries.

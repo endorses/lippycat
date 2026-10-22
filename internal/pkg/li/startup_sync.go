@@ -16,10 +16,10 @@ import (
 
 var errStartupSyncUnsupported = errors.New("ADMF GetAllDetails unsupported")
 
-type incompleteStartupSnapshot struct{ taskFailures, destinationFailures int }
+type incompleteStartupSnapshot struct{ taskFailures, destinationFailures, genericObjectFailures int }
 
 func (e *incompleteStartupSnapshot) Error() string {
-	return fmt.Sprintf("incomplete ADMF snapshot: %d task failures, %d destination failures", e.taskFailures, e.destinationFailures)
+	return fmt.Sprintf("incomplete ADMF snapshot: %d task failures, %d destination failures, %d generic object failures", e.taskFailures, e.destinationFailures, e.genericObjectFailures)
 }
 
 // Remote error descriptions and HTTP bodies can contain target definitions.

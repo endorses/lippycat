@@ -1091,3 +1091,7 @@ li:
 ```
 
 `etsi-8` rejects seconds outside `0..4294967295`, while allowing valid fractions within the final second. `target-identifier` emits typed XML only for one unambiguous admitted target; multi-target and untyped legacy username tasks omit optional attribute 17. Other serialization failures fail encoding without fallback. Defaults preserve existing bytes, including RADIUS attribute-17 absence. Queue and journal replay retain original encoded bytes after configuration changes or rollback. Verify receiver support before enabling either option and retain legacy support while older records remain deliverable. See [Delivery encoding and migration](../part5-advanced/lawful-interception.md#li-delivery-encoding-and-migration).
+
+## Selective IRI policy profile {#selective-iri-policy-profile}
+
+The root-level key `li.iri_policy_profile` selects an optional JSON fact profile for LI-enabled `process`, `tap`, and tap protocol subcommands. Its default is empty; the built-in `ETSI / IRIEvents / All` criterion needs no file. The flag `--li-iri-policy-profile` overrides `LIPPYCAT_LI_IRI_POLICY_PROFILE` and YAML. Unknown fields, duplicate keys, invalid mappings, or unsupported profile versions fail startup. Changes require a restart and renewed ADMF confirmation for policy-dependent tasks. See [Selective IRI policies](../part5-advanced/lawful-interception.md#selective-iri-policies).

@@ -133,7 +133,7 @@ func TestStateRotationRejectsInvalidPayloadIdentityAndPinAlias(t *testing.T) {
 			case "inner identity":
 				store = [16]byte(uuid.New())
 			case "unknown field":
-				payload = bytes.Replace(payload, []byte(`"version": 2`), []byte(`"version": 2, "PRIVATE": true`), 1)
+				payload = bytes.Replace(payload, []byte(`"version": 3`), []byte(`"version": 3, "PRIVATE": true`), 1)
 			case "trailing document":
 				payload = append(payload, []byte(`{}`)...)
 			}

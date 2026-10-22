@@ -63,6 +63,11 @@ func TaskResponseDetailsToInterceptTask(details *schema.TaskResponseDetails) (*I
 		DestinationIDs: destIDs,
 		DeliveryType:   deliveryType,
 	}
+	policyReferences, err := x1.ParseIRIPolicyReferences(td.ListOfIRIPolicyReferences)
+	if err != nil {
+		return nil, fmt.Errorf("convert IRI policy references: %w", err)
+	}
+	task.IRIPolicyReferences = policyReferences
 	startTime, endTime, err := mediationWindowFromSchema(td.ListOfMediationDetails)
 	if err != nil {
 		return nil, fmt.Errorf("convert mediation window: %w", err)

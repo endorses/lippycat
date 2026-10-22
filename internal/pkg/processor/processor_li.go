@@ -58,6 +58,8 @@ var (
 	liX3FinalizedSuppressed atomic.Uint64
 	liX3BufferedDiscarded   atomic.Uint64
 	liX3LastLateWarning     atomic.Int64
+	liIRIPolicySuppressed   atomic.Uint64
+	liIRIPolicyErrors       atomic.Uint64
 )
 
 const liLateX3WarningInterval = time.Minute
@@ -132,6 +134,8 @@ var _ li.FilterPusher = (*processorFilterPusher)(nil)
 // liStoragePreparation retains authenticated owners across New and Start.
 // Runtime globals are published only after the complete constructor succeeds.
 type liStoragePreparation struct {
+	iriProfile          iriPolicyProfile
+	iriProfileError     error
 	sequencer           *x2x3.Sequencer
 	x2Encoder           *x2x3.X2Encoder
 	x3Encoder           *x2x3.X3Encoder
@@ -165,6 +169,8 @@ func (p *Processor) initLIManager() {
 	}
 
 	p.liStorage = &liStoragePreparation{}
+	iriProfile, iriCapabilities, iriRevision, iriErr := loadIRIPolicyProfile(p.config.LIIRIPolicyProfileFile)
+	p.liStorage.iriProfile, p.liStorage.iriProfileError = iriProfile, iriErr
 
 	// Create filter pusher adapter
 	filterPusher := &processorFilterPusher{p: p}
@@ -185,6 +191,8 @@ func (p *Processor) initLIManager() {
 
 	// Create LI manager config
 	config := li.ManagerConfig{
+		IRIProfile:                  iriCapabilities,
+		IRIPolicyProfileRevision:    iriRevision,
 		TaskFilterDistributionScope: p.config.LITaskFilterDistributionScope,
 		RADIUSScope:                 p.config.LIRADIUSScope,
 		RADIUSMACProfile:            p.config.LIRADIUSMACProfile,
@@ -246,6 +254,12 @@ func (p *Processor) initLIManager() {
 
 	// Create LI manager
 	p.liManager = li.NewManager(config, deactivationCallback)
+	p.liManager.SetOnIRIPolicyChanged(func(previous *li.InterceptTask) error {
+		if p.liStorage.client != nil {
+			return p.liStorage.client.CancelTaskProducts(previous.XID, previous.ActivationGeneration)
+		}
+		return nil
+	})
 	p.liManager.SetTaskConflictCallback(func(previous *li.InterceptTask) error {
 		if liDeliveryClient != nil {
 			return liDeliveryClient.CancelTaskProducts(previous.XID, previous.ActivationGeneration)
@@ -375,6 +389,9 @@ func (p *Processor) initLIRuntime() {
 
 		// Encode and deliver X2 (IRI - signaling) for SIP packets
 		if deliverX2 && pkt.VoIPData != nil && !pkt.VoIPData.IsRTP {
+			if len(task.IRIPolicyReferences) > 0 && !p.allowIRI(task, p.liStorage.iriProfile.sipFacts(pkt)) {
+				return
+			}
 			policy := x2x3.SIPContentFull
 			if task.DeliveryType == li.DeliveryX2Only {
 				policy = x2x3.SIPContentIRIOnly
@@ -618,6 +635,9 @@ func (p *Processor) prepareLIStorage() error {
 }
 
 func (p *Processor) prepareLIStorageOnce() error {
+	if p.liStorage.iriProfileError != nil {
+		return p.liStorage.iriProfileError
+	}
 	if err := p.prepareLIWireFormats(); err != nil {
 		return err
 	}
@@ -1103,13 +1123,15 @@ func (p *Processor) isLIEnabled() bool {
 
 // LIEncodingStats contains X2/X3 encoding statistics.
 type LIEncodingStats struct {
-	X2Encoded uint64
-	X2Errors  uint64
-	X2Skipped uint64
-	X3Encoded uint64
-	X3Errors  uint64
-	X3Skipped uint64
-	NoEncoder uint64
+	IRIPolicySuppressed uint64
+	IRIPolicyErrors     uint64
+	X2Encoded           uint64
+	X2Errors            uint64
+	X2Skipped           uint64
+	X3Encoded           uint64
+	X3Errors            uint64
+	X3Skipped           uint64
+	NoEncoder           uint64
 
 	// DirectionResolvedMedia counts RTP streams (SSRCs) whose Payload Direction
 	// was derived from the call's observed signalling.
@@ -1124,6 +1146,8 @@ type LIEncodingStats struct {
 func (p *Processor) getLIEncodingStats() LIEncodingStats {
 	dirStats := liMediaDirection.Stats()
 	return LIEncodingStats{
+		IRIPolicySuppressed:    liIRIPolicySuppressed.Load(),
+		IRIPolicyErrors:        liIRIPolicyErrors.Load(),
 		X2Encoded:              liX2Encoded.Load(),
 		X2Errors:               liX2Errors.Load(),
 		X2Skipped:              liX2Skipped.Load(),
@@ -1144,6 +1168,14 @@ func (p *Processor) populateLIEncodingStats(dst *management.ProcessorStats) {
 	}
 	stats := p.getLIEncodingStats()
 	managerStats := p.liManager.Stats()
+	dst.LiIriPolicy = &management.LIIRIPolicyStats{
+		Objects:          uint64(managerStats.IRIPolicy.Objects),          // #nosec G115 -- bounded nonnegative map counts
+		Policies:         uint64(managerStats.IRIPolicy.Policies),         // #nosec G115 -- bounded nonnegative map counts
+		Rules:            uint64(managerStats.IRIPolicy.Rules),            // #nosec G115 -- bounded nonnegative map counts
+		ConfirmedObjects: uint64(managerStats.IRIPolicy.ConfirmedObjects), // #nosec G115 -- bounded nonnegative map counts
+		Suppressed:       stats.IRIPolicySuppressed,
+		EvaluationErrors: stats.IRIPolicyErrors,
+	}
 	dst.LiStartupSync = &management.LIStartupSyncStats{
 		State:       string(managerStats.StartupSync.State),
 		Attempts:    managerStats.StartupSync.Attempts,

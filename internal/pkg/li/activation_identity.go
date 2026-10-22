@@ -2,11 +2,13 @@ package li
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 
 	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/endorses/lippycat/internal/pkg/radius"
+	"github.com/google/uuid"
 )
 
 // canonicalTaskDefinition contains only enforcement-affecting activation
@@ -23,6 +25,9 @@ type canonicalTaskDefinition struct {
 	EndTimeUnixNano             int64
 	EndTimeSet                  bool
 	ImplicitDeactivationAllowed bool
+	IRIPolicyReferences         [][16]byte
+	IRIPolicySourceGenerations  map[[16]byte]uint64
+	IRIPolicyProfileRevision    string
 }
 
 // canonicalizeTargets returns a sorted, duplicate-free copy of targets. The
@@ -64,6 +69,14 @@ func canonicalizeTaskDefinition(task *InterceptTask) canonicalTaskDefinition {
 	}
 
 	c.Targets = canonicalizeTargets(task.Targets)
+	c.IRIPolicyProfileRevision = task.IRIPolicyProfileRevision
+	for _, id := range task.IRIPolicyReferences {
+		c.IRIPolicyReferences = append(c.IRIPolicyReferences, id)
+	}
+	c.IRIPolicySourceGenerations = make(map[[16]byte]uint64, len(task.IRIPolicySourceGenerations))
+	for id, generation := range task.IRIPolicySourceGenerations {
+		c.IRIPolicySourceGenerations[id] = generation
+	}
 
 	c.DestinationIDs = make([][16]byte, len(task.DestinationIDs))
 	for i, did := range task.DestinationIDs {
@@ -93,7 +106,7 @@ func equivalentTaskDefinition(a, b *InterceptTask) bool {
 		ca.StartTimeSet == cb.StartTimeSet && ca.StartTimeUnixNano == cb.StartTimeUnixNano &&
 		ca.EndTimeSet == cb.EndTimeSet && ca.EndTimeUnixNano == cb.EndTimeUnixNano &&
 		ca.ImplicitDeactivationAllowed == cb.ImplicitDeactivationAllowed &&
-		slices.Equal(ca.Targets, cb.Targets) && slices.Equal(ca.DestinationIDs, cb.DestinationIDs)
+		slices.Equal(ca.Targets, cb.Targets) && slices.Equal(ca.DestinationIDs, cb.DestinationIDs) && equivalentIRIPolicyDefinition(a, b)
 }
 
 // equivalentDeliveryDefinition identifies changes that revoke buffered product.
@@ -105,7 +118,15 @@ func equivalentDeliveryDefinition(a, b *InterceptTask) bool {
 		return equivalentTaskDefinition(a, b)
 	}
 	ca, cb := canonicalizeTaskDefinition(a), canonicalizeTaskDefinition(b)
-	return ca.XID == cb.XID && ca.RADIUSScope == cb.RADIUSScope && ca.RADIUSMACProfile == cb.RADIUSMACProfile && ca.DeliveryType == cb.DeliveryType && slices.Equal(ca.Targets, cb.Targets) && slices.Equal(ca.DestinationIDs, cb.DestinationIDs)
+	return ca.XID == cb.XID && ca.RADIUSScope == cb.RADIUSScope && ca.RADIUSMACProfile == cb.RADIUSMACProfile && ca.DeliveryType == cb.DeliveryType && slices.Equal(ca.Targets, cb.Targets) && slices.Equal(ca.DestinationIDs, cb.DestinationIDs) && equivalentIRIPolicyDefinition(a, b)
+}
+
+func cloneIRISourceGenerations(source map[uuid.UUID]uint64) map[uuid.UUID]uint64 {
+	return maps.Clone(source)
+}
+
+func equivalentIRIPolicyDefinition(a, b *InterceptTask) bool {
+	return slices.Equal(a.IRIPolicyReferences, b.IRIPolicyReferences) && maps.Equal(a.IRIPolicySourceGenerations, b.IRIPolicySourceGenerations) && a.IRIPolicyProfileRevision == b.IRIPolicyProfileRevision
 }
 
 // Retained generic identities require an explicit complete window even in

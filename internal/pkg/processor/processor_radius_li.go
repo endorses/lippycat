@@ -40,6 +40,10 @@ func (p *Processor) deliverLIRADIUS(task *li.InterceptTask, observation *radius.
 		p.radiusLIMu.Unlock()
 		return
 	}
+	if len(task.IRIPolicyReferences) > 0 && !p.allowIRI(task, p.liStorage.iriProfile.radiusFacts(observation)) {
+		admission.Release()
+		return
+	}
 	admission.Release()
 	// Serialize allocation/encoding/enqueue and shutdown for this POI. This also
 	// preserves sequence order when capture sources invoke callbacks concurrently.

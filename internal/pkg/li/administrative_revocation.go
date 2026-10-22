@@ -68,7 +68,7 @@ func (m *Manager) prepareRevocationsLocked(intent *StateIntent, task *InterceptT
 	}
 	request := RevocationRequest{OperationID: intent.OperationID, StateIncarnation: m.stateID, Kind: intent.Kind,
 		Task: cloneInterceptTask(task), Destination: stateDestination(dest)}
-	request.IncludeX2 = intent.CandidateTask != nil && intent.CandidateTask.Definition.Conflict
+	request.IncludeX2 = intent.IncludeX2 || intent.CandidateTask != nil && (intent.CandidateTask.Definition.Conflict || task != nil && !equivalentIRIPolicyDefinition(task, intent.CandidateTask))
 	if dest != nil {
 		request.DestinationGeneration = DestinationDeliveryGeneration(dest)
 	}

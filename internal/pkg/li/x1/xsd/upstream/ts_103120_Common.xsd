@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:etsi="http://uri.etsi.org/03280/common/2017/07" xmlns="http://uri.etsi.org/03120/common/2016/02/Common" targetNamespace="http://uri.etsi.org/03120/common/2016/02/Common" elementFormDefault="qualified" attributeFormDefault="unqualified">
+    <xs:import namespace="http://uri.etsi.org/03280/common/2017/07"/>
+    <xs:simpleType name="ETSIVersion">
+        <xs:restriction base="etsi:ShortString">
+            <xs:pattern value="V\d+\.\d+\.\d+"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:complexType name="DictionaryEntries">
+        <xs:sequence>
+            <xs:element name="DictionaryEntry" type="DictionaryEntry" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="DictionaryEntry">
+        <xs:sequence>
+            <xs:element name="Owner" type="etsi:ShortString"/>
+            <xs:element name="Name" type="etsi:ShortString"/>
+            <xs:element name="Value" type="etsi:ShortString"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ApprovalDetails">
+        <xs:sequence>
+            <xs:element name="ApprovalType" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="ApprovalDescription" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="ApprovalReference" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="ApproverDetails" type="ApproverDetails" minOccurs="0"/>
+            <xs:element name="ApprovalTimestamp" type="etsi:QualifiedDateTime" minOccurs="0"/>
+            <xs:element name="ApprovalIsEmergency" type="xs:boolean" minOccurs="0"/>
+            <xs:element name="ApprovalDigitalSignature" type="ApprovalDigitalSignature" minOccurs="0"/>
+            <xs:element name="ApprovalNationalDetails" type="ApprovalNationalDetails" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ApproverDetails">
+        <xs:sequence>
+            <xs:element name="ApproverName" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="ApproverRole" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="ApproverIdentity" type="ApproverIdentity" minOccurs="0"/>
+            <xs:element name="ApproverContactDetails" type="ApproverContactDetails" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ApproverIdentity">
+        <xs:choice>
+            <xs:element name="NationalApproverIdentity" type="NationalApproverIdentity"/>
+        </xs:choice>
+    </xs:complexType>
+    <xs:complexType name="ApproverContactDetails">
+        <xs:complexContent>
+            <xs:extension base="GenericContactDetails">
+                <xs:sequence>
+                    <xs:element name="ApproverAlternateName" type="etsi:LongString" minOccurs="0"/>
+                    <xs:element name="ApproverEmailAddress" type="etsi:InternationalizedEmailAddress" minOccurs="0"/>
+                    <xs:element name="ApproverPhoneNumber" type="etsi:InternationalE164" minOccurs="0"/>
+                </xs:sequence>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+    <xs:complexType name="GenericContactDetails">
+        <xs:sequence>
+            <xs:element name="Name" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="Role" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="EmailAddress" type="etsi:InternationalizedEmailAddress" minOccurs="0"/>
+            <xs:element name="PhoneNumber" type="etsi:InternationalE164" minOccurs="0"/>
+            <xs:element name="FaxNumber" type="etsi:InternationalE164" minOccurs="0"/>
+            <xs:element name="Address" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="Languages" type="LanguageIdentifier" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="LanguageIdentifier">
+        <xs:choice>
+            <xs:element name="ISO639Set1LanguageIdentifier" type="ISO639Set1LanguageIdentifier"/>
+        </xs:choice>
+    </xs:complexType>
+    <xs:simpleType name="ISO639Set1LanguageIdentifier">
+        <xs:restriction base="xs:string">
+            <xs:pattern value="[a-z]{2}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:complexType name="NationalApproverIdentity" abstract="true">
+        <xs:sequence>
+            <xs:element name="CountryCode" type="etsi:ISOCountryCode"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ApprovalDigitalSignature">
+        <xs:choice>
+            <xs:element name="NationalDigitalSignature" type="NationalDigitalSignature"/>
+        </xs:choice>
+    </xs:complexType>
+    <xs:complexType name="ApprovalNationalDetails" abstract="true">
+        <xs:sequence>
+            <xs:element name="CountryCode" type="etsi:ISOCountryCode"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="NationalDigitalSignature" abstract="true">
+        <xs:sequence>
+            <xs:element name="CountryCode" type="etsi:ISOCountryCode"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="Timespan">
+        <xs:sequence>
+            <xs:element name="StartTime" type="etsi:QualifiedDateTime" minOccurs="0"/>
+            <xs:element name="EndTime" type="etsi:QualifiedDateTime" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ListOfChecksumAndType">
+        <xs:sequence>
+            <xs:element name="ChecksumAndType" type="ChecksumAndType" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="ChecksumAndType">
+        <xs:sequence>
+            <xs:element name="Checksum" type="Checksum"/>
+            <xs:element name="ChecksumType" type="ChecksumType"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:simpleType name="Checksum">
+        <xs:restriction base="etsi:ShortString"/>
+    </xs:simpleType>
+    <xs:simpleType name="ChecksumType">
+        <xs:restriction base="etsi:ShortString"/>
+    </xs:simpleType>
+</xs:schema>

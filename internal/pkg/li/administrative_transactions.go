@@ -71,6 +71,7 @@ func (m *Manager) taskIntentLocked(kind StateIntentKind, previous, candidate *In
 		CandidateTask: cloneInterceptTask(candidate), CleanupFilterIDs: []string{}, RevocationIDs: []uuid.UUID{}}
 	if previous != nil {
 		i.PreviousGeneration = previous.ActivationGeneration
+		i.IncludeX2 = len(previous.IRIPolicyReferences) > 0 && (candidate == nil || !equivalentIRIPolicyDefinition(previous, candidate))
 	}
 	if candidate != nil {
 		i.ReservedGeneration = candidate.ActivationGeneration
@@ -284,15 +285,44 @@ func (m *Manager) activatePersistentTaskLocked(task *InterceptTask, startup bool
 	if kind == StateTaskConfirm {
 		candidate.Status = TaskStatusActive
 	}
+	// A different policy/profile after restart cannot retain old queued product.
+	if previous == nil {
+		if old := m.persistedActive[task.XID]; old != nil && old.ActivationGeneration > 0 && !equivalentIRIPolicyDefinition(old, candidate) {
+			previous = cloneInterceptTask(old)
+			kind = StateTaskModify
+		}
+	}
 	intent, err := m.taskIntentLocked(kind, previous, candidate)
 	if err != nil {
 		return err
 	}
-	if err := m.reserveAdministrativeLocked([]*StateIntent{intent}, nil, false); err != nil {
+	var controls []*StateRevocation
+	if kind == StateTaskModify {
+		controls, err = m.prepareRevocationsLocked(intent, previous, nil)
+		if err != nil {
+			return err
+		}
+		for _, control := range controls {
+			intent.RevocationIDs = append(intent.RevocationIDs, control.ControlID)
+		}
+	}
+	if err := m.reserveAdministrativeLocked([]*StateIntent{intent}, controls, false); err != nil {
 		if securestore.OutcomeOf(err) == securestore.NotCommitted {
 			return err
 		}
 		return m.failAdministrativeTaskLocked(intent, candidate, err)
+	}
+	if kind == StateTaskModify {
+		if _, err := m.commitRevocationsLocked(controls); err != nil {
+			return m.failAdministrativeTaskLocked(intent, candidate, err)
+		}
+		if err := m.notifyIRIPolicyChanged(previous); err != nil {
+			return m.failAdministrativeTaskLocked(intent, candidate, err)
+		}
+		m.notifyTaskModified(previous)
+		if err := m.checkpointIntentLocked(intent, StateRevocationCommitted, true); err != nil {
+			return m.failAdministrativeTaskLocked(intent, candidate, err)
+		}
 	}
 	if candidate.Status == TaskStatusActive {
 		if _, err := m.filters.CreateFiltersForTask(candidate); err != nil {
@@ -371,6 +401,9 @@ func (m *Manager) commitPersistentTaskDefinitionLocked(previous, candidate *Inte
 		}
 		m.registry.mu.Unlock()
 		_, revocationErr := m.commitRevocationsLocked(controls)
+		if revocationErr == nil && !equivalentIRIPolicyDefinition(previous, candidate) {
+			revocationErr = m.notifyIRIPolicyChanged(previous)
+		}
 		m.notifyTaskModified(previous)
 		if revocationErr != nil {
 			return m.failAdministrativeTaskLocked(intent, candidate, revocationErr)
@@ -402,7 +435,7 @@ func (m *Manager) commitPersistentTaskDefinitionLocked(previous, candidate *Inte
 	return nil
 }
 
-func (m *Manager) withdrawPersistentTaskLocked(xid uuid.UUID, kind StateIntentKind, reason string) error {
+func (m *Manager) withdrawPersistentTaskLocked(xid uuid.UUID, kind StateIntentKind, reason string, forceX2 ...bool) error {
 	if err := m.unfinishedSubjectLocked(xid, uuid.Nil); err != nil {
 		return err
 	}
@@ -416,6 +449,9 @@ func (m *Manager) withdrawPersistentTaskLocked(xid uuid.UUID, kind StateIntentKi
 	intent, err := m.taskIntentLocked(kind, previous, nil)
 	if err != nil {
 		return err
+	}
+	if len(forceX2) > 0 && forceX2[0] {
+		intent.IncludeX2 = true
 	}
 	var controls []*StateRevocation
 	if previous.ActivationGeneration != 0 {
@@ -453,6 +489,9 @@ func (m *Manager) withdrawPersistentTaskLocked(xid uuid.UUID, kind StateIntentKi
 	m.registry.tasks[xid] = cloneInterceptTask(closed)
 	m.registry.mu.Unlock()
 	_, revocationErr := m.commitRevocationsLocked(controls)
+	if revocationErr == nil && intent.IncludeX2 {
+		revocationErr = m.notifyIRIPolicyChanged(previous)
+	}
 	if m.registry.onDeactivation != nil {
 		m.registry.onDeactivation(closed, callbackReason)
 	}

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:etsi="http://uri.etsi.org/03280/common/2017/07" xmlns:common="http://uri.etsi.org/03120/common/2016/02/Common" xmlns="http://uri.etsi.org/03120/common/2024/06/Config" targetNamespace="http://uri.etsi.org/03120/common/2024/06/Config" elementFormDefault="qualified" attributeFormDefault="unqualified">
+    <xs:import namespace="http://uri.etsi.org/03120/common/2016/02/Common"/>
+    <xs:import namespace="http://uri.etsi.org/03280/common/2017/07"/>
+    <xs:complexType name="TargetFormatTypeDefinitions">
+        <xs:sequence>
+            <xs:element name="FormatOwner" type="etsi:ShortString"/>
+            <xs:element name="TargetFormatTypeDefinitionEntries" type="TargetFormatTypeDefinitionEntries"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="TargetFormatTypeDefinitionEntries">
+        <xs:sequence>
+            <xs:element name="TargetFormatTypeDefinitionEntry" type="TargetFormatTypeDefinitionEntry" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="TargetFormatTypeDefinitionEntry">
+        <xs:sequence>
+            <xs:element name="FormatName" type="etsi:ShortString"/>
+            <xs:element name="Description" type="etsi:LongString"/>
+            <xs:element name="FormatRegex" type="etsi:LongString"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="TargetingConfigurations">
+        <xs:sequence>
+            <xs:element name="TargetingConfiguration" type="TargetingConfiguration" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="TargetingConfiguration">
+        <xs:sequence>
+            <xs:element name="FormatName" type="etsi:ShortString"/>
+            <xs:element name="FormatOwner" type="etsi:ShortString"/>
+            <xs:element name="Guidance" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="AssociatedLIServiceTypes" type="common:DictionaryEntries" minOccurs="0"/>
+            <xs:element name="AssociatedLDRequestTypes" type="common:DictionaryEntries" minOccurs="0"/>
+            <xs:element name="AssociatedLDRequestSubtypes" type="common:DictionaryEntries" minOccurs="0"/>
+            <xs:element name="AssociatedLPRequestTypes" type="common:DictionaryEntries" minOccurs="0"/>
+            <xs:element name="AssociatedLPRequestSubtypes" type="common:DictionaryEntries" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="SupportedLIWorkflowEndpoints">
+        <xs:sequence>
+            <xs:element name="SupportedLIWorkflowEndpoint" type="SupportedLIWorkflowEndpoint" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="SupportedLIWorkflowEndpoint">
+        <xs:sequence>
+            <xs:element name="LIWorkflowEndpoint" type="common:DictionaryEntry"/>
+            <xs:element name="Guidance" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="URL" type="etsi:LongString"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="SupportedLPWorkflowEndpoints">
+        <xs:sequence>
+            <xs:element name="SupportedLPWorkflowEndpoint" type="SupportedLPWorkflowEndpoint" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="SupportedLPWorkflowEndpoint">
+        <xs:sequence>
+            <!-- Implementers should note that the naming of this element was corrected from LIWorkflowEndpoint in v1.20.1 -->
+            <xs:element name="LPWorkflowEndpoint" type="common:DictionaryEntry"/>
+            <xs:element name="Guidance" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="URL" type="etsi:LongString"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="SupportedLDWorkflowEndpoints">
+        <xs:sequence>
+            <xs:element name="SupportedLDWorkflowEndpoint" type="SupportedLDWorkflowEndpoint" minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="SupportedLDWorkflowEndpoint">
+        <xs:sequence>
+            <xs:element name="LDWorkflowEndpoint" type="common:DictionaryEntry"/>
+            <xs:element name="Guidance" type="etsi:LongString" minOccurs="0"/>
+            <xs:element name="URL" type="etsi:LongString"/>
+        </xs:sequence>
+    </xs:complexType>
+</xs:schema>

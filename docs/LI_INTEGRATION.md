@@ -4,21 +4,20 @@ This guide covers the deployment and operation of lippycat's ETSI X1/X2/X3 lawfu
 
 ## X1 version compatibility
 
-lippycat declares ETSI TS 103 221-1 `v1.22.1`, matching the bundled
-`TS_103_221_01.xsd` schema. It accepts the verified inclusive compatibility
-window from `v1.13.1` through `v1.22.1` (with or without the lowercase `v`
-prefix). Malformed revisions and revisions outside that window are rejected
-with an explicit X1 request-syntax error. This is a reviewed schema
-compatibility window, not a general semantic-version compatibility rule.
+lippycat declares ETSI TS 103 221-1 `v1.23.1`, matching the bundled
+`TS_103_221_01.xsd` schema. It accepts the inclusive compatibility window from
+`v1.13.1` through `v1.23.1` (with or without the lowercase `v` prefix).
+Malformed revisions and revisions outside that window are rejected with an
+explicit X1 request-syntax error.
 
-The V1.23.1 gap review did not pass: the generated schema remains V1.22.1 and
-the implemented surface is destination create/modify/remove, task
-activate/modify/deactivate/details, ping/keepalive, lifecycle/error
-notifications, and state reconciliation—not every mandatory V1.23.1 operation
-and field. Do not advertise V1.23.1 until all X1 schemas are regenerated and
-the server, ADMF client, fixtures, and peer compatibility tests are upgraded
-together. Confirm ADMF peers accept V1.22.1 responses and notifications before
-cutover; remove V1.13.1 compatibility only in a coordinated release.
+The supported capability profile is a point of interception (POI): task-level
+IRI policies govern SIP and RADIUS X2 generation. Mediation-level policy
+references are rejected because their HI2/HI3 scope belongs to an MDF.
+Policy provisioning uses the documented project-owned X1 generic-object adapter
+`urn:lippycat:li:x1:iri-policy:1`; the ADMF must use the same adapter. See
+[Selective IRI policies](LI_IRI_POLICIES.md) for schema provenance, evaluation,
+configuration, object lifecycle, restart requirements, and limitations.
+Confirm peer compatibility with this profile before cutover.
 
 ## X2/X3 encoding compatibility and migration
 
@@ -86,8 +85,8 @@ after rollback. Resetting a setting does not rewrite a backlog. Keep receiver
 support for legacy representations for the full lifetime of older records that
 remain eligible for delivery; retaining that support longer is allowed. Any
 future default change requires a separate release decision and explicit receiver
-readiness confirmation. No X1 revision upgrade or selective IRI policy support is
-introduced by these fixes.
+readiness confirmation. These encoding settings are independent of X1 policy
+provisioning and evaluation.
 
 ## X2/X3 correlation compatibility invariant
 

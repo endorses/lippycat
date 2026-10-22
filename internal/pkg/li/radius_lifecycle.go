@@ -76,6 +76,11 @@ func (m *Manager) reconcileRADIUSTask(task *InterceptTask) (bool, error) {
 	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	bound, bindErr := m.bindIRIPolicyTaskLocked(task)
+	if bindErr != nil {
+		return true, bindErr
+	}
+	task = bound
 	previous, err := m.registry.GetTaskDetails(task.XID)
 	if err != nil || (!IsRADIUSTask(previous) && !IsRADIUSTask(task)) {
 		return false, nil
@@ -104,7 +109,10 @@ func (m *Manager) reconcileRADIUSTask(task *InterceptTask) (bool, error) {
 		return true, nil
 	}
 	modifyErr := m.modifyTask(task.XID, &TaskModification{
-		Targets: &task.Targets, DestinationIDs: &task.DestinationIDs,
+		IRIPolicyReferences:        &task.IRIPolicyReferences,
+		iriPolicySourceGenerations: task.IRIPolicySourceGenerations,
+		iriPolicyProfileRevision:   task.IRIPolicyProfileRevision,
+		Targets:                    &task.Targets, DestinationIDs: &task.DestinationIDs,
 		DeliveryType: &task.DeliveryType, EndTime: &task.EndTime,
 		ImplicitDeactivationAllowed: &task.ImplicitDeactivationAllowed,
 		RADIUSScope:                 &task.RADIUSScope, RADIUSMACProfile: &task.RADIUSMACProfile,

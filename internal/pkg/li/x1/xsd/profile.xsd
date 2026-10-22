@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+ <xs:import namespace="http://uri.etsi.org/03221/X1/2017/10" schemaLocation="TS_103_221_01.xsd"/>
+ <xs:import namespace="urn:lippycat:li:x1:iri-policy:1" schemaLocation="Lippycat_IRIPolicy.xsd"/>
+</xs:schema>

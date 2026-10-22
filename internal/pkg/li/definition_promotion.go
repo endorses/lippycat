@@ -36,7 +36,10 @@ func (m *Manager) promoteTaskDefinitionLocked(task *InterceptTask) error {
 	// validation to check the proposed complete window and destination set.
 	view.tasks[task.XID].StartTime = task.StartTime
 	mod := &TaskModification{
-		Targets: &task.Targets, DestinationIDs: &task.DestinationIDs,
+		IRIPolicyReferences:        &task.IRIPolicyReferences,
+		iriPolicySourceGenerations: task.IRIPolicySourceGenerations,
+		iriPolicyProfileRevision:   task.IRIPolicyProfileRevision,
+		Targets:                    &task.Targets, DestinationIDs: &task.DestinationIDs,
 		DeliveryType: &task.DeliveryType, EndTime: &task.EndTime,
 		ImplicitDeactivationAllowed: &task.ImplicitDeactivationAllowed,
 		definition:                  &task.Definition,
@@ -74,6 +77,12 @@ func (m *Manager) promoteTaskDefinitionLocked(task *InterceptTask) error {
 	}
 	// Delivery admission stays closed under lifecycleMu while filter mutation
 	// either commits or compensates. Consume generations even on failed attempts.
+	if !equivalentIRIPolicyDefinition(previous, candidate) {
+		if err := m.notifyIRIPolicyChanged(previous); err != nil {
+			m.faultAdministrative(err)
+			return err
+		}
+	}
 	m.registry.mu.Lock()
 	m.registry.generations[task.XID] = max(m.registry.generations[task.XID], candidate.ActivationGeneration)
 	m.registry.mu.Unlock()

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/sms"
 	"github.com/google/gopacket/layers"
 )
 
@@ -58,6 +59,7 @@ type VoIPMetadata struct {
 	FromTag     string            // SIP From tag parameter (for dialog correlation)
 	ToTag       string            // SIP To tag parameter (for dialog correlation)
 	User        string            // Username from URI
+	SMS         *sms.Message      // Owned SMS-over-IMS segment and optional assembly result
 	ContentType string            // Content-Type header
 	Body        string            // SIP message body (for MESSAGE method, limited size)
 	Headers     map[string]string // All SIP headers

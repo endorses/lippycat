@@ -2,6 +2,14 @@
 
 VoIP analysis is lippycat's most mature protocol mode. It tracks SIP signaling dialogs, correlates RTP media streams with their controlling SIP sessions, and supports per-call PCAP extraction for offline analysis.
 
+## SMS-over-IMS {#sms-over-ims}
+
+VoIP call details show SMS text decoded from SIP `MESSAGE` bodies with media type `application/vnd.3gpp.sms`. GSM7 and UCS2 text are supported. Multipart messages are joined across SIP transactions; missing or conflicting parts and unsupported encodings are labelled explicitly. Decoding and display work without a keyword filter.
+
+`hunt voip` and `tap voip` optionally accept `--sms-keywords` and `--sms-keywords-file`. Keywords are case-insensitive literal substrings, with any keyword allowed to match. An empty keyword set disables filtering. Existing subscriber filters and capture policies still apply; SMS keywords cannot authorize additional traffic. Ordinary calls and RTP keep their existing behavior.
+
+When filtering is enabled, multipart SMS waits for all parts, including keywords split across segment boundaries. Matching messages and their eligible contributing packets are released together. Nonmatching, undecodable, expired, or incomplete messages are suppressed. Without filtering, assembly does not delay forwarding. Bounded assembly and pending-packet settings are configured under `hunter.voip.sms` or `tap.voip.sms`.
+
 ## SIP Signaling Flow {#sip-signaling-flow}
 
 SIP (Session Initiation Protocol) uses a request/response model to establish, modify, and tear down voice and video calls. lippycat tracks the full dialog lifecycle. A typical successful call follows the sequence shown in {{#figure fig-sip-call-flow}}:

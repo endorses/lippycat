@@ -3,6 +3,7 @@ package offline
 import (
 	"bytes"
 	"fmt"
+	"github.com/endorses/lippycat/internal/pkg/sms"
 	"math"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 
 func TestCompactTypedVoIPMatchesFrozenCodec(t *testing.T) {
 	full := types.VoIPMetadata{
+		SMS:    &sms.Message{Status: sms.StatusDecoded, Text: "hello 世界", Encoding: sms.EncodingUCS2, Concat: &sms.Concatenation{Reference: 23, ReferenceBits: 16, Part: 1, Total: 2}, Assembly: sms.AssemblyInfo{ID: "assembly", Status: sms.AssemblyPending, Received: []uint8{1}, Missing: []uint8{2}}},
 		CallID: "call\x00\xff", Method: "INVITE", CSeqMethod: "ACK", CSeqNumber: math.MaxUint64, ViaBranch: "z9hG4bK-branch", Status: -123,
 		From: "from", To: "to", FromTag: "from-tag", ToTag: "to-tag", User: "user", ContentType: "application/sdp", Body: "body\xfe",
 		Headers: map[string]string{"z-last": "last", "a-first": "first", "\xff": "\x00"}, RawSIP: []byte{0, 1, 128, 255}, IMSI: "imsi", IMEI: "imei",

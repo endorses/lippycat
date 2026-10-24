@@ -9,6 +9,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/filters"
+	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
 // CallStore manages call storage with LRU eviction
@@ -53,7 +54,12 @@ func (cs *CallStore) AddOrUpdateCall(call components.Call) {
 func (cs *CallStore) addOrUpdateCallLocked(call components.Call) {
 	cs.callsDirty = true // Invalidate cache on mutation
 
-	_, exists := cs.calls[call.CallID]
+	existing, exists := cs.calls[call.CallID]
+	if exists {
+		call.SMS = types.MergeSMSRecords(existing.SMS, call.SMS)
+	} else {
+		call.SMS = types.MergeSMSRecords(nil, call.SMS)
+	}
 
 	if !exists {
 		// Evict LRU (least recently used) if at capacity
@@ -84,8 +90,10 @@ func (cs *CallStore) addOrUpdateCallLocked(call components.Call) {
 	// Store/update the call
 	cs.calls[call.CallID] = &call
 
+	cs.pruneSMSContentLocked()
+
 	// Apply filter and update filtered calls
-	cs.updateFilteredCallLocked(call)
+	cs.updateFilteredCallLocked(*cs.calls[call.CallID])
 }
 
 // AddOrUpdateCalls adds or updates multiple calls with a single lock acquisition
@@ -130,6 +138,9 @@ func (cs *CallStore) GetCallsInOrder() []components.Call {
 	// Return a copy of the cached slice
 	result := make([]components.Call, len(cs.cachedCalls))
 	copy(result, cs.cachedCalls)
+	for i := range result {
+		result[i].SMS = types.CloneSMSRecords(result[i].SMS)
+	}
 
 	return result
 }
@@ -143,7 +154,9 @@ func (cs *CallStore) GetCall(callID string) (*components.Call, bool) {
 	if !exists {
 		return nil, false
 	}
-	return call, true
+	owned := *call
+	owned.SMS = types.CloneSMSRecords(call.SMS)
+	return &owned, true
 }
 
 // GetCallCount returns the current number of calls in the store
@@ -222,6 +235,9 @@ func (cs *CallStore) GetFilteredCalls() []components.Call {
 	// List is always sorted via binary search insert - just return a copy
 	result := make([]components.Call, len(cs.filteredCalls))
 	copy(result, cs.filteredCalls)
+	for i := range result {
+		result[i].SMS = types.CloneSMSRecords(result[i].SMS)
+	}
 	return result
 }
 
@@ -345,6 +361,29 @@ func (cs *CallStore) reapplyFiltersLocked() {
 			insertIdx := cs.findInsertPosition(*call)
 			cs.insertAtPosition(*call, insertIdx)
 			cs.matchedCalls++
+		}
+	}
+}
+
+func (cs *CallStore) pruneSMSContentLocked() {
+	retained := 0
+	for _, call := range cs.calls {
+		retained += types.SMSRecordsBytes(call.SMS)
+	}
+	for retained > types.SMSContentByteLimit {
+		var oldest *components.Call
+		for _, call := range cs.calls {
+			if len(call.SMS) > 0 && (oldest == nil || call.StartTime.Before(oldest.StartTime) || (call.StartTime.Equal(oldest.StartTime) && call.CallID < oldest.CallID)) {
+				oldest = call
+			}
+		}
+		if oldest == nil {
+			return
+		}
+		retained -= types.SMSRecordsBytes(oldest.SMS)
+		oldest.SMS = nil
+		if idx, ok := cs.filteredIndex[oldest.CallID]; ok {
+			cs.filteredCalls[idx].SMS = nil
 		}
 	}
 }

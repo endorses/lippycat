@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/smsconfig"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -67,6 +68,9 @@ Example:
 
 func init() {
 	HuntCmd.AddCommand(voipHuntCmd)
+	if err := smsconfig.RegisterFlags(voipHuntCmd, viper.GetViper(), "hunter.voip.sms"); err != nil {
+		panic(err)
+	}
 	cmdutil.RegisterMediaAdmissionFlags(voipHuntCmd, viper.GetViper(), "hunter.voip.rtp_ebpf")
 	voipHuntCmd.Flags().String("signalling-policy", "matched", "SIP forwarding policy: matched, all or none")
 	voipHuntCmd.Flags().String("media-policy", "local", "Media selection authority: local or processor")
@@ -110,6 +114,10 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	streamConfig, err := huntSIPStreamConfig(cmd)
+	if err != nil {
+		return err
+	}
+	streamConfig.SMS, err = smsconfig.ReadConfig(viper.GetViper(), "hunter.voip.sms")
 	if err != nil {
 		return err
 	}
@@ -316,6 +324,10 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 	if err := processor.SetCapturePolicies(policies, hunterMediaResolver(h)); err != nil {
 		return err
 	}
+	if err := processor.SetSMSConfig(streamConfig.SMS); err != nil {
+		return err
+	}
+	go processor.RunSMS(ctx)
 
 	// Wire the TCP assembler to the processor
 	// TCP packets will be fed to the assembler for stream reconstruction

@@ -337,6 +337,79 @@ message SIPMetadata {
 
     // Bounded RTP media ports advertised by this SIP message's SDP.
     repeated uint32 media_ports = 16;
+
+    // SMS-over-IMS interpretation. Absent when the producer supplied no SMS
+    // metadata, including older peers. Raw RPDU bytes remain in packet data.
+    SMSMetadata sms = 17;
+}
+
+// SMSMetadata preserves the original segment alongside any assembly update.
+// Content-bearing fields follow the same authorization as captured SIP bodies.
+message SMSMetadata {
+    enum DecodeStatus {
+        DECODE_STATUS_UNSPECIFIED = 0;
+        DECODE_STATUS_DECODED = 1;
+        DECODE_STATUS_CONTROL = 2;
+        DECODE_STATUS_UNSUPPORTED = 3;
+        DECODE_STATUS_MALFORMED = 4;
+        DECODE_STATUS_INCOMPLETE = 5;
+    }
+    enum Encoding {
+        ENCODING_UNSPECIFIED = 0;
+        ENCODING_GSM7 = 1;
+        ENCODING_UCS2 = 2;
+        ENCODING_BINARY = 3;
+        ENCODING_UNKNOWN = 4;
+    }
+    enum Direction {
+        DIRECTION_UNSPECIFIED = 0;
+        DIRECTION_MOBILE_ORIGINATED = 1;
+        DIRECTION_MOBILE_TERMINATED = 2;
+        DIRECTION_UNKNOWN = 3;
+    }
+    enum AssemblyStatus {
+        ASSEMBLY_STATUS_UNSPECIFIED = 0;
+        ASSEMBLY_STATUS_NONE = 1;
+        ASSEMBLY_STATUS_PENDING = 2;
+        ASSEMBLY_STATUS_COMPLETE = 3;
+        ASSEMBLY_STATUS_CONFLICT = 4;
+        ASSEMBLY_STATUS_EXPIRED = 5;
+        ASSEMBLY_STATUS_RESOURCE_LIMITED = 6;
+    }
+    message Concatenation {
+        uint32 reference = 1;
+        uint32 reference_bits = 2;
+        uint32 total = 3;
+        uint32 part = 4;
+    }
+    message Assembly {
+        // Opaque identity scoped to the preserved producer/capture provenance.
+        // Consumers must not correlate IDs across unrelated capture sources.
+        string id = 1;
+        AssemblyStatus status = 2;
+        // Complete text only for COMPLETE; an explicitly partial preview otherwise.
+        string text = 3;
+        repeated uint32 received = 4;
+        repeated uint32 missing = 5;
+    }
+
+    string text = 1;
+    DecodeStatus status = 2;
+    Encoding encoding = 3;
+    Direction direction = 4;
+    uint32 rp_type = 5;
+    uint32 tp_type = 6;
+    uint32 reference = 7;
+    uint32 dcs = 8;
+    uint32 pid = 9;
+    // TPDU SMS parties, independent of SIP routing identities.
+    string from = 10;
+    string to = 11;
+    optional int64 timestamp_unix_nano = 12;
+    Concatenation concat = 13;
+    Assembly assembly = 14;
+    // Validated non-concatenation UDH elements for compatible assembly grouping.
+    bytes header = 15;
 }
 
 // AccessNetworkInfo contains parsed P-Access-Network-Info header data (3GPP TS 24.229).

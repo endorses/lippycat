@@ -8,6 +8,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
+	"github.com/endorses/lippycat/internal/pkg/smsflow"
 	mediaadaptor "github.com/endorses/lippycat/internal/pkg/voip/admission"
 )
 
@@ -18,12 +19,25 @@ type remoteSignallingReceipt struct {
 }
 
 type hunterCapturePolicy struct {
-	policies CapturePolicies
-	remote   RemoteMediaResolver
+	policies       CapturePolicies
+	remote         RemoteMediaResolver
+	sms            *smsflow.Controller
+	smsDomain      uint32
+	smsDomainKnown bool
+}
+
+func (p *hunterCapturePolicy) envelope(info capture.PacketInfo) *pipeline.PacketEnvelope {
+	env := envelopeForHunterPacket(info)
+	env.Source.ObservationDomain, env.Source.ObservationDomainKnown = p.smsDomain, p.smsDomainKnown
+	return env
 }
 
 func defaultHunterCapturePolicy() *hunterCapturePolicy {
-	return &hunterCapturePolicy{policies: CapturePolicies{Signalling: SignallingMatched, Media: MediaLocal}}
+	controller, err := smsflow.New(smsflow.Config{})
+	if err != nil {
+		panic(err)
+	}
+	return &hunterCapturePolicy{policies: CapturePolicies{Signalling: SignallingMatched, Media: MediaLocal}, sms: controller}
 }
 
 func (p *hunterCapturePolicy) set(policies CapturePolicies, remote RemoteMediaResolver) error {
@@ -55,7 +69,7 @@ func (p *hunterCapturePolicy) policySIP(info capture.PacketInfo, event *sharedsi
 	if filter == nil {
 		direct = containsUserInHeaders(event.Headers)
 	}
-	env := envelopeForHunterPacket(info)
+	env := p.envelope(info)
 	setHunterFilterProvenance(env, directIDs, nil)
 	result := pipeline.SIPResultFromEvent(*event, env)
 	analysis := sipflow.ProcessResult{SIP: result, Stage: pipeline.Result{Outcome: pipeline.OutcomeAccepted}}
@@ -107,6 +121,9 @@ func (p *hunterCapturePolicy) policySIP(info capture.PacketInfo, event *sharedsi
 	}
 	setHunterFilterProvenance(env, directIDs, inherited)
 	analysis.SIP = result
+	if result.Method == "MESSAGE" || result.CSeqMethod == "MESSAGE" {
+		freezeSMSSelection(env, filter, buffer, info.Packet, event.CallID, direct, proof, p.policies.Signalling == SignallingAll)
+	}
 	analysis.Stage = pipeline.Result{Outcome: pipeline.OutcomeAccepted}
 	analysis = orchestrator.Dispatch(analysis)
 	return true, p.policies.Signalling != SignallingNone && analysis.Stage.Outcome == pipeline.OutcomeAccepted

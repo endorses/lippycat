@@ -169,7 +169,6 @@ func (s *LocalSource) appendPolicyPacket(accepted *policyCapture, after func()) 
 		}
 		return
 	}
-	s.stats.AddForwarded(uint64(len(packet.Data)))
 	s.appendEnvelope(envelope, accepted.signedCapturePolicy, after, accepted.check)
 }
 

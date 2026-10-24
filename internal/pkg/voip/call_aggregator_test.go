@@ -1133,7 +1133,7 @@ func TestCallAggregator_NonCallMethodsIgnored(t *testing.T) {
 	// captured mid-dialog still surfaces (see TestCallAggregator_MidCall*).
 	ca := NewCallAggregator()
 
-	nonCallMethods := []string{"OPTIONS", "REGISTER", "SUBSCRIBE", "NOTIFY", "PUBLISH", "MESSAGE"}
+	nonCallMethods := []string{"OPTIONS", "REGISTER", "SUBSCRIBE", "NOTIFY", "PUBLISH"}
 
 	for _, method := range nonCallMethods {
 		packet := &data.CapturedPacket{

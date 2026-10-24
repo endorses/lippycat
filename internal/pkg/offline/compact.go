@@ -28,7 +28,8 @@ const compactHeaderBytes = 32
 
 // Minor 4 appends observation-domain identity and presence to completed rows.
 // Other minor versions are rejected; temporary completed datasets are not migrated.
-const compactSchemaMinor = 4
+// Minor 5 appends owned SMS metadata to the VoIP override schema.
+const compactSchemaMinor = 5
 const compactBlockHeaderBytes = 72
 const compactRows = 128
 const compactRowSlotBytes = 1024

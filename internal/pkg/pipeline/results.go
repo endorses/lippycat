@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sms"
 )
 
 // DomainResult is implemented by output-neutral analysis results.
@@ -28,6 +29,7 @@ type SIPResult struct {
 	SourcePort, DestinationPort    uint16
 	SDP                            []byte
 	Body                           []byte
+	SMS                            *sms.Message
 	Headers                        map[string]string
 	DuplicateReliableHeaders       sip.ReliableHeaderDuplicates
 	ReliableHeaderEvidence         sip.ReliableHeaderEvidence

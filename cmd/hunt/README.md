@@ -869,3 +869,13 @@ verified mTLS, encrypted policy/raw stores and reliable raw forwarding, and
 rejects `signalling_policy: all`. Upgrade peers for signed-policy version 2 before
 enabling this profile; unsupported peers fail without pattern-distribution fallback.
 See [central LI task selection](../../docs/DISTRIBUTED_MEDIA.md#li-central-task-selection).
+
+## SMS-over-IMS
+
+VoIP hunters decode GSM7/UCS2 SMS and join multipart messages for remote display.
+Optional `--sms-keywords "urgent,maintenance"` or `--sms-keywords-file keywords.txt`
+adds case-insensitive literal matching to existing capture selection. Empty
+keywords disable filtering. Complete multipart text is matched across segment
+boundaries; selected contributing packets are retained until that decision.
+Ordinary calls and RTP keep their existing policies. Configuration and resource
+limits live under `hunter.voip.sms`; see [SMS-over-IMS](../../docs/SMS_OVER_IMS.md).

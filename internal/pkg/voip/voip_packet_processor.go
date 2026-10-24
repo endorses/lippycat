@@ -3,10 +3,12 @@
 package voip
 
 import (
+	"context"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	"github.com/endorses/lippycat/internal/pkg/smsflow"
 	mediaadaptor "github.com/endorses/lippycat/internal/pkg/voip/admission"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -36,9 +38,37 @@ func (p *VoIPPacketProcessor) SetTCPHandler(handler *HunterForwardHandler) {
 
 // Close drains the independently buffered SIP sinks owned by both transports.
 func (p *VoIPPacketProcessor) Close() {
-	p.udpHandler.Close()
+	p.udpHandler.orchestrator.Close()
 	if p.tcpHandler != nil {
-		p.tcpHandler.Close()
+		p.tcpHandler.orchestrator.Close()
+	}
+	p.udpHandler.capturePolicy.sms.Close()
+}
+
+// SetSMSConfig configures one decoder/assembly/filter context shared by UDP and
+// TCP within this observation domain. Call before capture or sink dispatch.
+func (p *VoIPPacketProcessor) SetSMSConfig(config smsflow.Config) error {
+	controller, err := smsflow.New(config)
+	if err != nil {
+		return err
+	}
+	p.udpHandler.capturePolicy.sms.Close()
+	p.udpHandler.capturePolicy.sms = controller
+	if p.tcpHandler != nil {
+		p.tcpHandler.capturePolicy.sms.Close()
+		p.tcpHandler.capturePolicy.sms = controller
+	}
+	return nil
+}
+
+func (p *VoIPPacketProcessor) RunSMS(ctx context.Context) { p.udpHandler.capturePolicy.sms.Run(ctx) }
+
+// SetSMSObservationDomain binds both transports to a configured capture domain.
+// It must be called before processing packets, alongside the domain router.
+func (p *VoIPPacketProcessor) SetSMSObservationDomain(domain uint32) {
+	p.udpHandler.capturePolicy.smsDomain, p.udpHandler.capturePolicy.smsDomainKnown = domain, true
+	if p.tcpHandler != nil {
+		p.tcpHandler.capturePolicy.smsDomain, p.tcpHandler.capturePolicy.smsDomainKnown = domain, true
 	}
 }
 

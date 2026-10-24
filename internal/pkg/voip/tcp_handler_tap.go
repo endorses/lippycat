@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
@@ -183,6 +184,7 @@ func metadataFromSIPResult(r pipeline.SIPResult) *data.PacketMetadata {
 		FromTag: r.FromTag, ToTag: r.ToTag, FromUri: r.FromURI, ToUri: r.ToURI,
 		Method: r.Method, CseqMethod: r.CSeqMethod, CseqNumber: r.CSeqNumber, ViaBranch: r.ViaBranch, ResponseCode: uint32(r.ResponseCode),
 		MediaPorts:        sharedsip.MediaPorts(r.SDP),
+		Sms:               grpcadapter.ToProtoSMS(r.SMS),
 		PAssertedIdentity: r.PAssertedIdentity,
 	}}
 }

@@ -670,6 +670,37 @@ func (bm *BufferManager) SelectionProofCurrent(callID string) bool {
 	defer bm.mu.RUnlock()
 	return bm.selectionCurrentLocked(callID)
 }
+
+// SIPSelectionCheck freezes inherited selection definitions and call lifetime
+// before content buffering. Re-selecting a reused Call-ID cannot authorize the
+// earlier bytes under a replacement proof.
+func (bm *BufferManager) SIPSelectionCheck(callID string) func() bool {
+	bm.mu.RLock()
+	proof := capturepolicy.MergeProofs(nil, bm.selectionProofs[callID])
+	registry := bm.registry
+	var original callregistry.Call
+	var exists bool
+	if registry != nil {
+		original, exists = registry.Call(callID)
+	}
+	bm.mu.RUnlock()
+	return func() bool {
+		bm.mu.RLock()
+		defer bm.mu.RUnlock()
+		if !exists || bm.registry != registry || !bm.matchedValidLocked(callID) {
+			return false
+		}
+		current, ok := registry.Call(callID)
+		if !ok || current.Lifetime != original.Lifetime {
+			return false
+		}
+		if bm.selectionMatcher != nil {
+			valid, _ := bm.selectionMatcher.CurrentSelection(proof)
+			return valid
+		}
+		return true
+	}
+}
 func (bm *BufferManager) currentFilterIDsLocked(callID string) []string {
 	if bm.selectionMatcher != nil {
 		_, ids := bm.selectionMatcher.CurrentSelection(bm.selectionProofs[callID])

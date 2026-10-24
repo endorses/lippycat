@@ -35,7 +35,9 @@ const rtpStalenessThreshold = 10 * time.Second
 
 // LocalCallAggregator wraps voip.CallAggregator for TUI local capture modes (live and offline)
 type LocalCallAggregator struct {
+	stopped         atomic.Bool
 	silent          bool // Offline indexing installs one final bounded snapshot.
+	offline         bool // Replay advances expiry only with the capture clock.
 	aggregator      *voip.CallAggregator
 	program         *tea.Program
 	callTracker     *CallTracker
@@ -73,7 +75,7 @@ func (lca *LocalCallAggregator) SetProgram(program *tea.Program) {
 
 // ProcessPacket processes a packet and updates call state
 func (lca *LocalCallAggregator) ProcessPacket(pkt *types.PacketDisplay) {
-	if pkt.VoIPData == nil {
+	if lca.stopped.Load() || pkt.VoIPData == nil {
 		return
 	}
 
@@ -84,6 +86,8 @@ func (lca *LocalCallAggregator) ProcessPacket(pkt *types.PacketDisplay) {
 		sourceID = "local"
 	}
 
+	enrichDisplaySMS(pkt)
+
 	// Process the packet through the aggregator
 	lca.aggregator.ProcessPacketDisplay(pkt, sourceID)
 
@@ -93,7 +97,7 @@ func (lca *LocalCallAggregator) ProcessPacket(pkt *types.PacketDisplay) {
 
 // scheduleCallUpdate schedules a throttled call update notification
 func (lca *LocalCallAggregator) scheduleCallUpdate() {
-	if lca.silent {
+	if lca.stopped.Load() || lca.silent {
 		return
 	}
 	lca.mu.Lock()
@@ -112,9 +116,19 @@ func (lca *LocalCallAggregator) scheduleCallUpdate() {
 
 // notifyCallUpdates sends call updates to the TUI
 func (lca *LocalCallAggregator) notifyCallUpdates() {
+	if lca.stopped.Load() {
+		return
+	}
+	if !lca.offline && !lca.silent {
+		lca.aggregator.ExpireSMS(time.Now())
+	}
 	calls := lca.aggregator.GetCalls()
 
 	lca.mu.Lock()
+	if lca.stopped.Load() {
+		lca.mu.Unlock()
+		return
+	}
 	// Use double-buffer pattern to reduce allocations:
 	// - One buffer is being processed by TUI
 	// - We fill the other buffer with new data
@@ -254,6 +268,7 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 
 	return types.CallInfo{
 		CallID:           call.CallID,
+		SMS:              types.CloneSMSRecords(call.SMS),
 		From:             from,
 		To:               to,
 		State:            state,
@@ -300,6 +315,7 @@ func (lca *LocalCallAggregator) Start() {
 // Stop stops the background call update notifier
 func (lca *LocalCallAggregator) Stop() {
 	lca.stopOnce.Do(func() {
+		lca.stopped.Store(true)
 		close(lca.stopCh)
 		lca.wg.Wait()
 
@@ -307,7 +323,9 @@ func (lca *LocalCallAggregator) Stop() {
 		if lca.callUpdateTimer != nil {
 			lca.callUpdateTimer.Stop()
 		}
+		lca.callInfoBuffers = [2][]types.CallInfo{}
 		lca.mu.Unlock()
+		lca.aggregator.ClearSMS()
 
 		logger.Debug("Local call aggregator stopped")
 	})

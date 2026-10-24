@@ -6,10 +6,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 )
 
-// appendEnvelope linearizes every local packet path with capture-policy grouping.
+// appendEnvelopeDirect linearizes every local packet path with capture-policy grouping.
 // Empty policy is a distinct ordinary group; it cannot inherit a neighboring
 // learned packet's signed capture snapshot.
-func (s *LocalSource) appendEnvelope(envelope *pipeline.PacketEnvelope, policy []byte, after func(), check func(*pipeline.PacketEnvelope) bool) {
+func (s *LocalSource) appendEnvelopeDirect(envelope *pipeline.PacketEnvelope, policy []byte, after func(), check func(*pipeline.PacketEnvelope) bool) {
+	s.stats.AddForwarded(uint64(len(envelope.Data)))
 	s.policyBatchMu.Lock()
 	defer s.policyBatchMu.Unlock()
 	s.batchMu.Lock()

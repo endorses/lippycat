@@ -2,6 +2,7 @@ package voip
 
 import (
 	"container/list"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -102,6 +105,7 @@ func (cs CallState) String() string {
 
 // AggregatedCall represents a call tracked by the processor
 type AggregatedCall struct {
+	SMS              []types.SMSRecord
 	CallID           string
 	From             string
 	To               string
@@ -175,6 +179,7 @@ type RTPQualityStats struct {
 
 // CallAggregator aggregates call state from packet streams
 type CallAggregator struct {
+	smsAssembler       types.SMSDisplayAssembler
 	calls              map[string]*AggregatedCall            // callID -> call state
 	retired            map[string]map[inviteAttempt]struct{} // old generations' transaction keys
 	retiredSSRC        map[string]map[uint32]struct{}
@@ -449,6 +454,7 @@ func (ca *CallAggregator) ResetCall(callID string) {
 	ca.mu.Lock()
 	defer ca.mu.Unlock()
 	if old := ca.calls[callID]; old != nil {
+		ca.forgetCallSMSLocked(old)
 		retired := ca.retired[callID]
 		if retired == nil {
 			retired = make(map[inviteAttempt]struct{})
@@ -566,6 +572,7 @@ func (ca *CallAggregator) ProcessPacket(packet *data.CapturedPacket, hunterID st
 
 	// Extract timestamp from packet
 	timestamp := time.Unix(0, packet.TimestampNs)
+	ca.ExpireSMS(timestamp)
 
 	// Handle SIP packets
 	if packet.Metadata.Sip != nil {
@@ -587,6 +594,7 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 	voip := pkt.VoIPData
 	// Use packet timestamp from capture
 	timestamp := pkt.Timestamp
+	ca.ExpireSMS(timestamp)
 
 	// Handle SIP packets (but not RTP-ONLY synthetic calls)
 	if voip.CallID != "" && voip.Method != "RTP-ONLY" && (voip.Method != "" || voip.Status > 0) {
@@ -615,17 +623,29 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 			ToUser:       voip.To,
 			FromUri:      voip.From, // VoIPMetadata doesn't distinguish between user and URI
 			ToUri:        voip.To,
+			Sms:          grpcadapter.ToProtoSMS(voip.SMS),
 		}
 
 		// Create a minimal CapturedPacket for compatibility
 		capturedPkt := &data.CapturedPacket{
+			ObservationDomain:      pkt.ObservationDomain,
+			ObservationDomainKnown: pkt.ObservationDomainKnown,
+			InterfaceName:          pkt.Interface,
 			Metadata: &data.PacketMetadata{
-				Sip: sipMeta,
+				SrcIp: pkt.SrcIP,
+				Sip:   sipMeta,
 			},
 		}
 
 		// Process SIP packet first to create/update the call
-		ca.processSIPPacket(capturedPkt, nodeID, timestamp)
+		smsSourceID := nodeID
+		if pkt.ObservationDomainKnown {
+			smsSourceID = pkt.NodeID
+			if smsSourceID == "" {
+				smsSourceID = "local"
+			}
+		}
+		ca.processSIPPacketFromSource(capturedPkt, nodeID, timestamp, smsSourceID)
 
 		// Now merge from RTP-only call if needed (after real call exists)
 		if voip.MergeFromCallID != "" {
@@ -681,7 +701,7 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 // deliberately excluded so they never spawn call entries.
 func isDialogMethod(method string) bool {
 	switch strings.ToUpper(method) {
-	case "INVITE", "ACK", "BYE", "CANCEL", "INFO", "PRACK", "UPDATE", "REFER":
+	case "INVITE", "ACK", "BYE", "CANCEL", "INFO", "PRACK", "UPDATE", "REFER", "MESSAGE":
 		return true
 	default:
 		return false
@@ -702,6 +722,10 @@ func effectiveSIPMethod(sip *data.SIPMetadata) string {
 }
 
 func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID string, timestamp time.Time) {
+	ca.processSIPPacketFromSource(packet, hunterID, timestamp, hunterID)
+}
+
+func (ca *CallAggregator) processSIPPacketFromSource(packet *data.CapturedPacket, hunterID string, timestamp time.Time, smsSourceID string) {
 	sip := packet.Metadata.Sip
 	if sip.CallId == "" {
 		return
@@ -759,6 +783,7 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 				oldestCallID := oldest.Value.(string)
 				ca.lruList.Remove(oldest)
 				delete(ca.lruIndex, oldestCallID)
+				ca.forgetCallSMSLocked(ca.calls[oldestCallID])
 				delete(ca.calls, oldestCallID)
 				delete(ca.retired, oldestCallID)
 				delete(ca.retiredSSRC, oldestCallID)
@@ -838,6 +863,30 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 				"to", to,
 				"method", sip.Method)
 		}
+	}
+
+	// SMS metadata is independently retained from call state and packet storage.
+	if message := grpcadapter.FromProtoSMS(sip.Sms); message != nil {
+		from, to := sip.FromUri, sip.ToUri
+		if from == "" {
+			from = sip.FromUser
+		}
+		if to == "" {
+			to = sip.ToUser
+		}
+		scopeInterface := packet.InterfaceName
+		if packet.ObservationDomainKnown {
+			scopeInterface = ""
+		}
+		scope := fmt.Sprintf("%q/%q/%t/%d/%q/%q", smsSourceID, scopeInterface, packet.ObservationDomainKnown, packet.ObservationDomain, sharedsip.URI(from), sharedsip.URI(to))
+		message = ca.smsAssembler.Add(scope, message, timestamp)
+
+		record := types.SMSRecord{TransactionID: types.SMSTransactionID(scope, sip.CallId, sip.CseqNumber, sip.ViaBranch, message), Message: message}
+		call.SMS = types.MergeSMSRecords(call.SMS, []types.SMSRecord{record})
+		for _, related := range ca.calls {
+			related.SMS = types.UpdateSuppliedSMSAssembly(related.SMS, message)
+		}
+		ca.pruneSMSContent()
 	}
 
 	// Add hunter if not already tracking
@@ -946,6 +995,9 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 // mid-dialog — capture started after the INVITE, or packets reordered —
 // still lands in a sensible state instead of being stuck in NEW.
 func (ca *CallAggregator) updateCallState(call *AggregatedCall, method, cseqMethod string, responseCode uint32, timestamp time.Time) {
+	if call.State == CallStateMessage {
+		return
+	}
 	oldState := call.State
 
 	switch method {
@@ -1151,6 +1203,7 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 				oldestCallID := oldest.Value.(string)
 				ca.lruList.Remove(oldest)
 				delete(ca.lruIndex, oldestCallID)
+				ca.forgetCallSMSLocked(ca.calls[oldestCallID])
 				delete(ca.calls, oldestCallID)
 				delete(ca.retired, oldestCallID)
 				delete(ca.retiredSSRC, oldestCallID)
@@ -1386,7 +1439,7 @@ func (ca *CallAggregator) GetActiveCalls() []AggregatedCall {
 	calls := make([]AggregatedCall, 0)
 	for _, call := range ca.calls {
 		if call.State != CallStateEnded && call.State != CallStateFailed &&
-			call.State != CallStateCancelled && call.State != CallStateBusy {
+			call.State != CallStateCancelled && call.State != CallStateBusy && call.State != CallStateMessage {
 			// Create a deep copy to avoid race conditions
 			calls = append(calls, ca.deepCopyCall(call))
 		}
@@ -1422,6 +1475,7 @@ func (ca *CallAggregator) GetCallCount() int {
 func (ca *CallAggregator) deepCopyCall(call *AggregatedCall) AggregatedCall {
 	callCopy := AggregatedCall{
 		CallID:           call.CallID,
+		SMS:              types.CloneSMSRecords(call.SMS),
 		From:             call.From,
 		To:               call.To,
 		State:            call.State,
@@ -1802,4 +1856,64 @@ func calculateMOS(packetLoss, jitter float64) float64 {
 	}
 
 	return mos
+}
+
+// pruneSMSContent bounds display text across calls without changing call state.
+// ca.mu is held by the caller.
+func (ca *CallAggregator) pruneSMSContent() {
+	retained := 0
+	for _, call := range ca.calls {
+		retained += types.SMSRecordsBytes(call.SMS)
+	}
+	for retained > types.SMSContentByteLimit {
+		var oldest *AggregatedCall
+		for _, call := range ca.calls {
+			if len(call.SMS) > 0 && (oldest == nil || call.StartTime.Before(oldest.StartTime) || (call.StartTime.Equal(oldest.StartTime) && call.CallID < oldest.CallID)) {
+				oldest = call
+			}
+		}
+		if oldest == nil {
+			return
+		}
+		retained -= types.SMSRecordsBytes(oldest.SMS)
+		ca.forgetCallSMSLocked(oldest)
+	}
+}
+
+// ExpireSMS advances the capture clock without changing terminal SMS call state.
+func (ca *CallAggregator) ExpireSMS(now time.Time) {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	for _, message := range ca.smsAssembler.Expire(now) {
+		for _, call := range ca.calls {
+			call.SMS = types.UpdateSMSAssembly(call.SMS, message)
+		}
+		ca.callsDirty = true
+	}
+}
+
+func (ca *CallAggregator) forgetCallSMSLocked(call *AggregatedCall) {
+	if call == nil {
+		return
+	}
+	for _, record := range call.SMS {
+		if lost := ca.smsAssembler.Forget(record.Message); lost != nil {
+			for _, related := range ca.calls {
+				related.SMS = types.UpdateSMSAssembly(related.SMS, lost)
+			}
+		}
+	}
+	call.SMS = nil
+}
+
+// ClearSMS releases all retained SMS content when a capture session stops.
+func (ca *CallAggregator) ClearSMS() {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	ca.smsAssembler.Close()
+	for _, call := range ca.calls {
+		call.SMS = nil
+	}
+	ca.cachedCalls = nil
+	ca.callsDirty = true
 }

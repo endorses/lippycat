@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"github.com/endorses/lippycat/internal/pkg/smsflow"
 	"sync"
 	"time"
 )
@@ -24,6 +25,8 @@ func initConfigDefaults() {}
 
 // Config holds all configurable VoIP processing parameters
 type Config struct {
+	// SMS is resolved by command composition; keywords are optional.
+	SMS smsflow.Config
 	// Output and registry settings are resolved by command composition.
 	WriteVoIP               bool
 	OutputFile              string
@@ -111,6 +114,7 @@ func GetConfig() *Config {
 	configMu.RLock()
 	defer configMu.RUnlock()
 	cfg := *config
+	cfg.SMS.Keywords = append([]string(nil), config.SMS.Keywords...)
 	return &cfg
 }
 
@@ -121,6 +125,7 @@ func SetConfig(cfg *Config) {
 		cfg = DefaultConfig()
 	}
 	clone := *cfg
+	clone.SMS.Keywords = append([]string(nil), cfg.SMS.Keywords...)
 	configMu.Lock()
 	config = &clone
 	configMu.Unlock()

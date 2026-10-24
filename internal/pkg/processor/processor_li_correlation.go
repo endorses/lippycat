@@ -144,6 +144,9 @@ func (p *Processor) snapshotLICorrelationPacket(pkt *types.PacketDisplay, tasks 
 	snapshot.bytes += len(clone.RawData) + len(clone.SrcIP) + len(clone.DstIP) + len(clone.SrcPort) + len(clone.DstPort) + len(clone.Info) + len(clone.NodeID) + len(clone.Interface) + len(clone.Protocol)
 	if pkt.VoIPData != nil {
 		voip := *pkt.VoIPData
+		// LI constructs its own authorized content from RawSIP. Presentation SMS
+		// metadata is unused here and must not retain content outside that budget.
+		voip.SMS = nil
 		voip.RawSIP = append([]byte(nil), voip.RawSIP...)
 		voip.Headers = make(map[string]string, len(voip.Headers))
 		for key, value := range pkt.VoIPData.Headers {

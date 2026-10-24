@@ -52,7 +52,7 @@ func TestHuntProtocolCLIContract(t *testing.T) {
 		{"http", "Run as HTTP hunter with content filtering", "lc hunt http --processor processor:55555", httpHuntCmd, map[string]string{"capture-body": "false", "host": "", "http-port": "80,8080,8000,3000,8888", "keywords": "", "max-body-size": "65536", "method": "", "path": "", "status": "", "tls-keylog": "", "tls-keylog-pipe": ""}},
 		{"tls", "Run as TLS hunter with fingerprint filtering", "lc hunt tls --processor processor:55555", tlsHuntCmd, map[string]string{"tls-port": "443"}},
 		{"email", "Run as Email hunter with SMTP/IMAP/POP3 filtering", "lc hunt email --processor processor:55555", emailHuntCmd, map[string]string{"capture-body": "false", "command": "", "imap-port": "143,993", "keywords": "", "mailbox": "", "max-body-size": "65536", "pop3-port": "110,995", "protocol": "all", "recipient": "", "sender": "", "smtp-port": "25,587,465", "subject": ""}},
-		{"voip", "Run as VoIP hunter with call buffering", "lc hunt voip --processor processor:55555", voipHuntCmd, map[string]string{"signalling-policy": "matched", "media-policy": "local", "pattern-algorithm": "auto", "pattern-buffer-mb": "64", "rtp-ebpf": "false", "rtp-ebpf-failure-policy": "open", "rtp-ebpf-mode": "enforce", "rtp-ebpf-shadow-sample-every": "1", "rtp-port-range": "", "sip-port": "", "tcp-max-streams": "0", "tcp-sip-idle-timeout": "0s", "udp-only": "false"}},
+		{"voip", "Run as VoIP hunter with call buffering", "lc hunt voip --processor processor:55555", voipHuntCmd, map[string]string{"signalling-policy": "matched", "media-policy": "local", "pattern-algorithm": "auto", "pattern-buffer-mb": "64", "rtp-ebpf": "false", "rtp-ebpf-failure-policy": "open", "rtp-ebpf-mode": "enforce", "rtp-ebpf-shadow-sample-every": "1", "rtp-port-range": "", "sip-port": "", "sms-keywords": "[]", "sms-keywords-file": "", "tcp-max-streams": "0", "tcp-sip-idle-timeout": "0s", "udp-only": "false"}},
 	}
 
 	rootFlags := flagDefaults(HuntCmd.PersistentFlags())
@@ -75,6 +75,7 @@ func TestHuntProtocolCLIContract(t *testing.T) {
 
 func TestHuntViperBindingContract(t *testing.T) {
 	bindings := map[string]*pflag.Flag{
+		"hunter.voip.sms.keywords": voipHuntCmd.Flags().Lookup("sms-keywords"), "hunter.voip.sms.keywords_file": voipHuntCmd.Flags().Lookup("sms-keywords-file"),
 		"hunter.voip.signalling_policy": voipHuntCmd.Flags().Lookup("signalling-policy"), "hunter.voip.media_policy": voipHuntCmd.Flags().Lookup("media-policy"),
 		"hunter.packets.delivery_profile": HuntCmd.PersistentFlags().Lookup("packet-delivery-profile"), "hunter.packets.ack_scope": HuntCmd.PersistentFlags().Lookup("packet-ack-scope"),
 		"hunter.processor_addr": HuntCmd.PersistentFlags().Lookup("processor"), "hunter.id": HuntCmd.PersistentFlags().Lookup("id"), "hunter.hunter_id": HuntCmd.PersistentFlags().Lookup("id"),
@@ -137,7 +138,7 @@ func TestHuntRenderedHelpSnapshots(t *testing.T) {
 		"http":  "bb9ad53d18462c3dc477882f22386e1691545e7e2f2f38fa85b3df3bb04e3c89",
 		"tls":   "a097ab648c4b123e53f6ede9753634948015da3e0c7bb1f918107a6205fd8d41",
 		"email": "af97a8462053fdac27b471c1c1accb8b09aa8d62f7b878cb24c581e0538b16ba",
-		"voip":  "94a03b317825431d94ea91e0bc965b2c17c5f0ed85d6dab08eb94cb988a9fccf",
+		"voip":  "03a15d4418e7b8f54650b77e2a14f9c66058f7b60927572a199ac4c7cabf1838",
 	}
 	commands := map[string]*cobra.Command{"hunt": HuntCmd, "dns": dnsHuntCmd, "http": httpHuntCmd, "tls": tlsHuntCmd, "email": emailHuntCmd, "voip": voipHuntCmd}
 	for name, cmd := range commands {

@@ -12,8 +12,12 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
+	"github.com/endorses/lippycat/internal/pkg/smsflow"
+	"github.com/endorses/lippycat/internal/pkg/voip/capturepolicy"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
@@ -90,6 +94,54 @@ func (hunterDialogCompletionPolicy) Completes(event sharedsip.Event) bool {
 }
 
 func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInput) pipeline.Result {
+	if s.capturePolicy == nil || s.capturePolicy.sms == nil || s.capturePolicy.policies.Signalling == SignallingNone ||
+		(input.Result.SMS == nil && input.Result.Method != "MESSAGE" && input.Result.CSeqMethod != "MESSAGE") {
+		return s.deliverSIP(ctx, input)
+	}
+	current := func() bool {
+		env := input.Result.Packet
+		if env == nil {
+			return false
+		}
+		if s.capturePolicy.sms.Enabled() && input.Result.SMS != nil && input.Result.Headers != nil {
+			if packet := env.Packet(); packet != nil && packet.TransportLayer() != nil &&
+				smsflow.HasTrailingPayload(packet.TransportLayer().LayerPayload(), len(input.Result.Body)) {
+				return false
+			}
+		}
+		if guarded, ok := s.forwarder.(PacketForwarderWithObservedCaptureBoundary); ok {
+			if !guarded.WithObservedCaptureBoundary(env.Source.CapturePolicyGeneration, func() bool { return true }) {
+				return false
+			}
+		}
+		if env.CurrentCaptureSelection != nil && !env.CurrentCaptureSelection() {
+			return false
+		}
+		if receipt, ok := input.Attachment.(remoteSignallingReceipt); ok && receipt.required {
+			if s.capturePolicy.remote == nil {
+				return false
+			}
+			association, valid := s.capturePolicy.remote.ResolveSignalling(receipt.event, captureadapter.ToPacketInfo(env).Packet, env.Source.InterfaceName)
+			return valid && receipt.proof.SameSelection(association)
+		}
+		return true
+	}
+	size := len(input.Result.Body)
+	if input.Result.Packet != nil {
+		size += len(input.Result.Packet.Data)
+	}
+	_, err := s.capturePolicy.sms.Process(smsflow.Entry{Result: input.Result, Size: size, Current: current, Deliver: func(result pipeline.SIPResult) error {
+		input.Result = result
+		out := s.deliverSIP(ctx, input)
+		return out.Err
+	}})
+	if err != nil {
+		return pipeline.Result{Outcome: pipeline.OutcomeRetryableFailure, Err: err}
+	}
+	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
+}
+
+func (s hunterForwardSink) deliverSIP(ctx context.Context, input sipflow.SinkInput) pipeline.Result {
 	if s.capturePolicy != nil && s.capturePolicy.policies.Signalling == SignallingNone {
 		return pipeline.Result{Outcome: pipeline.OutcomeFiltered}
 	}
@@ -124,11 +176,16 @@ func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInpu
 		ToUri: input.Result.ToURI, Method: input.Result.Method, CseqMethod: input.Result.CSeqMethod,
 		CseqNumber: input.Result.CSeqNumber, ViaBranch: input.Result.ViaBranch,
 		MediaPorts:   sharedsip.MediaPorts(input.Result.SDP),
+		Sms:          grpcadapter.ToProtoSMS(input.Result.SMS),
 		ResponseCode: uint32(input.Result.ResponseCode), PAssertedIdentity: input.Result.PAssertedIdentity,
 	}}
-	var selectionCurrent func() bool
+	selectionCurrent := env.CurrentCaptureSelection
 	if receipt, ok := input.Attachment.(remoteSignallingReceipt); ok && receipt.required {
+		baseCurrent := selectionCurrent
 		selectionCurrent = func() bool {
+			if baseCurrent != nil && !baseCurrent() {
+				return false
+			}
 			if s.capturePolicy == nil || s.capturePolicy.remote == nil {
 				return false
 			}
@@ -174,4 +231,35 @@ func envelopeForHunterPacket(info capture.PacketInfo) *pipeline.PacketEnvelope {
 		env.LinkType = layers.LinkTypeEthernet
 	}
 	return env
+}
+
+// freezeSMSSelection keeps content retention from borrowing a replacement
+// filter's authority. Legacy non-proof filters are re-evaluated on the original
+// packet; proof-aware matchers validate the original selected definitions.
+func freezeSMSSelection(env *pipeline.PacketEnvelope, filter ApplicationFilter, buffer *BufferManager, packet gopacket.Packet, callID string, direct bool, proof capturepolicy.FilterSelectionProof, all bool) {
+	proof = capturepolicy.MergeProofs(nil, proof)
+	var inherited func() bool
+	if !direct && buffer != nil {
+		inherited = buffer.SIPSelectionCheck(callID)
+	}
+	env.CurrentCaptureSelection = func() bool {
+		if all {
+			return true
+		}
+		if filter == nil {
+			if packet == nil || packet.TransportLayer() == nil {
+				return false
+			}
+			event, err := sharedsip.Parse(packet.TransportLayer().LayerPayload(), sharedsip.ParseOptions{})
+			return err == nil && containsUserInHeaders(event.Headers)
+		}
+		if direct {
+			if matcher, ok := filter.(capturepolicy.SelectionProofMatcher); ok {
+				valid, _ := matcher.CurrentSelection(proof)
+				return valid
+			}
+			return filter == nil || filter.MatchPacket(packet)
+		}
+		return inherited != nil && inherited()
+	}
 }

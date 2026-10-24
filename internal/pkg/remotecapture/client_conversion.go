@@ -6,6 +6,7 @@ package remotecapture
 // including packet parsing, call state conversion, and MOS calculation.
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sms"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -145,6 +148,9 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 			voipData.CallID = pkt.Metadata.Sip.CallId
 			voipData.Method = pkt.Metadata.Sip.Method
 			voipData.CSeqMethod = pkt.Metadata.Sip.CseqMethod
+			voipData.CSeqNumber = pkt.Metadata.Sip.CseqNumber
+			voipData.ViaBranch = pkt.Metadata.Sip.ViaBranch
+			voipData.SMS = remoteSMS(pkt, packet)
 			voipData.Status = int(pkt.Metadata.Sip.ResponseCode)
 			voipData.From = pkt.Metadata.Sip.FromUser
 			voipData.To = pkt.Metadata.Sip.ToUser
@@ -439,6 +445,10 @@ func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) (bec
 
 	c.callsMu.Lock()
 	defer c.callsMu.Unlock()
+	if c.smsClosed {
+		return false
+	}
+	c.expireSMSLocked(time.Unix(0, pkt.TimestampNs))
 
 	call, exists := c.calls[sip.CallId]
 	if !exists {
@@ -479,6 +489,33 @@ func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) (bec
 		if !contains(call.Hunters, hunterID) {
 			call.Hunters = append(call.Hunters, hunterID)
 		}
+	}
+
+	// Supplied decoded content takes precedence over compatibility parsing.
+	message := grpcadapter.FromProtoSMS(sip.Sms)
+	if message == nil {
+		message = remoteSMS(pkt, nil)
+	}
+	if message != nil {
+		from, to := sip.FromUri, sip.ToUri
+		if from == "" {
+			from = sip.FromUser
+		}
+		if to == "" {
+			to = sip.ToUser
+		}
+		scopeInterface := pkt.InterfaceName
+		if pkt.ObservationDomainKnown {
+			scopeInterface = ""
+		}
+		scope := fmt.Sprintf("%q/%q/%q/%t/%d/%q/%q", c.nodeID, hunterID, scopeInterface, pkt.ObservationDomainKnown, pkt.ObservationDomain, sharedsip.URI(from), sharedsip.URI(to))
+		message = c.smsAssembler.Add(scope, message, time.Unix(0, pkt.TimestampNs))
+
+		call.SMS = types.MergeSMSRecords(call.SMS, []types.SMSRecord{{TransactionID: types.SMSTransactionID(scope, sip.CallId, sip.CseqNumber, sip.ViaBranch, message), Message: message}})
+		for _, related := range c.calls {
+			related.SMS = types.UpdateSuppliedSMSAssembly(related.SMS, message)
+		}
+		c.pruneSMSContent()
 	}
 
 	// Update state based on SIP method and response code
@@ -707,6 +744,10 @@ func (c *Client) maybeNotifyCallUpdates(force bool) {
 	}
 
 	c.callsMu.Lock()
+	if c.smsClosed {
+		c.callsMu.Unlock()
+		return
+	}
 	c.lastCallUpdate = time.Now()
 
 	// Copy calls to slice for notification
@@ -718,7 +759,10 @@ func (c *Client) maybeNotifyCallUpdates(force bool) {
 		} else if !call.EndTime.IsZero() {
 			call.Duration = call.EndTime.Sub(call.StartTime)
 		}
-		calls = append(calls, *call)
+		owned := *call
+		owned.SMS = types.CloneSMSRecords(call.SMS)
+		owned.Hunters = append([]string(nil), call.Hunters...)
+		calls = append(calls, owned)
 	}
 	c.callsMu.Unlock()
 
@@ -733,4 +777,108 @@ func cloneMediaAdmissionStatus(status *management.MediaAdmissionStatus) *managem
 		return nil
 	}
 	return proto.Clone(status).(*management.MediaAdmissionStatus)
+}
+
+// remoteSMS only falls back to a complete raw SIP message. Older peers require
+// no remote TCP reassembler and missing bytes never become guessed text.
+func remoteSMS(packet *data.CapturedPacket, decoded gopacket.Packet) *sms.Message {
+	if packet.Metadata == nil || packet.Metadata.Sip == nil {
+		return nil
+	}
+	if supplied := grpcadapter.FromProtoSMS(packet.Metadata.Sip.Sms); supplied != nil {
+		return supplied
+	}
+	var raw []byte
+	if len(raw) == 0 {
+		if decoded == nil {
+			link := layers.LinkType(packet.LinkType)
+			if link == 0 {
+				link = layers.LinkTypeEthernet
+			}
+			decoded = gopacket.NewPacket(packet.Data, link, gopacket.Default)
+		}
+		if transport := decoded.TransportLayer(); transport != nil {
+			raw = transport.LayerPayload()
+		}
+	}
+	if !bytes.Contains(raw, []byte("\r\n\r\n")) && !bytes.Contains(raw, []byte("\n\n")) {
+		return nil
+	}
+	event, err := sharedsip.Parse(raw, sharedsip.ParseOptions{Timestamp: time.Unix(0, packet.TimestampNs)})
+	if err != nil || event.CallID != packet.Metadata.Sip.CallId || !sms.IsSMS(event.ContentType) {
+		return nil
+	}
+	if event.Headers["content-length"] == "" && strings.EqualFold(packet.Metadata.Transport, "tcp") {
+		return nil
+	}
+	message, decodeErr := sms.Decode(event.Body)
+	if decodeErr != nil && message == nil {
+		return &sms.Message{Status: sms.StatusMalformed, Encoding: sms.EncodingUnknown}
+	}
+	return message
+}
+
+// pruneSMSContent releases oldest SMS text while retaining ordinary call state.
+// callsMu is held by the caller.
+func (c *Client) pruneSMSContent() {
+	count, retained := 0, 0
+	for _, call := range c.calls {
+		if len(call.SMS) > 0 {
+			count++
+			retained += types.SMSRecordsBytes(call.SMS)
+		}
+	}
+	for count > types.SMSContentCallLimit || retained > types.SMSContentByteLimit {
+		var oldest *types.CallInfo
+		for _, call := range c.calls {
+			if len(call.SMS) > 0 && (oldest == nil || call.StartTime.Before(oldest.StartTime) || (call.StartTime.Equal(oldest.StartTime) && call.CallID < oldest.CallID)) {
+				oldest = call
+			}
+		}
+		if oldest == nil {
+			return
+		}
+		retained -= types.SMSRecordsBytes(oldest.SMS)
+		for _, record := range oldest.SMS {
+			if lost := c.smsAssembler.Forget(record.Message); lost != nil {
+				for _, related := range c.calls {
+					related.SMS = types.UpdateSMSAssembly(related.SMS, lost)
+				}
+			}
+		}
+		oldest.SMS = nil
+		count--
+	}
+}
+
+func (c *Client) expireSMSLocked(now time.Time) bool {
+	expired := c.smsAssembler.Expire(now)
+	for _, message := range expired {
+		for _, call := range c.calls {
+			call.SMS = types.UpdateSMSAssembly(call.SMS, message)
+		}
+	}
+	return len(expired) > 0
+}
+
+// runSMSExpiry enforces presentation assembly lifetime while a live remote
+// source is idle. Close cancels the worker and releases state without waiting
+// for an external handler callback (which may itself close the client).
+func (c *Client) runSMSExpiry() {
+	defer c.smsExpiryWG.Done()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case now := <-ticker.C:
+			c.callsMu.Lock()
+			changed := c.expireSMSLocked(now)
+			c.callsMu.Unlock()
+			if changed && c.ctx.Err() == nil {
+				c.maybeNotifyCallUpdates(true)
+			}
+		}
+	}
 }

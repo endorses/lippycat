@@ -108,6 +108,7 @@ func (m *Model) ensureCallAggregator() {
 
 	case components.CaptureModeOffline:
 		m.offlineCallAggregator = NewLocalCallAggregator(program, m.callTracker)
+		m.offlineCallAggregator.offline = true
 		m.offlineCallAggregator.Start()
 		if m.backgroundProcessor != nil {
 			m.backgroundProcessor.BeginGeneration()
@@ -306,6 +307,7 @@ func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
 
 		tuiCalls[i] = components.Call{
 			CallID:           call.CallID,
+			SMS:              types.CloneSMSRecords(call.SMS),
 			From:             call.From,
 			To:               call.To,
 			FromURI:          components.ExtractSIPURI(call.From), // Pre-parse for display

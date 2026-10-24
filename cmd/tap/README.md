@@ -1132,3 +1132,13 @@ interface and domain extension for compatible MDFs. It defaults to `false`.
 Processor delivery identity and sequencing remain stable across source changes;
 legacy journal bytes replay unchanged. See [central LI selection and the receiver
 contract](../../docs/DISTRIBUTED_MEDIA.md#li-central-task-selection).
+
+## SMS-over-IMS
+
+VoIP taps decode GSM7/UCS2 SMS and join multipart messages for call details.
+Optional `--sms-keywords "urgent,maintenance"` or `--sms-keywords-file keywords.txt`
+adds case-insensitive literal matching to existing capture selection. Empty
+keywords disable filtering and do not delay packet output. With filtering
+enabled, complete multipart text is matched across segment boundaries before
+eligible contributing packets are released. Configuration and resource limits
+live under `tap.voip.sms`; see [SMS-over-IMS](../../docs/SMS_OVER_IMS.md).

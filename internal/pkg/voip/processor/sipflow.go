@@ -9,6 +9,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
 )
@@ -110,6 +111,7 @@ func protobufMetadataFromResult(result pipeline.SIPResult, metadata *CallMetadat
 		CseqMethod: result.CSeqMethod, ResponseCode: uint32(result.ResponseCode),
 		CseqNumber: result.CSeqNumber, ViaBranch: result.ViaBranch,
 		MediaPorts:        sharedsip.MediaPorts(result.SDP),
+		Sms:               grpcadapter.ToProtoSMS(result.SMS),
 		PAssertedIdentity: result.PAssertedIdentity, VisitedNetworkId: metadata.VisitedNetworkID,
 	}}
 	if metadata.AccessType != "" {

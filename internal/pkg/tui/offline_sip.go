@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/offline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/reassembly"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/voip"
@@ -69,6 +70,7 @@ type offlineSIPStream struct {
 	closed             bool
 	packetID           [2]offline.PacketID
 	timestamp          [2]time.Time
+	source             [2]pipeline.SourceProvenance
 }
 
 func (s *offlineSIPStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection, _ reassembly.Sequence, start *bool, _ reassembly.AssemblerContext) bool {
@@ -79,6 +81,7 @@ func (s *offlineSIPStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir 
 	if len(tcp.Payload) > 0 {
 		s.packetID[i] = s.factory.CurrentID
 		s.timestamp[i] = ci.Timestamp
+		s.source[i] = offlineSIPSource(ci)
 	}
 	*start = true
 	return s.factory.err == nil
@@ -137,18 +140,18 @@ func (s *offlineSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reassem
 		s.data[i] = next
 		s.factory.buffered += take
 		data = data[take:]
-		origin := func(end int) (offline.PacketID, time.Time) {
+		origin := func(end int) (offline.PacketID, time.Time, pipeline.SourceProvenance) {
 			if ac != nil && !s.factory.Flushing {
 				ci := ac.GetCaptureInfo()
 				if id, ok := offlineSIPOrigin(ci); ok && id == s.factory.CurrentID {
-					return id, ci.Timestamp
+					return id, ci.Timestamp, offlineSIPSource(ci)
 				}
 			}
 			ci := sg.CaptureInfo(consumedSG + end - previous - 1)
 			if id, ok := offlineSIPOrigin(ci); ok {
-				return id, ci.Timestamp
+				return id, ci.Timestamp, offlineSIPSource(ci)
 			}
-			return s.packetID[i], s.timestamp[i]
+			return s.packetID[i], s.timestamp[i], s.source[i]
 		}
 		s.parse(i, origin)
 		consumedSG += take
@@ -157,7 +160,7 @@ func (s *offlineSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reassem
 		}
 	}
 }
-func (s *offlineSIPStream) parse(i int, origin func(int) (offline.PacketID, time.Time)) {
+func (s *offlineSIPStream) parse(i int, origin func(int) (offline.PacketID, time.Time, pipeline.SourceProvenance)) {
 	consumed := 0
 	for len(s.data[i]) > 0 {
 		b := s.data[i]
@@ -213,9 +216,9 @@ func (s *offlineSIPStream) parse(i int, origin func(int) (offline.PacketID, time
 			tf = tf.Reverse()
 		}
 		src, dst := net.JoinHostPort(nf.Src().String(), tf.Src().String()), net.JoinHostPort(nf.Dst().String(), tf.Dst().String())
-		packetID, ts := origin(consumed + total)
+		packetID, ts, source := origin(consumed + total)
 		event, err := sharedsip.Parse(b[:total], sharedsip.OptionsForEndpoints(ts, src, dst))
-		if err == nil && s.factory.handler.HandleParsedSIPMessage(b[:total], event, src, dst, nf, tf) {
+		if err == nil && s.factory.handler.HandleParsedSIPMessageFromSource(b[:total], event, src, dst, nf, tf, source) {
 			s.factory.LastEvent = &event
 			if s.factory.OnEvent != nil {
 				s.factory.err = s.factory.OnEvent(packetID, event)
@@ -234,8 +237,11 @@ func (s *offlineSIPStream) parse(i int, origin func(int) (offline.PacketID, time
 type offlineSIPAssemblerContext struct{ info gopacket.CaptureInfo }
 
 func (c offlineSIPAssemblerContext) GetCaptureInfo() gopacket.CaptureInfo { return c.info }
-func offlineSIPContext(info gopacket.CaptureInfo, id offline.PacketID) offlineSIPAssemblerContext {
+func offlineSIPContext(info gopacket.CaptureInfo, id offline.PacketID, source ...pipeline.SourceProvenance) offlineSIPAssemblerContext {
 	info.AncillaryData = []any{id}
+	if len(source) > 0 {
+		info.AncillaryData = append(info.AncillaryData, source[0])
+	}
 	return offlineSIPAssemblerContext{info}
 }
 func offlineSIPOrigin(info gopacket.CaptureInfo) (offline.PacketID, bool) {
@@ -245,4 +251,13 @@ func offlineSIPOrigin(info gopacket.CaptureInfo) (offline.PacketID, bool) {
 		}
 	}
 	return 0, false
+}
+
+func offlineSIPSource(info gopacket.CaptureInfo) pipeline.SourceProvenance {
+	for _, value := range info.AncillaryData {
+		if source, ok := value.(pipeline.SourceProvenance); ok {
+			return source
+		}
+	}
+	return pipeline.SourceProvenance{}
 }

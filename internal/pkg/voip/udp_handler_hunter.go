@@ -115,7 +115,12 @@ func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, buffer
 	return h
 }
 
-func (h *UDPPacketHandler) Close() { h.orchestrator.Close() }
+func (h *UDPPacketHandler) Close() {
+	h.orchestrator.Close()
+	if h.capturePolicy.sms != nil {
+		h.capturePolicy.sms.Close()
+	}
+}
 
 func (h *UDPPacketHandler) SIPStats() map[string]sipflow.SinkStats { return h.orchestrator.Stats() }
 
@@ -261,7 +266,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		return forwarded
 	}
 	directMatch, directFilterIDs, selectionProof := matchPacketWithSelectionProof(h.appFilter, packet)
-	envelope := envelopeForHunterPacket(pkt)
+	envelope := h.capturePolicy.envelope(pkt)
 	setHunterFilterProvenance(envelope, directFilterIDs, nil)
 	analysis := h.orchestrator.Analyze(sipflow.Message{
 		Payload: payload, Envelope: envelope, ParseOptions: opts,
@@ -277,6 +282,13 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		return false
 	}
 	result, callID := analysis.SIP, analysis.SIP.CallID
+	// Standalone MESSAGE transactions have no SDP or RTP to wait for. Their
+	// independent SMS output gate, rather than the INVITE buffer, owns retention.
+	if result.Method == "MESSAGE" || result.CSeqMethod == "MESSAGE" {
+		freezeSMSSelection(envelope, h.appFilter, h.bufferMgr, packet, callID, directMatch, selectionProof, false)
+		h.orchestrator.Dispatch(analysis)
+		return true
+	}
 	inheritedFilterIDs := h.bufferMgr.MatchedFilterIDs(callID)
 	setHunterFilterProvenance(envelope, directFilterIDs, inheritedFilterIDs)
 	if directMatch {

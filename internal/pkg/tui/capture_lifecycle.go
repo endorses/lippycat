@@ -191,6 +191,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				// Initialize offline call aggregator for VoIP analysis
 				m.callTracker = NewCallTracker()
 				m.offlineCallAggregator = NewLocalCallAggregator(program, m.callTracker)
+				m.offlineCallAggregator.offline = true
 				m.offlineCallAggregator.Start()
 
 				// Update background processor with the new call aggregator

@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/endorses/lippycat/internal/pkg/sms"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket/layers"
@@ -171,6 +172,7 @@ func cloneBackgroundPacket(packet types.PacketDisplay) types.PacketDisplay {
 		metadata := *packet.VoIPData
 		metadata.Headers = cloneStringMap(metadata.Headers)
 		metadata.RawSIP = append([]byte(nil), metadata.RawSIP...)
+		metadata.SMS = sms.Clone(metadata.SMS)
 		if metadata.AccessNetworkInfo != nil {
 			ani := *metadata.AccessNetworkInfo
 			ani.Parameters = cloneStringMap(ani.Parameters)

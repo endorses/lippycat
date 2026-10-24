@@ -9,16 +9,20 @@ import (
 	"sort"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/sms"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
-// Schema-v2 field order remains the prefix of schema-v2.4, independent of Go
+// Schema-v2 field order remains the prefix of schema-v2.5, independent of Go
 // declaration order. Packet observation-domain fields are appended to rows.
 // Field additions require an explicit schema-version decision. Integer
 // widths follow the declared fixed-width types; Go int is always signed 64-bit.
 // Strings and containers have uint32 lengths; containers, pointers and bools
 // use one-byte presence/value markers. Timestamps use int64 seconds + uint32 ns.
 var compactFieldNames = map[reflect.Type][]string{
+	reflect.TypeOf(sms.Message{}):             {"Text", "Status", "Encoding", "Direction", "RPType", "TPType", "Reference", "DCS", "PID", "From", "To", "Timestamp", "Concat", "Assembly", "Header"},
+	reflect.TypeOf(sms.Concatenation{}):       {"Reference", "ReferenceBits", "Total", "Part"},
+	reflect.TypeOf(sms.AssemblyInfo{}):        {"ID", "Status", "Text", "Received", "Missing"},
 	reflect.TypeOf(types.RADIUSMetadata{}):    {"Code", "CodeName", "Identifier", "MessageLength", "Association", "ObservationID", "RequestID", "Attributes"},
 	reflect.TypeOf(compactRow{}):              {"Argument", "Interface", "Sequence", "Locator", "Context", "PhysicalOrdinal", "OriginalCaptured", "OriginalWire", "OriginalLink", "Derived", "Captured", "Original", "Timestamp", "SrcIP", "DstIP", "SrcPort", "DstPort", "Protocol", "Info", "Node", "Device", "Transport", "Length", "LinkType", "Projection", "NodeRef", "DeviceRef", "ContextRef", "ObservationDomain", "ObservationDomainKnown"},
 	reflect.TypeOf(compactProjection{}):       {"Presence", "User", "From", "To", "CallID", "Method", "Codec", "FromTag", "ToTag", "IMSI", "IMEI", "Status", "IsRTP", "SequenceNum", "SSRC", "QueryName", "QueryType", "QueryResponseTimeMs", "AnswerPresent", "TTL", "SNI", "JA3", "Host", "Path", "HTTPMethod", "StatusCode", "ContentLength"},
@@ -26,7 +30,7 @@ var compactFieldNames = map[reflect.Type][]string{
 	reflect.TypeOf(compactOverrides{}):        {"Mask", "Metadata"},
 	reflect.TypeOf(Locator{}):                 {"BackingID", "Offset", "Length", "Digest"},
 	reflect.TypeOf(CaptureContext{}):          {"Format", "ByteOrder", "SectionID", "InterfaceID", "LinkType", "Snaplen", "TimestampResolutionBase", "TimestampResolutionExponent", "TimestampOffset", "TimestampMissing"},
-	reflect.TypeOf(types.VoIPMetadata{}):      {"CallID", "Method", "CSeqMethod", "Status", "From", "To", "FromTag", "ToTag", "User", "ContentType", "Body", "Headers", "RawSIP", "IMSI", "IMEI", "AccessNetworkInfo", "VisitedNetworkID", "IsRTP", "SSRC", "PayloadType", "SequenceNum", "SeqNumber", "Timestamp", "Codec", "MergeFromCallID", "CSeqNumber", "ViaBranch"},
+	reflect.TypeOf(types.VoIPMetadata{}):      {"CallID", "Method", "CSeqMethod", "Status", "From", "To", "FromTag", "ToTag", "User", "ContentType", "Body", "Headers", "RawSIP", "IMSI", "IMEI", "AccessNetworkInfo", "VisitedNetworkID", "IsRTP", "SSRC", "PayloadType", "SequenceNum", "SeqNumber", "Timestamp", "Codec", "MergeFromCallID", "CSeqNumber", "ViaBranch", "SMS"},
 	reflect.TypeOf(types.AccessNetworkInfo{}): {"AccessType", "BSSID", "CellID", "LocalIP", "Parameters"},
 	reflect.TypeOf(types.DNSMetadata{}):       {"TransactionID", "IsResponse", "Opcode", "ResponseCode", "Authoritative", "Truncated", "RecursionDesired", "RecursionAvailable", "AuthenticatedData", "CheckingDisabled", "QuestionCount", "AnswerCount", "AuthorityCount", "AdditionalCount", "QueryName", "QueryType", "QueryClass", "Answers", "QueryResponseTimeMs", "CorrelatedQuery", "TunnelingScore", "EntropyScore"},
 	reflect.TypeOf(types.DNSAnswer{}):         {"Name", "Type", "Class", "TTL", "Data"},

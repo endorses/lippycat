@@ -79,9 +79,9 @@ func TestObservationDomainStorageRoundTrip(t *testing.T) {
 					if compact {
 						require.EqualValues(t, 2, version.Version)
 						require.EqualValues(t, 2, version.Compact.SchemaMajor)
-						require.EqualValues(t, 4, version.Compact.SchemaMinor)
+						require.EqualValues(t, 5, version.Compact.SchemaMinor)
 					} else {
-						require.EqualValues(t, 5, version.Version)
+						require.EqualValues(t, 6, version.Version)
 					}
 				})
 			}
@@ -96,9 +96,9 @@ func TestCodecObservationDomainVersionRejection(t *testing.T) {
 	require.NoError(t, err)
 	_, err = writeStreamHeader(&stream, recordKindDetail)
 	require.NoError(t, err)
-	require.EqualValues(t, 5, binary.LittleEndian.Uint16(record.Bytes()[4:6]))
-	require.EqualValues(t, 5, binary.LittleEndian.Uint16(stream.Bytes()[8:10]))
-	for _, version := range []uint16{0, 1, 2, 3, 4, 6, 65535} {
+	require.EqualValues(t, 6, binary.LittleEndian.Uint16(record.Bytes()[4:6]))
+	require.EqualValues(t, 6, binary.LittleEndian.Uint16(stream.Bytes()[8:10]))
+	for _, version := range []uint16{0, 1, 2, 3, 4, 5, 7, 65535} {
 		t.Run(fmt.Sprintf("version-%d", version), func(t *testing.T) {
 			encoded := bytes.Clone(record.Bytes())
 			binary.LittleEndian.PutUint16(encoded[4:6], version)

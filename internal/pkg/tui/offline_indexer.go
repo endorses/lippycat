@@ -289,6 +289,7 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	}
 	agg := NewLocalCallAggregator(nil, session.Tracker)
 	agg.silent = true
+	agg.offline = true
 	if cfg.MaxCalls > 0 {
 		agg.aggregator = voip.NewCallAggregatorWithCapacity(cfg.MaxCalls)
 	}
@@ -427,7 +428,7 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 			}
 		}
 		if assembler != nil && info.Packet.NetworkLayer() != nil && info.Packet.Layer(layers.LayerTypeTCP) != nil {
-			if err := assembler.AssembleWithContext(env, offlineSIPContext(info.Packet.Metadata().CaptureInfo, sipFactory.CurrentID)); err != nil {
+			if err := assembler.AssembleWithContext(env, offlineSIPContext(info.Packet.Metadata().CaptureInfo, sipFactory.CurrentID, env.Source)); err != nil {
 				return err
 			}
 		}
@@ -604,7 +605,7 @@ func offlinePacketSupportsEventAnalysis(info capture.PacketInfo) bool {
 func applyOfflineSIPEvent(packet *types.PacketDisplay, event sharedsip.Event) {
 	packet.Protocol = "SIP"
 	packet.Info = event.StartLine
-	packet.VoIPData = &types.VoIPMetadata{CallID: event.CallID, Method: event.Method, Status: event.ResponseCode, From: event.From, To: event.To, FromTag: event.FromTag, ToTag: event.ToTag, User: event.FromUser, Headers: cloneStringMap(event.Headers)}
+	packet.VoIPData = &types.VoIPMetadata{CallID: event.CallID, CSeqMethod: event.CSeqMethod, CSeqNumber: event.CSeqNumber, ViaBranch: event.ViaBranch, ContentType: event.ContentType, SMS: decodeSMSBody(event.ContentType, event.Body), Method: event.Method, Status: event.ResponseCode, From: event.From, To: event.To, FromTag: event.FromTag, ToTag: event.ToTag, User: event.FromUser, Headers: cloneStringMap(event.Headers)}
 }
 
 // TCP replay enables datagram dissection for other protocols. Its automatically

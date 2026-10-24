@@ -3,6 +3,7 @@ package offline
 import (
 	"context"
 	"errors"
+	"github.com/endorses/lippycat/internal/pkg/sms"
 	"io"
 	"maps"
 	"reflect"
@@ -204,6 +205,7 @@ func cloneCompactDetail(d Detail, raw []byte) Detail {
 		m := *p.VoIPData
 		m.Headers = maps.Clone(m.Headers)
 		m.RawSIP = cloneCompactSlice(m.RawSIP)
+		m.SMS = sms.Clone(m.SMS)
 		if m.AccessNetworkInfo != nil {
 			a := *m.AccessNetworkInfo
 			a.Parameters = maps.Clone(a.Parameters)

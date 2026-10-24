@@ -346,6 +346,7 @@ func (m *Model) PrepareLocalCallAggregator() *LocalCallAggregator {
 	case components.CaptureModeOffline:
 		if m.offlineCallAggregator == nil {
 			m.offlineCallAggregator = NewLocalCallAggregator(nil, m.callTracker)
+			m.offlineCallAggregator.offline = true
 		}
 		return m.offlineCallAggregator
 	default:

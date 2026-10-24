@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
@@ -107,6 +108,9 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 					displays := make([]types.PacketDisplay, 0, len(batch.Packets))
 					callEnded := false
 					for _, pkt := range batch.Packets {
+						c.callsMu.Lock()
+						c.expireSMSLocked(time.Unix(0, pkt.TimestampNs))
+						c.callsMu.Unlock()
 						display := c.convertToPacketDisplay(pkt, batch.HunterId)
 						displays = append(displays, display)
 

@@ -110,9 +110,16 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 
 // HandleParsedSIPMessage consumes the stream framer's parsed event without
 // reparsing, then publishes the typed pipeline result through the TUI sink.
-func (h *TUISIPHandler) HandleParsedSIPMessage(sipMessage []byte, event sharedsip.Event, srcEndpoint, dstEndpoint string, _, _ gopacket.Flow) bool {
+func (h *TUISIPHandler) HandleParsedSIPMessage(sipMessage []byte, event sharedsip.Event, srcEndpoint, dstEndpoint string, nf, tf gopacket.Flow) bool {
+	return h.HandleParsedSIPMessageFromSource(sipMessage, event, srcEndpoint, dstEndpoint, nf, tf, pipeline.SourceProvenance{})
+}
+
+// HandleParsedSIPMessageFromSource carries the completed message's observation
+// domain and interface through reassembly to SMS correlation.
+func (h *TUISIPHandler) HandleParsedSIPMessageFromSource(sipMessage []byte, event sharedsip.Event, srcEndpoint, dstEndpoint string, _, _ gopacket.Flow, source pipeline.SourceProvenance) bool {
 	analysis := h.flow.Analyze(sipflow.Message{
 		Payload: sipMessage, Event: &event, ExpectedCallID: event.CallID,
+		Envelope:     &pipeline.PacketEnvelope{Source: source},
 		ParseOptions: sharedsip.OptionsForEndpoints(event.Timestamp, srcEndpoint, dstEndpoint),
 	})
 	if analysis.Stage.Outcome != pipeline.OutcomeAccepted {
@@ -177,12 +184,23 @@ func (h *TUISIPHandler) consumeSIPResult(result pipeline.SIPResult) {
 				DstPort:   dstPort,
 				Protocol:  "SIP",
 				VoIPData: &components.VoIPMetadata{
-					CallID: callID,
-					Method: method,
-					Status: responseCode,
-					From:   result.From,
-					To:     result.To,
+					CallID:      callID,
+					CSeqMethod:  result.CSeqMethod,
+					CSeqNumber:  result.CSeqNumber,
+					ViaBranch:   result.ViaBranch,
+					ContentType: result.ContentType,
+					SMS:         result.SMS,
+					Method:      method,
+					Status:      responseCode,
+					From:        result.From,
+					To:          result.To,
 				},
+			}
+			if result.Packet != nil {
+				pkt.Interface = result.Packet.Source.InterfaceName
+				pkt.NodeID = result.Packet.Source.NodeID
+				pkt.ObservationDomain = result.Packet.Source.ObservationDomain
+				pkt.ObservationDomainKnown = result.Packet.Source.ObservationDomainKnown
 			}
 			agg.ProcessPacket(pkt)
 		}

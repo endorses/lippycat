@@ -172,6 +172,10 @@ func newScopedHunterRouter(ctx context.Context, h voip.PacketForwarder, domains 
 		if scope.bridge != nil {
 			scope.processor.SetMediaAdmission(scope.bridge, child.representative)
 		}
+		if err := scope.processor.SetSMSConfig(child.config.SMS); err != nil {
+			return nil, errors.Join(err, router.Close())
+		}
+		scope.processor.SetSMSObservationDomain(uint32(domain))
 	}
 	return router, nil
 }
@@ -199,6 +203,7 @@ func runScopedVoIPHunter(ctx context.Context, h *hunter.Hunter, domains mediaadm
 	}
 	h.SetPacketProcessor(router)
 	for _, scope := range router.domains {
+		go scope.processor.RunSMS(ctx)
 		go func(scope *admissionHunterDomain) {
 			if err := scope.assembler.Run(ctx); err != nil {
 				logger.Error("Hunter SIP reassembly stopped", "error", err)

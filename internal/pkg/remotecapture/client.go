@@ -81,6 +81,9 @@ type Client struct {
 	interfaces   map[string][]string
 
 	// Call aggregation for VoIP monitoring
+	smsAssembler    types.SMSDisplayAssembler
+	smsClosed       bool
+	smsExpiryWG     sync.WaitGroup
 	callsMu         sync.RWMutex
 	calls           map[string]*types.CallInfo  // callID -> call state
 	rtpStats        map[string]*rtpQualityStats // callID -> RTP quality tracking
@@ -211,6 +214,8 @@ func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Cli
 
 	// Detect node type by checking if GetHunterStatus is available
 	client.detectNodeType()
+	client.smsExpiryWG.Add(1)
+	go client.runSMSExpiry()
 
 	return client, nil
 }
@@ -267,6 +272,11 @@ func (c *Client) GetTopology(ctx context.Context) (*management.ProcessorNode, er
 // Close closes the connection
 func (c *Client) Close() {
 	c.cancel()
+	c.callsMu.Lock()
+	c.smsClosed = true
+	c.smsAssembler.Close()
+	c.calls = make(map[string]*types.CallInfo)
+	c.callsMu.Unlock()
 	if c.conn != nil {
 		if err := c.conn.Close(); err != nil {
 			logger.Warn("Failed to close gRPC connection during shutdown", "error", err, "addr", c.addr)

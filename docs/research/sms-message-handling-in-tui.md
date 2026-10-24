@@ -1,6 +1,9 @@
 # SMS (SIP MESSAGE) Handling in the VoIP TUI
 
-Status: implemented (call-state fix) + design analysis (SMS-text display, not yet built)
+Status: implemented call-state handling, reusable SMS decoding, display,
+multipart joining, and optional keyword filtering. See
+[the implementation plan](../plans/sms-over-ims-decoding-and-filtering.md) and
+[operator documentation](../SMS_OVER_IMS.md).
 Date: 2026-07-01
 Context: SMS-over-IMS interception on `de.lyca` (tap mode), observed via `lc watch remote`.
 
@@ -28,15 +31,15 @@ so the duration freezes instead of climbing.
 
 The call-state machine exists in **three synchronized places** (the enums are
 bridged by string, not by ordinal — `call_aggregator.go` already carries an extra
-`CallStateEnding` the TUI enum lacks — so new states must be *appended*, never
+`CallStateEnding` the TUI enum lacks — so new states must be _appended_, never
 inserted):
 
-| File | Change |
-|------|--------|
+| File                                              | Change                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `internal/pkg/remotecapture/client_conversion.go` | `deriveSIPState`: added `case "MESSAGE"` → `State = "SMS"`, set `EndTime`. Added `"SMS"` to the terminal-state guard and to `isTerminalCallState` (so the trailing `2xx` can't reactivate it, and the terminal transition is flushed to the TUI immediately). Also handles the response-first case (`cseqMethod == "MESSAGE"` in the 2xx branch). This is the path that drives `lc watch remote`. |
-| `internal/pkg/voip/call_aggregator.go` | Appended `CallStateMessage` to the enum, `String()` → `"SMS"`, and mirrored the `MESSAGE` method + `cseqMethod` handling in `updateCallState` (keeps local `lc watch live` consistent). |
-| `internal/pkg/tui/components/callsview.go` | Appended `CallStateMessage` to the enum, `String()` → `"SMS"`, and a color case (violet, like a completed/ended transaction). Duration column already uses `c.Duration` for non-`Active`/`RTPOnly` states, so `SMS` does not climb. |
-| `internal/pkg/tui/model.go` | `mapCallState`: `"SMS"`/`"MESSAGE"` → `components.CallStateMessage` (string→enum bridge for the remote path). |
+| `internal/pkg/voip/call_aggregator.go`            | Appended `CallStateMessage` to the enum, `String()` → `"SMS"`, and mirrored the `MESSAGE` method + `cseqMethod` handling in `updateCallState` (keeps local `lc watch live` consistent).                                                                                                                                                                                                           |
+| `internal/pkg/tui/components/callsview.go`        | Appended `CallStateMessage` to the enum, `String()` → `"SMS"`, and a color case (violet, like a completed/ended transaction). Duration column already uses `c.Duration` for non-`Active`/`RTPOnly` states, so `SMS` does not climb.                                                                                                                                                               |
+| `internal/pkg/tui/model.go`                       | `mapCallState`: `"SMS"`/`"MESSAGE"` → `components.CallStateMessage` (string→enum bridge for the remote path).                                                                                                                                                                                                                                                                                     |
 
 Tests added in `internal/pkg/remotecapture/client_test.go`:
 `TestUpdateCallState_MessageIsSMSTransaction` (request-first, request then 200 does
@@ -51,7 +54,23 @@ TUI duration column returns `time.Since(StartTime)` only for `Active`/`RTP-only`
 states and `c.Duration` otherwise — so an `SMS` entry shows a frozen, tiny
 duration.
 
-## Feature analysis: showing the SMS text in the details pane (NOT yet built)
+## Implementation update (2026-10-24)
+
+The SMS library now decodes RP-DATA and GSM7/UCS2 TPDUs and assembles multipart
+messages independently of SIP Call-ID. Structured protobuf metadata carries
+segment and assembly results through hunters, taps, processors, and the TUI.
+Call details retain readable text and explicit incomplete/unsupported statuses.
+
+Keyword filtering is optional on `hunt voip` and `tap voip`; it matches complete
+joined text, including keywords split across segments. With no keywords,
+decoding/display remain available and assembly does not hold packet output.
+Configured filters narrow existing capture selection and never authorize new
+subscribers or media. Retained packets preserve their original selection proof.
+
+The analysis below records the July baseline and original alternatives. Its
+missing-decoder and missing-metadata constraints have since been addressed.
+
+## Historical feature analysis: showing the SMS text in the details pane
 
 The details renderer (`callsview.go:renderCallDetailsContent`, ~line 1197) is a
 plain `strings.Builder`; adding a `💬 Message` section is trivial **once the text
@@ -112,7 +131,7 @@ main cost but is a one-time, additive field.
 - `docs/research/hunt-tap-voip-filtering-issues.md` — SIP-over-TCP / ESP-NULL
   capture path.
 - Capture-gap note: in the `test_call_2026-07-01-10.pcap` multi-SMS test, the
-  *middle* SMS produced zero target-endpoint ESP frames in either the tcpdump or
+  _middle_ SMS produced zero target-endpoint ESP frames in either the tcpdump or
   lippycat's live capture (the port-5060 OPTIONS keepalives kept flowing, proving
   the capture was alive) — i.e. that specific drop was upstream of lippycat
   (mirror/IMS path), not a reassembly bug. Unrelated to the TUI display issue

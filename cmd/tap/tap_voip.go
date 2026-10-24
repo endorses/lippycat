@@ -23,6 +23,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
+	"github.com/endorses/lippycat/internal/pkg/smsconfig"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
@@ -134,6 +135,9 @@ Example:
 func init() {
 	TapCmd.AddCommand(voipTapCmd)
 	cmdutil.RegisterMediaAdmissionFlags(voipTapCmd, viper.GetViper(), "tap.voip.rtp_ebpf")
+	if err := smsconfig.RegisterFlags(voipTapCmd, viper.GetViper(), "tap.voip.sms"); err != nil {
+		panic(err)
+	}
 	voipTapCmd.Flags().String("signalling-policy", "matched", "SIP source policy: matched, all or none")
 	voipTapCmd.Flags().String("media-policy", "local", "Media selection authority: local or processor")
 	_ = viper.BindPFlag("tap.voip.signalling_policy", voipTapCmd.Flags().Lookup("signalling-policy"))
@@ -198,6 +202,10 @@ func init() {
 }
 
 func runVoIPTap(cmd *cobra.Command, args []string) error {
+	smsConfig, err := smsconfig.ReadConfig(viper.GetViper(), "tap.voip.sms")
+	if err != nil {
+		return err
+	}
 	policies, err := tapCapturePolicies()
 	if err != nil {
 		return err
@@ -613,6 +621,9 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer routing.Close()
+	if err := localSource.SetSMSConfig(smsConfig); err != nil {
+		return err
+	}
 	localSource.SetVoIPProcessor(routing.adapter)
 	localSource.SetSelectionPolicy(selectionPolicy)
 	runtime.processor.SetPacketSource(localSource)

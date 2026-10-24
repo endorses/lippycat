@@ -37,6 +37,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/endorses/lippycat/internal/pkg/radius"
+	"github.com/endorses/lippycat/internal/pkg/smsflow"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	"github.com/endorses/lippycat/internal/pkg/voip/capturepolicy"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
@@ -291,6 +292,12 @@ func credibleSIPMethod(method []byte) bool {
 // LocalSource captures packets from local network interfaces.
 // It implements the PacketSource interface for standalone capture mode.
 type LocalSource struct {
+	smsMu                           sync.Mutex
+	smsConfig                       smsflow.Config
+	smsFiltering                    bool
+	smsFlow                         *smsflow.Controller
+	smsGeneration                   atomic.Uint64
+	smsBoundaryTime                 atomic.Int64
 	learnedPolicySnapshot           func() ([]byte, error)
 	policyBatchMu                   sync.Mutex
 	currentBatchSignedCapturePolicy []byte
@@ -684,6 +691,7 @@ func (s *LocalSource) Start(ctx context.Context) (result error) {
 			pb.Close()
 		}
 		s.wg.Wait()
+		s.closeSMS()
 		s.radiusProcessor.Close()
 		close(s.batches)
 		s.boundaryMu.Unlock()
@@ -1045,8 +1053,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				}
 				continue
 			}
-			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
-			s.appendEnvelope(envelope, nil, injectedPkt.AfterProcess, nil)
+			s.appendEnvelope(envelope, nil, injectedPkt.AfterProcess, s.smsSelectionCheck(injectedPkt.PacketInfo, injectedPkt.CallLifetime))
 
 		case pktInfo, ok := <-input:
 			if !ok {
@@ -1269,10 +1276,10 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				}
 			}
 			// A packet is forwarded only after it can be admitted to a batch.
-			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
-			s.appendEnvelope(envelope, nil, nil, nil)
+			s.appendEnvelope(envelope, nil, nil, s.smsSelectionCheck(pktInfo, voipLifetime))
 
 		case <-ticker.C:
+			s.expireSMS(time.Now())
 			// Send batch on timeout
 			s.sendBatch()
 		}
@@ -1535,6 +1542,11 @@ func (s *LocalSource) setBPFFilter(filter string, policyBoundary bool) error {
 		}
 	}
 
+	// Discard pending SMS before admitting a replacement capture generation.
+	s.mu.Unlock()
+	s.closeSMS()
+	s.mu.Lock()
+
 	// Shutdown may have started while the previous capture generation drained.
 	// Preserve the requested configuration without adding a goroutine after
 	// Start has begun waiting on its WaitGroup.
@@ -1625,6 +1637,8 @@ func (s *LocalSource) ApplyPolicyBoundary(ctx context.Context, filter string, ap
 		return fmt.Errorf("drain local capture workers: %w", err)
 	}
 
+	s.closeSMS()
+
 	processed := make(chan struct{})
 	barrier := &PacketBatch{SourceID: s.SourceID(), AfterProcess: []func(){func() { close(processed) }}}
 	select {
@@ -1678,16 +1692,15 @@ func waitDone(ctx context.Context, done <-chan struct{}) error {
 // Stop gracefully stops the source.
 func (s *LocalSource) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.cancel != nil {
 		s.cancel()
 	}
-
-	// Stop DNS processor if set
-	if s.dnsProcessor != nil {
-		s.dnsProcessor.Stop()
+	dnsProcessor := s.dnsProcessor
+	s.mu.Unlock()
+	if dnsProcessor != nil {
+		dnsProcessor.Stop()
 	}
+	s.closeSMS()
 }
 
 // IsStarted returns whether the source has been started.

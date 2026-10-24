@@ -275,6 +275,7 @@ func SIPReasonPhrase(code uint32) string {
 
 // Call represents a tracked VoIP call
 type Call struct {
+	SMS              []types.SMSRecord
 	CallID           string
 	From             string
 	To               string
@@ -1324,6 +1325,8 @@ func (cv *CallsView) renderCallDetailsContent(selectedCall *Call, width int) str
 	if selectedCall.MOS > 0 {
 		content.WriteString(fmt.Sprintf("Quality (MOS): %.1f\n", selectedCall.MOS))
 	}
+
+	content.WriteString(renderSMSDetails(selectedCall, sectionHeaderStyle))
 
 	// SDP Endpoints section (for debugging RTP correlation)
 	content.WriteString("\n")

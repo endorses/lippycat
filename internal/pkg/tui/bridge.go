@@ -1573,6 +1573,7 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 	case "SIP":
 		// Convert metadata to VoIPData for compatibility
 		display.VoIPData = metadataToVoIPData(result.Metadata)
+		enrichDisplaySMSFromPacket(display, pkt)
 
 		// Feed SIP packet to offline tracker for RTP-to-CallID mapping
 		// Use media_ports and media_ip from detector metadata (parsed from SDP)

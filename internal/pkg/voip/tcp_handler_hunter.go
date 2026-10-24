@@ -150,7 +150,12 @@ func (h *HunterForwardHandler) SetSelectionPolicy(policy callregistry.SelectionP
 }
 
 // Close drains accepted SIP forwarding and stops the handler-owned sink.
-func (h *HunterForwardHandler) Close() { h.orchestrator.Close() }
+func (h *HunterForwardHandler) Close() {
+	h.orchestrator.Close()
+	if h.capturePolicy.sms != nil {
+		h.capturePolicy.sms.Close()
+	}
+}
 
 func (h *HunterForwardHandler) SIPStats() map[string]sipflow.SinkStats { return h.orchestrator.Stats() }
 
@@ -231,9 +236,9 @@ func (h *HunterForwardHandler) handleObservedSIPMessage(sipMessage []byte, event
 	if h.bufferMgr != nil {
 		inheritedFilterIDs = h.bufferMgr.MatchedFilterIDs(callID)
 	}
-	envelope := envelopeForHunterPacket(pkt)
+	envelope := h.capturePolicy.envelope(pkt)
 	setHunterFilterProvenance(envelope, directFilterIDs, inheritedFilterIDs)
-	analysis := h.orchestrator.Process(sipflow.Message{
+	analysis := h.orchestrator.Analyze(sipflow.Message{
 		Payload: sipMessage, Event: event, ExpectedCallID: callID, Envelope: envelope,
 		ParseOptions:     sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint),
 		FilterConfigured: true, DirectMatch: directMatch,
@@ -252,6 +257,10 @@ func (h *HunterForwardHandler) handleObservedSIPMessage(sipMessage []byte, event
 		h.bufferMgr.StoreMatchedSelection(callID, directFilterIDs, selectionProof)
 	}
 	result, method := analysis.SIP, analysis.SIP.Method
+	if method == "MESSAGE" || result.CSeqMethod == "MESSAGE" {
+		freezeSMSSelection(envelope, h.appFilter, h.bufferMgr, pkt.Packet, callID, directMatch, selectionProof, false)
+	}
+	h.orchestrator.Dispatch(analysis)
 	// Every selected TCP dialog needs an immutable registry lifetime, including
 	// delayed-offer messages without SDP and captures with kernel admission off.
 	if call := h.tracker.GetOrCreateCall(callID, pkt.LinkType); call != nil {

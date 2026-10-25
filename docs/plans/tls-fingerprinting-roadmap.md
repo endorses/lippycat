@@ -274,19 +274,26 @@ Add SSH KEXINIT fingerprints using the established HASSH/HASSHServer model.
 
 ### Tasks
 
-- [ ] Add SSH parser package or extend the SSH detector with a parser boundary.
-- [ ] Parse protocol banner and `SSH_MSG_KEXINIT`.
-- [ ] Extract kex, encryption, MAC, and compression algorithm lists.
-- [ ] Compute client HASSH and server HASSHServer.
-- [ ] Add SSH fingerprint metadata to `types` and `api/proto/data.proto`.
-- [ ] Add TUI/detail panel display.
-- [ ] Add tests with OpenSSH fixture payloads.
+- [x] Add SSH parser package or extend the SSH detector with a parser boundary.
+- [x] Parse protocol banner and `SSH_MSG_KEXINIT`.
+- [x] Extract kex, encryption, MAC, and compression algorithm lists.
+- [x] Compute client HASSH and server HASSHServer.
+- [x] Add typed SSH fingerprint metadata and negotiated transport in
+      `api/proto/events/v1/events.proto` (the current event contract).
+- [x] Add TUI/detail panel display.
+- [x] Add tests with published OpenSSH algorithm lists and generated controlled
+      client/server handshake fixtures.
 
 ### Acceptance Criteria
 
 - SSH banner detection remains unchanged.
 - HASSH is emitted only when a complete KEXINIT is observed.
 - Distributed mode carries SSH fingerprint metadata from hunter to processor/TUI.
+
+Delivered in [umbrella workstream 6A](operational-visibility-and-offline-investigation.md#workstream-6a-completion--2026-10-25).
+The current shared runtime and typed event contract replace this roadmap's older
+packet-message proposal. Packet-mode analysis stays at the processor; edge event
+mode transports the same observations without creating a second analyzer.
 
 ## Phase 6: QUIC Initial Fingerprinting Spike
 
@@ -416,7 +423,7 @@ support.
 ### Proto Tasks
 
 - [ ] Add TLS fingerprint metadata message to `api/proto/data.proto`.
-- [ ] Add SSH fingerprint metadata message when HASSH ships.
+- [x] Add SSH fingerprint metadata to the current typed event wire contract when HASSH ships.
 - [ ] Add QUIC metadata message when QUIC parser ships.
 - [ ] Regenerate code with the repo's proto generation command.
 - [ ] Preserve backward compatibility by using new optional fields only.
@@ -425,7 +432,7 @@ support.
 
 - [ ] Add TLS fingerprint rows to packet details.
 - [x] Add ECH counters to statistics.
-- [ ] Add SSH fingerprint rows.
+- [x] Add SSH fingerprint rows to local/remote/offline Events details.
 - [ ] Add coherence findings as compact reason-code rows.
 - [ ] Avoid widening packet-list columns unless the field is useful for scanning.
 

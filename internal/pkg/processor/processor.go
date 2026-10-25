@@ -559,6 +559,8 @@ func New(config Config) (_ *Processor, constructorErr error) {
 				err = p.logSink.Register(events.KindRADIUS, "radius", logrecords.RADIUS)
 			case "notice":
 				err = p.logSink.Register(events.KindNotice, "notice", logrecords.Notice)
+			case "ssh":
+				err = p.logSink.Register(events.KindSSH, "ssh", logrecords.SSH)
 			case "dns":
 				err = p.logSink.Register(events.KindDNS, "dns", logrecords.DNS)
 			case "smtp":
@@ -582,7 +584,7 @@ func New(config Config) (_ *Processor, constructorErr error) {
 		if coalesceErr != nil {
 			return nil, fmt.Errorf("initialize structured log event coalescer: %w", coalesceErr)
 		}
-		if err = p.eventDispatcher.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata, events.KindNotice); err != nil {
+		if err = p.eventDispatcher.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata, events.KindNotice, events.KindSSH); err != nil {
 			return nil, fmt.Errorf("register structured log event sink: %w", err)
 		}
 	}
@@ -810,6 +812,7 @@ func New(config Config) (_ *Processor, constructorErr error) {
 				OnEndpoint:             config.PrepareUpstream,
 				InventoryEnabled:       config.EventAnalysis.Inventory.Enabled,
 				DNSNoticesEnabled:      config.EventAnalysis.EffectiveDNS().DetectTunneling,
+				SSHEnabled:             config.EventAnalysis.EffectiveSSH().Enabled,
 				RequiredEventKinds:     requiredEventKinds,
 				Address:                "", // Endpoints is the normalized source of truth.
 				Endpoints:              append([]failover.Endpoint(nil), config.UpstreamProcessors...),

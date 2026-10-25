@@ -46,3 +46,7 @@
 #path	notice
 #fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	schema_version	detector	detector_version	category	severity	status	detector_node_id	detector_generation	domain	score	threshold	entropy	queries	unique_subdomains	source_ips	unique_subdomains_truncated	source_ips_truncated	evidence_node_ids	evidence_uids	evidence_timestamps	evidence_truncated	evidence_redacted	event_id	community_id	node_id	capture_scope	partial
 #types	time	string	addr	port	addr	port	enum	count	string	string	enum	enum	enum	string	string	string	double	double	double	count	count	vector[addr]	bool	bool	vector[string]	vector[string]	vector[time]	bool	bool	string	string	string	enum	bool
+[ssh.log]
+#path	ssh
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	role	role_evidence	status	reason	banner	banner_escaped	protocol_version	software_version	kex_algorithms	server_host_key_algorithms	encryption_client_server	encryption_server_client	mac_client_server	mac_server_client	compression_client_server	compression_server_client	languages_client_server	languages_server_client	first_kex_packet_follows	hassh	hassh_algorithms	hassh_version	event_id	community_id	node_id	capture_scope	partial
+#types	time	string	addr	port	addr	port	enum	enum	enum	enum	enum	string	bool	string	string	string	string	string	string	string	string	string	string	string	string	bool	string	string	string	string	string	string	enum	bool

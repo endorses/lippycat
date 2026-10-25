@@ -432,6 +432,10 @@ func safeEventProjector(includeSensitiveFields, includeFileMetadata bool) broadc
 			return event, true, nil
 		}
 		switch value := event.(type) {
+		case events.SSHEvent, *events.SSHEvent:
+			// Initial cleartext handshake offers contain no authentication or
+			// decrypted content; retain this ordinary protocol metadata.
+			return event, true, nil
 		case events.NoticeEvent:
 			return redactNoticeEvidence(value), true, nil
 		case *events.NoticeEvent:

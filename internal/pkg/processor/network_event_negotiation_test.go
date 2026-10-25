@@ -104,6 +104,9 @@ func TestInventoryPromiseAcrossThreeNodeRegistration(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			disabled := eventForwardingCapabilities(protoadapter.SupportedKindIDs(false)...)
+			// Inventory is disabled independently of the relay's default SSH
+			// production promise, which this otherwise current source satisfies.
+			disabled.StatefulAnalysisFeatures = append(disabled.StatefulAnalysisFeatures, protoadapter.SSHProductionFeature)
 			result, err := client.RegisterHunter(ctx, &management.HunterRegistration{HunterId: "old-source", EventForwarding: disabled})
 			if scenario == "optional" {
 				require.NoError(t, err)
@@ -133,7 +136,7 @@ func TestInventoryPromiseAcrossThreeNodeRegistration(t *testing.T) {
 				require.Equal(t, codes.FailedPrecondition, status.Code(err))
 			}
 			enabled := eventForwardingCapabilities(protoadapter.SupportedKindIDs(true)...)
-			enabled.StatefulAnalysisFeatures = append(enabled.StatefulAnalysisFeatures, protoadapter.InventoryProductionFeature)
+			enabled.StatefulAnalysisFeatures = append(enabled.StatefulAnalysisFeatures, protoadapter.InventoryProductionFeature, protoadapter.SSHProductionFeature)
 			result, err = client.RegisterHunter(ctx, &management.HunterRegistration{HunterId: "inventory-source", EventForwarding: enabled})
 			require.NoError(t, err)
 			require.Equal(t, management.ForwardingMode_FORWARDING_MODE_EVENTS, result.AcceptedForwardingMode)

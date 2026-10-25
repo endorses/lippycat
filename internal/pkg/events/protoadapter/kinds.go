@@ -11,6 +11,10 @@ import (
 const InventoryProductionFeature = "inventory_production"
 const DNSNoticeProductionFeature = "dns_notice_production"
 
+// SSHProductionFeature promises SSH observations for eligible input, including
+// an event relay's accepted children. Codec support alone makes no such promise.
+const SSHProductionFeature = "ssh_production"
+
 // This additive mapping is independent of the semantic profile. Support is not
 // a promise that a particular source has enabled inventory production.
 var kindMappings = []struct {
@@ -31,6 +35,7 @@ var kindMappings = []struct {
 	{events.KindKnownHost, eventsv1.EventKind_EVENT_KIND_KNOWN_HOST, "known_hosts", true},
 	{events.KindKnownService, eventsv1.EventKind_EVENT_KIND_KNOWN_SERVICE, "known_services", true},
 	{events.KindNotice, eventsv1.EventKind_EVENT_KIND_NOTICE, "notice", false},
+	{events.KindSSH, eventsv1.EventKind_EVENT_KIND_SSH, "ssh", false},
 }
 
 func WireKind(kind events.Kind) (eventsv1.EventKind, bool) {
@@ -118,4 +123,19 @@ func RequiredDNSNoticeKinds(required []eventsv1.EventKind, enabled bool) []event
 		}
 	}
 	return append(result, eventsv1.EventKind_EVENT_KIND_NOTICE)
+}
+
+// RequiredSSHKinds expands an explicit production-coverage promise. Ordinary
+// hunters can still negotiate an older receiver and report optional SSH loss.
+func RequiredSSHKinds(required []eventsv1.EventKind, enabled bool) []eventsv1.EventKind {
+	result := append([]eventsv1.EventKind(nil), required...)
+	if !enabled {
+		return result
+	}
+	for _, kind := range result {
+		if kind == eventsv1.EventKind_EVENT_KIND_SSH {
+			return result
+		}
+	}
+	return append(result, eventsv1.EventKind_EVENT_KIND_SSH)
 }

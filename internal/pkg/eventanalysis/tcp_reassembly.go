@@ -103,6 +103,7 @@ type applicationStream struct {
 	smtpContextSet    bool
 	partial           bool
 	protocolHint      string
+	framedProtocol    string
 	dnsFramingLost    bool
 	tlsHandshake      []byte
 	tlsRecordVersion  uint16
@@ -110,6 +111,13 @@ type applicationStream struct {
 	tlsContextSet     bool
 	httpCloseBody     *types.HTTPMetadata
 	httpCloseContext  reassemblyMark
+	ssh               *sshConnection
+	sshProbe          [2]sshIdentificationProbe
+	sshRejected       bool
+	sshRoleKnown      bool
+	sshRoleConflict   bool
+	sshClientHalf     int
+	sshRoleEvidence   events.SSHRoleEvidence
 }
 
 type reassemblyMark struct {
@@ -118,8 +126,9 @@ type reassemblyMark struct {
 	ci  gopacket.CaptureInfo
 }
 
-func (*applicationStream) Accept(_ *layers.TCP, _ gopacket.CaptureInfo, _ reassembly.TCPFlowDirection, _ reassembly.Sequence, start *bool, _ reassembly.AssemblerContext) bool {
+func (s *applicationStream) Accept(tcp *layers.TCP, _ gopacket.CaptureInfo, direction reassembly.TCPFlowDirection, _ reassembly.Sequence, start *bool, _ reassembly.AssemblerContext) bool {
 	*start = true
+	s.observeSSHRole(tcp, direction)
 	return true
 }
 
@@ -137,6 +146,9 @@ func (s *applicationStream) ReassembledSG(sg reassembly.ScatterGather, _ reassem
 	_, _, _, skip := sg.Info()
 	if skip != 0 {
 		s.partial = true
+	}
+	if s.reassembleSSH(sg, skip) {
+		return
 	}
 	if skip > 0 && s.isDNSStream(ctx.protocolHint) {
 		// A known byte gap destroys DNS frame alignment. Do not guess a new
@@ -181,6 +193,7 @@ func (s *applicationStream) appendBuffer(chunk []byte) {
 
 func (s *applicationStream) ReassemblyComplete(reassembly.AssemblerContext) bool {
 	delete(s.runtime.activeTCPFlows, s.flowKey)
+	s.closeSSH()
 	if s.httpCloseBody != nil {
 		metadata := s.httpCloseBody
 		metadata.BodyPreview = string(s.buffer)
@@ -201,6 +214,12 @@ func (s *applicationStream) ReassemblyComplete(reassembly.AssemblerContext) bool
 func (s *applicationStream) parse() {
 	if len(s.marks) != 0 && s.marks[len(s.marks)-1].ctx.protocolHint != "" {
 		s.protocolHint = s.marks[len(s.marks)-1].ctx.protocolHint
+	}
+	if s.framedProtocol == "http" {
+		// Packet-local hints can identify bytes inside a body. Positive HTTP
+		// framing retains ownership until its declared body is consumed.
+		s.parseHTTP()
+		return
 	}
 	srcPort, dstPort := flowPort(s.tcpFlow.Src()), flowPort(s.tcpFlow.Dst())
 	switch {
@@ -604,6 +623,13 @@ func (s *applicationStream) emitApplication(ctx reassemblyContext, ci gopacket.C
 		service = "TLS"
 	case metadata.Email != nil:
 		service = "SMTP"
+	}
+	if service == "HTTP" {
+		// The complete message has consumed its body. Release the pending
+		// HTTP boundary so a later protocol upgrade can be identified.
+		s.framedProtocol = ""
+	} else if service != "" {
+		s.framedProtocol = strings.ToLower(service)
 	}
 	analysisScope := s.runtime.associationScope(ctx.source, env)
 	eligible := s.runtime.cfg.Policy.Inventory.Enabled && !ci.Timestamp.Before(s.runtime.watermark) && ci.Timestamp.After(s.runtime.expiryWatermark.Add(-s.runtime.cfg.Connections.IdleTimeout))

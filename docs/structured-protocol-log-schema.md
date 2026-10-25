@@ -22,6 +22,7 @@ schema version.
 | `known_hosts`    | `known_hosts.log`    | Opt-in bounded, scoped host observations                             |
 | `known_services` | `known_services.log` | Opt-in bounded, scoped responder/service observations                |
 | `notice`         | `notice.log`         | Opt-in typed detector decisions with bounded references              |
+| `ssh`            | `ssh.log`            | Directional initial cleartext handshake observations and HASSH       |
 
 “Zeek-compatible” means the field has the same name, Zeek TSV type, and
 meaning. It does not promise that lippycat observes every value Zeek would.
@@ -73,13 +74,13 @@ Every event has this envelope:
 
 The typed event-kind set is `dns`, `smtp`, `tls`, `http`, `conn`,
 `file_metadata`, `file_content`, `radius`, `dhcp`, `ntp`, `known_host`, and
-`known_service`, and `notice`. Event kinds are stable lowercase wire labels; Go type names
+`known_service`, `notice`, and `ssh`. Event kinds are stable lowercase wire labels; Go type names
 and plural inventory stream names are not wire labels. `file_content` remains
 local-only and is never accepted on the protocol-event transport.
 
 ### Metadata versus content
 
-`DNSEvent`, `TLSEvent`, `ConnEvent`, `NoticeEvent`, and `FileMetadataEvent` are metadata-only.
+`DNSEvent`, `TLSEvent`, `SSHEvent`, `ConnEvent`, `NoticeEvent`, and `FileMetadataEvent` are metadata-only.
 `SMTPEvent` contains SMTP envelope/header metadata only: HELO, sender,
 recipients, routing headers, message identifiers, subject, replies, TLS state,
 and file IDs. `HTTPEvent` contains request/response metadata only: method, host,
@@ -425,3 +426,69 @@ overflow accounting, rotation and graceful drain apply as for existing streams.
 This file sink is independent of best-effort TUI subscriptions and asynchronous
 command actions. Neither stable event identity nor reliable ingress promises
 exactly-once file output or external side effects across crashes.
+
+## SSH observation stream (v1 additive extension)
+
+`ssh.log` records initial cleartext SSH observations, rather than Zeek SSH
+connection/authentication summaries. The stream is optional and leaves all
+existing field orders unchanged. A banner observation may be followed by a
+complete KEXINIT or terminal partial observation for the same direction. Each
+observation has a distinct `event_id`; `uid` and `community_id` identify the
+shared bidirectional flow. Endpoint columns preserve the emitting direction.
+Counts of log rows therefore count observations, not unique connections.
+
+The canonical columns after the standard endpoint/protocol prefix are `role`,
+`role_evidence`, `status`, `reason`, `banner`, `banner_escaped`, `protocol_version`,
+`software_version`, `kex_algorithms`, `server_host_key_algorithms`,
+`encryption_client_server`, `encryption_server_client`, `mac_client_server`,
+`mac_server_client`, `compression_client_server`, `compression_server_client`,
+`languages_client_server`, `languages_server_client`, `first_kex_packet_follows`,
+`hassh`, `hassh_algorithms`, `hassh_version`, and `event_id`, followed by
+`community_id`, `node_id`, `capture_scope`, and `partial`. The machine-readable
+registry and header fixture define their exact order and types.
+
+`role` is `client`, `server`, or `unknown` for the source endpoint. Independent
+`role_evidence` is `tcp_syn`, `tcp_synack`, `protocol`, `unknown`, or `conflict`.
+A captured SYN or SYNACK can establish the roles of both endpoints; evidence
+names the observed witness, not a claim that this endpoint sent that flag.
+Port 22, packet order, and a first-seen TCP direction do not establish a role.
+`status` is `banner`, `complete`, or `partial`. `complete` means a fully framed,
+valid initial KEXINIT was observed, even when role remains unknown. `reason`
+records completion or a bounded parser/stream stop such as `kex_complete`,
+`no_kex`, `missing_banner`, `incomplete`, `gap`, `malformed`, `resource_limit`,
+`unsupported_version`, `newkeys_before_kex`, or `disconnect`. Envelope `partial`
+independently reports incomplete capture visibility.
+
+Ordered comma-separated name-lists are retained exactly: they are never sorted,
+deduplicated, or stripped of extension markers. HASSH 1.0 computes MD5 over
+`kex;encryption;mac;compression`, selecting client-to-server lists for a client
+and server-to-client lists for a server, as defined by the maintained
+[Corelight HASSH implementation](https://github.com/corelight/hassh/blob/main/scripts/hassh.zeek).
+`hassh_algorithms` retains that exact semicolon-separated input and `hassh_version`
+is `1.0`. `server_host_key_algorithms`, language lists, and the follows flag are
+evidence but do not participate in this fingerprint. The fingerprint describes
+the offered algorithms; it is not an authenticated endpoint identity.
+
+Banners and partial observations have unset KEXINIT/fingerprint fields. A
+complete observation with unknown/conflicting role retains the complete lists
+but leaves all three HASSH fields unset. A complete empty language list is an
+empty string rather than unset. `banner` excludes CR/LF. If its original bytes
+contain invalid UTF-8 or control characters, `banner_escaped=true` and the field
+contains the complete Go `strconv.QuoteToASCII` representation, including its
+quotes, so the exact bytes can be recovered without unsafe terminal text.
+
+SSH 2.0 and the 1.99 compatibility identification are supported. Parsing is
+bounded to the initial cleartext identification and KEXINIT and stops at initial
+KEX completion or NEWKEYS. Encrypted rekey traffic, authentication identities,
+credentials, commands, decrypted content, and session-success inference are not
+part of these events. The same handshake metadata is available to ordinary and
+sensitive-authorized subscribers; requesting sensitive fields still requires
+its existing authorization. Transport kind 13 is additive. Required `ssh`
+streams require both that encoding and the `ssh_production` feature, which
+promises observation production for eligible input. Codec support alone does
+not satisfy that promise. An event relay advertising enabled SSH production
+enforces the same requirement on its event-producing children, even without a
+local `ssh` log. An explicitly permitted packet fallback is available only when
+the receiving processor has local SSH analysis enabled. Optional unsupported
+observations use compatibility-loss accounting. Relays preserve producer
+identity and do not reparse SSH events.

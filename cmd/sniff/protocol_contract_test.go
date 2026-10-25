@@ -24,11 +24,11 @@ type sniffProtocolContract struct {
 
 func TestSniffProtocolCLIContracts(t *testing.T) {
 	helpHashes := map[string]string{
-		"dns":   "0db5f4c6d7c46763765f136372fddb518fc99a46853ebedd25ffb95d35a4ce26",
-		"email": "1662af3537e1581cdf0b2650b4889b284e94f70b915a8e851b9cde4e5d039ffc",
-		"http":  "7e4509750e4a39e801e45a43cc3dc74767335211ddfb771455ac156b2867930c",
-		"tls":   "19ac05f90d2302e7279f5d760dbc981aed110524546306d195cf623b19bec60d",
-		"voip":  "44698fbfe8a4fb44c34c9a1fdc202b6b95b47cffc3d965d07fd53ef3b7b89c7f",
+		"dns":   "40402cecbb11891b8932a3a8b83457c473aa47605fab2a1c15c05c7c47352d0a",
+		"email": "07a390c08a92a431cdb442392d308a76909315763ae3f35d810ecee15a7dc7d6",
+		"http":  "1b6ff1663a623f3f739cb1861a5847bcc3f02550c9fbf59bb38a1ba35cf65f99",
+		"tls":   "804f43011dcc20750f43e77a8c12bfc08744b252d319932d4219bad023738d24",
+		"voip":  "44275168093446d65c51d3d6b349c41ac19b963ae34518eb887256cf9e823cf5",
 	}
 	contracts := map[string]sniffProtocolContract{
 		"dns": {

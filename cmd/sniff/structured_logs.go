@@ -163,7 +163,7 @@ func registerSniffLogSink(d *events.Dispatcher, dir string, queueSize int) (*log
 		kind  events.Kind
 		build logstream.Builder
 	}{
-		"notice": {events.KindNotice, logrecords.Notice}, "dhcp": {events.KindDHCP, logrecords.DHCP}, "ntp": {events.KindNTP, logrecords.NTP},
+		"ssh": {events.KindSSH, logrecords.SSH}, "notice": {events.KindNotice, logrecords.Notice}, "dhcp": {events.KindDHCP, logrecords.DHCP}, "ntp": {events.KindNTP, logrecords.NTP},
 		"known_hosts": {events.KindKnownHost, logrecords.KnownHosts}, "known_services": {events.KindKnownService, logrecords.KnownServices},
 		"radius": {events.KindRADIUS, logrecords.RADIUS}, "dns": {events.KindDNS, logrecords.DNS}, "ssl": {events.KindTLS, logrecords.SSL}, "http": {events.KindHTTP, logrecords.HTTP}, "smtp": {events.KindSMTP, logrecords.SMTP}, "conn": {events.KindConn, logrecords.Conn}, "files": {events.KindFileMetadata, logrecords.Files},
 	}
@@ -180,7 +180,7 @@ func registerSniffLogSink(d *events.Dispatcher, dir string, queueSize int) (*log
 	if err != nil {
 		return nil, err
 	}
-	if err := d.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata, events.KindNotice); err != nil {
+	if err := d.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata, events.KindNotice, events.KindSSH); err != nil {
 		return nil, err
 	}
 	return sink, nil

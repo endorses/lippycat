@@ -50,6 +50,7 @@ type Config struct {
 	// Filter capabilities advertised to processor
 	InventoryEnabled     bool
 	DNSNoticesEnabled    bool
+	SSHEnabled           bool
 	RADIUSIngress        bool     // Observation-aware capture and provenance transport are installed.
 	SupportedFilterTypes []string // If set, overrides VoIPMode-based defaults
 	// TLS settings
@@ -680,6 +681,9 @@ func (m *Manager) register() error {
 	}
 
 	features := []string{"tcp_reassembly", "connection_tracking", "file_metadata"}
+	if m.config.SSHEnabled {
+		features = append(features, protoadapter.SSHProductionFeature)
+	}
 	if m.config.DNSNoticesEnabled {
 		features = append(features, protoadapter.DNSNoticeProductionFeature)
 	}

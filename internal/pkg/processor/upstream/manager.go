@@ -45,6 +45,7 @@ type Config struct {
 	RequiredEventKinds     []eventsv1.EventKind
 	InventoryEnabled       bool
 	DNSNoticesEnabled      bool
+	SSHEnabled             bool
 }
 
 const defaultOutboundQueueSize = 256
@@ -497,6 +498,13 @@ func RequiredInventoryKinds(required []eventsv1.EventKind, inventoryEnabled bool
 
 func (m *Manager) eventAnalysisFeatures() []string {
 	features := []string{"relay"}
+	ssh := m.config.SSHEnabled
+	for _, kind := range m.config.RequiredEventKinds {
+		ssh = ssh || kind == eventsv1.EventKind_EVENT_KIND_SSH
+	}
+	if ssh {
+		features = append(features, protoadapter.SSHProductionFeature)
+	}
 	notices := m.config.DNSNoticesEnabled
 	for _, kind := range m.config.RequiredEventKinds {
 		notices = notices || kind == eventsv1.EventKind_EVENT_KIND_NOTICE

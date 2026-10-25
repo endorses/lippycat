@@ -22,6 +22,7 @@ enum EventKind {
   EVENT_KIND_KNOWN_HOST = 10;
   EVENT_KIND_KNOWN_SERVICE = 11;
   EVENT_KIND_NOTICE = 12;
+  EVENT_KIND_SSH = 13;
 }
 
 enum CaptureScope {
@@ -343,6 +344,32 @@ message NoticeEvent {
   bool evidence_redacted = 12;
 }
 
+// One observed initial cleartext SSH direction. Role refers to envelope flow source.
+message SSHEvent {
+  string role = 1;
+  string role_evidence = 2;
+  string status = 3;
+  string reason = 4;
+  string banner = 5;
+  bool banner_escaped = 6;
+  string protocol_version = 7;
+  string software_version = 8;
+  string kex_algorithms = 9;
+  string server_host_key_algorithms = 10;
+  string encryption_client_server = 11;
+  string encryption_server_client = 12;
+  string mac_client_server = 13;
+  string mac_server_client = 14;
+  string compression_client_server = 15;
+  string compression_server_client = 16;
+  string languages_client_server = 17;
+  string languages_server_client = 18;
+  bool first_kex_packet_follows = 19;
+  string hassh = 20;
+  string hassh_algorithms = 21;
+  string hassh_version = 22;
+}
+
 message ProtocolEvent {
   // event_id is an opaque, retry-stable representation of node ID, producer
   // session ID, and event sequence.
@@ -367,6 +394,7 @@ message ProtocolEvent {
     KnownHostEvent known_host = 19;
     KnownServiceEvent known_service = 20;
     NoticeEvent notice = 21;
+    SSHEvent ssh = 22;
   }
 }
 

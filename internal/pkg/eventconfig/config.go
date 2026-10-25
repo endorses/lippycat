@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const AnalysisRevision = "network-observations-v4"
+const AnalysisRevision = "network-observations-v5"
 
 type Inventory struct {
 	Enabled                        bool
@@ -27,6 +27,7 @@ type Inventory struct {
 }
 type Config struct {
 	DNS       *DNSPolicy
+	SSH       *SSHPolicy
 	DHCP      dhcp.Config
 	NTP       ntp.Config
 	Inventory Inventory
@@ -38,11 +39,16 @@ func Default() Config {
 func (c Config) Clone() Config {
 	d := c.EffectiveDNS()
 	c.DNS = &d
+	ssh := c.EffectiveSSH()
+	c.SSH = &ssh
 	c.Inventory.LocalCIDRs = append([]string(nil), c.Inventory.LocalCIDRs...)
 	return c
 }
 func (c Config) Validate() error {
 	if err := c.EffectiveDNS().Validate(); err != nil {
+		return err
+	}
+	if err := c.EffectiveSSH().Validate(); err != nil {
 		return err
 	}
 	if err := c.DHCP.Validate(); err != nil {
@@ -137,10 +143,18 @@ func FromViper(v *viper.Viper) *Config {
 	setInt("events.ntp.max_entries", &c.NTP.MaxEntries)
 	setBytes("events.ntp.max_bytes", &c.NTP.MaxBytes)
 	setDuration("events.ntp.timeout", &c.NTP.Timeout)
+	ssh := c.EffectiveSSH()
+	if v.IsSet("events.ssh.enabled") {
+		ssh.Enabled = v.GetBool("events.ssh.enabled")
+	}
+	setInt("events.ssh.max_flows", &ssh.MaxFlows)
+	setBytes("events.ssh.max_bytes", &ssh.MaxBytes)
+	c.SSH = &ssh
 	return &c
 }
 
 var bindings = map[string]string{
+	"ssh-analysis": "events.ssh.enabled", "ssh-analysis-max-flows": "events.ssh.max_flows", "ssh-analysis-max-bytes": "events.ssh.max_bytes",
 	"dns-notices": "events.dns.notices", "dns-notice-threshold": "events.dns.threshold", "dns-notice-debounce": "events.dns.debounce", "dns-analysis-ports": "events.dns.ports", "dns-notice-max-domains": "events.dns.max_domains", "dns-notice-max-subdomains": "events.dns.max_subdomains", "dns-notice-max-source-ips": "events.dns.max_source_ips", "dns-notice-retention": "events.dns.retention",
 	"inventory": "events.inventory.enabled", "inventory-local-cidrs": "events.inventory.local_cidrs",
 	"inventory-max-entries": "events.inventory.max_entries", "inventory-max-bytes": "events.inventory.max_bytes",
@@ -154,6 +168,10 @@ var bindings = map[string]string{
 func Register(flags *pflag.FlagSet) {
 	c := Default()
 	d := c.EffectiveDNS()
+	ssh := c.EffectiveSSH()
+	flags.Bool("ssh-analysis", ssh.Enabled, "Analyze visible initial SSH identification and KEXINIT")
+	flags.Int("ssh-analysis-max-flows", ssh.MaxFlows, "Maximum admitted SSH handshake flows across capture sources")
+	flags.Int64("ssh-analysis-max-bytes", ssh.MaxBytes, "Maximum reserved SSH handshake state bytes across capture sources")
 	flags.Bool("dns-notices", d.DetectTunneling, "Produce bounded DNS tunneling security notices independently of command hooks")
 	flags.Float64("dns-notice-threshold", d.Threshold, "DNS security notice score threshold (0..1)")
 	flags.Duration("dns-notice-debounce", d.Debounce, "Capture-time minimum interval between DNS notices per domain and scope")

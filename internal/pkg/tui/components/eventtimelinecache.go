@@ -87,7 +87,7 @@ func (v *EventsView) buildTimelineCache(width, height int, previous *eventTimeli
 		c.columns = eventTimelineColumnWidths(contentWidth)
 		c.header = lipgloss.NewStyle().Bold(true).Foreground(v.theme.HeaderBg).Reverse(true).Width(contentWidth).Render(eventTimelineHeader(contentWidth))
 		c.styles = make(map[events.Kind]lipgloss.Style)
-		for _, kind := range []events.Kind{events.KindTLS, events.KindHTTP, events.KindDNS, events.KindConn, events.KindNotice} {
+		for _, kind := range []events.Kind{events.KindSSH, events.KindTLS, events.KindHTTP, events.KindDNS, events.KindConn, events.KindNotice} {
 			c.styles[kind] = lipgloss.NewStyle().Foreground(v.eventColor(kind)).Width(contentWidth)
 		}
 		c.styles[""] = lipgloss.NewStyle().Foreground(v.theme.Foreground).Width(contentWidth)

@@ -110,6 +110,8 @@ func isNilEvent(event Event) bool {
 		return true
 	}
 	switch ev := event.(type) {
+	case *SSHEvent:
+		return ev == nil
 	case *NoticeEvent:
 		return ev == nil
 	case *DNSEvent:
@@ -248,6 +250,17 @@ func (p *Producer) Assign(event Event) Event {
 		return event
 	}
 	switch ev := event.(type) {
+	case SSHEvent:
+		ev = ev.Clone()
+		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
+		return ev
+	case *SSHEvent:
+		if ev == nil {
+			return ev
+		}
+		copy := ev.Clone()
+		copy.eventBase.EventEnvelope = p.envelope(copy.EventEnvelope)
+		return copy
 	case NoticeEvent:
 		ev = ev.Clone()
 		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
@@ -459,3 +472,5 @@ func (p *Producer) NewKnownServiceEvent(env Envelope) KnownServiceEvent {
 func (p *Producer) NewNoticeEvent(env Envelope) NoticeEvent {
 	return NewNoticeEvent(p.envelope(env))
 }
+
+func (p *Producer) NewSSHEvent(env Envelope) SSHEvent { return NewSSHEvent(p.envelope(env)) }

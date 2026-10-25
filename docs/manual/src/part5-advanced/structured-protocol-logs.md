@@ -177,6 +177,22 @@ fingerprints. Fingerprints are common lippycat extensions, not base Zeek fields.
 | `subject`, `issuer`, `client_subject`, `client_issuer`, `validation_status` | `string`, `string`, `string`, `string`, `string` |
 | `ja3`, `ja3s`, `ja4`, `community_id`, `node_id`                             | `string`, `string`, `string`, `string`, `string` |
 
+### `ssh.log` {#sshlog}
+
+Select `ssh` explicitly with `--log-streams conn,ssh`. Each observed endpoint can produce a `banner` snapshot followed by a `complete` KEXINIT or terminal `partial` snapshot; rows count observations, not unique connections. Fields retain `role`, `role_evidence`, `status`, `reason`, banner/version/software, the ten ordered algorithm lists, and `hassh`, `hassh_algorithms`, `hassh_version`. The server role identifies a HASSHServer value in the same hash column.
+
+Fingerprints require a complete initial cleartext KEXINIT and proven endpoint role. Client hashes use client-to-server encryption, MAC and compression lists; server hashes use the server-to-client lists. Unknown or conflicting roles retain complete algorithm evidence without a hash. Segmentation and retransmission use shared TCP reassembly on any recognized SSH port. Gaps, incomplete input, unsupported versions and resource limits remain explicit; encrypted rekeys, authentication and application content are not analyzed. Non-UTF-8 or control-bearing banners use a lossless quoted ASCII representation with `banner_escaped=true`.
+
+SSH analysis defaults to enabled. `--ssh-analysis`, `--ssh-analysis-max-flows` and `--ssh-analysis-max-bytes` map to `events.ssh.enabled`, `events.ssh.max_flows` and `events.ssh.max_bytes`; defaults are `true`, `1024` and `33554432`. Both limits bound admitted handshake state, independently of shared TCP and output queues. Shared connection idle expiry releases state. These cleartext handshake fields are ordinary protocol metadata; no credentials or decrypted content are included. Older peers must negotiate support, report optional-kind compatibility loss, or use configured packet fallback.
+
+SSH metadata appears in local and remote Events details and filters, including `hassh` and `role`. Offline Events retains the complete admitted metadata history after analysis revision 1 publishes; base revision 0 shows analysis pending. Live/remote Events retains its bounded history. Packet details do not gain an independent SSH metadata pipeline.
+
+<!-- i18n:skip -->
+
+```bash
+lc sniff -r ssh.pcap --log-dir ./logs --log-streams conn,ssh
+```
+
 ### `http.log` {#httplog}
 
 One HTTP transaction observation. `trans_depth` orders transactions on a

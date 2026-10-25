@@ -78,6 +78,11 @@ and terminal observations are intentional.
 See [Structured Protocol Logs](../../docs/STRUCTURED_LOGS.md) for schemas,
 rotation, extraction limits, completeness semantics, and privacy guidance.
 
+SSH initial-handshake metadata is available with `--log-streams conn,ssh` and
+in Events. Complete KEXINIT and proven endpoint roles produce HASSH/HASSHServer;
+partial observations retain an explicit reason without a fabricated hash. See
+[SSH observations](../../docs/SSH.md) for fields, bounds and shared policy flags.
+
 The default seven streams remain `conn,dns,ssl,http,smtp,files,radius`. Opt in to
 `dhcp,ntp,known_hosts,known_services` with `--log-streams`. DHCP/NTP preserve one
 record per accepted message. Inventory events are enabled by default for all

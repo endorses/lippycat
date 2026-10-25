@@ -1,7 +1,7 @@
 # Operational visibility and offline investigation implementation plan
 
 **Date:** 2026-10-25
-**Status:** In progress; workstreams 1–5 implemented and verified; workstream 6 pending
+**Status:** In progress; workstreams 1–5 and production SSH implemented and verified; QUIC study awaiting separate commit
 **Assessment baseline:** `8ba8ed27`
 **Scope:** Six ordered workstreams selected from the existing plans and research
 
@@ -350,28 +350,28 @@ query schemas, and local/offline/remote TUI projections.
 
 ### A. Production SSH metadata and fingerprints
 
-- [ ] Specify the supported initial cleartext SSH handshake, bounded framing,
+- [x] Specify the supported initial cleartext SSH handshake, bounded framing,
       endpoint roles, missing/partial observation behavior, and event completion
       semantics. Use the current authoritative HASSH/HASSHServer definitions and
       verify any new dependency's stable release and license before adoption.
-- [ ] Implement banner and complete initial KEXINIT parsing using shared bounded
+- [x] Implement banner and complete initial KEXINIT parsing using shared bounded
       TCP reassembly. Preserve algorithm ordering for fingerprint calculation,
       support segmentation/coalescing, and reject invalid lengths without
       unbounded allocation. Do not treat encrypted rekey traffic as cleartext.
-- [ ] Compute client HASSH and server HASSHServer only from complete eligible
+- [x] Compute client HASSH and server HASSHServer only from complete eligible
       messages, retaining the evidence needed to explain them. Preserve existing
       signature detection for banner-only and unsupported observations.
-- [ ] Add typed SSH production, additive negotiated transport, canonical query
+- [x] Add typed SSH production, additive negotiated transport, canonical query
       projection, and a documented `ssh.log` schema with TSV/JSONL output.
       Distinguish partial/banner observations from complete fingerprint evidence.
-- [ ] Add local/remote TUI event details and offline complete-history support.
+- [x] Add local/remote TUI event details and offline complete-history support.
       Extend packet metadata only where packet-mode consumers require it; avoid
       speculative unused messages or a separate analysis pipeline.
-- [ ] Validate independent client/server reference fingerprints with generated
+- [x] Validate independent client/server reference fingerprints with generated
       or redistributable controlled-client fixtures. Cover partial handshakes,
       malformed lists, tuple reuse, retransmission, expiry, mixed-version peers,
       producer parity, and actual transport/log/TUI integration.
-- [ ] Document supported fields and intentional limits, update applicable manual
+- [x] Document supported fields and intentional limits, update applicable manual
       translations, and release SSH independently of the QUIC decision.
 
 **SSH completion:** Supported initial handshakes produce reproducible fingerprints
@@ -424,15 +424,15 @@ decryption, application attribution, and coherence scoring require separate scop
       checklist mappings below as each release increment completes. Mark tasks
       complete only after the corresponding behavior and checks are verified.
 
-| Workstream                   | Implementation commits | Verification evidence                                                          | Disposition |
-| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------ | ----------- |
-| 1. Failover integration      | `9bd9b347`, `0e1c05d4` | Runtime, custody, topology, expiry, race and build checks below                | Complete    |
-| 2. ECH visibility            | `07945e59`             | Parser/runtime/wire/log/CLI/TUI race checks; manual and build matrix           | Complete    |
-| 3. DNS notices               | `2767d2bf`             | Canonical runtime/transport/log/action/UI race suites, manual and build matrix | Complete    |
-| 4. Offline event history     | `e966aefb`             | Complete storage/UI lifecycle race suites, build matrix and translated manual  | Complete    |
-| 5. Compact-index Milestone B | This increment         | Revision/pipeline/UI race checks, generated readiness report, build and manual | Complete    |
-| 6A. SSH/HASSH                | Pending                | Pending                                                                        | Not started |
-| 6B. QUIC study               | Pending                | Pending                                                                        | Not started |
+| Workstream                   | Implementation commits | Verification evidence                                                                          | Disposition |
+| ---------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------- | ----------- |
+| 1. Failover integration      | `9bd9b347`, `0e1c05d4` | Runtime, custody, topology, expiry, race and build checks below                                | Complete    |
+| 2. ECH visibility            | `07945e59`             | Parser/runtime/wire/log/CLI/TUI race checks; manual and build matrix                           | Complete    |
+| 3. DNS notices               | `2767d2bf`             | Canonical runtime/transport/log/action/UI race suites, manual and build matrix                 | Complete    |
+| 4. Offline event history     | `e966aefb`             | Complete storage/UI lifecycle race suites, build matrix and translated manual                  | Complete    |
+| 5. Compact-index Milestone B | `0856f6b6`             | Revision/pipeline/UI race checks, generated readiness report, build and manual                 | Complete    |
+| 6A. SSH/HASSH                | This increment         | Parser/runtime, negotiated transport/log, local/remote/offline Events, manual and build checks | Complete    |
+| 6B. QUIC study               | Pending                | Isolated v1 decrypt/reassembly spike and reproducible report under verification                | In progress |
 
 ## Deferred scope
 
@@ -775,3 +775,75 @@ reproducible observation, not acceptance thresholds. The private capture was
 unavailable. Original compact-plan Phase 5 is fulfilled; the selected Phase 6
 correctness/readiness work is recorded there without claiming the historical
 private/performance matrix or optional reuse was completed.
+
+### Workstream 6 implementation checkpoint — 2026-10-25
+
+Production integration starts from `0856f6b6`; only the separately owned SSH
+parser preparation was untracked at the W5 boundary. The shared runtime,
+additive SSH event/wire/query/log contracts, and local/remote/offline Events
+integration are being verified with real controlled client/server traffic.
+The isolated `experiments/quicinitial` code and decision report remain outside
+the SSH release and production capture paths. W6 tasks stay unchecked until
+each selected deliverable is verified and committed independently.
+
+### Workstream 6A completion — 2026-10-25
+
+Production SSH starts from `0856f6b6` and includes the isolated parser preparation
+recorded above. No dependency was added. Shared bounded TCP reassembly now emits
+owned per-direction banner and terminal observations on any port. Complete first
+KEXINITs preserve all ten ordered lists; independent SYN/SYNACK role evidence
+qualifies client HASSH or server HASSHServer. Missing/conflicting role evidence
+retains complete lists without a fabricated hash. Gaps, malformed frames, partial
+input, expiry, tuple replacement, NEWKEYS and admission rejection remain explicit.
+
+Additive typed SSH events, canonical queries and opt-in `ssh.log` TSV/JSONL share
+the existing runtime, transport and sink ownership. Required SSH production is
+negotiated across each relay/child boundary; optional unsupported kinds report
+compatibility loss. Packet fallback requires local SSH analysis. Transport retries
+retain identity without analysis. Local/remote Events and completed offline
+revision 1 carry the same evidence; live retention and pending base revision 0
+retain their existing meanings. No unused packet metadata pipeline was added.
+
+The single bounded closure campaign found one primary P2: SSH probing could take
+ownership of SSH-looking HTTP body bytes before HTTP analysis. Validated HTTP
+framing now retains body ownership. Its one integrated review found that this
+ownership outlived the completed message and suppressed a later CONNECT-to-TLS
+handshake. The single supplemental repair releases the HTTP boundary when its
+message emits. Permanent raw/transported coalesced/split body, custom-port/prelude,
+and CONNECT-to-TLS regressions pass, along with the complete runtime race suite.
+**CLOSED**, discovery 1/1, primary 1/1, integrated 1/1, supplemental 1/1, with no
+remaining material finding. The cookie documentation also now states accurately
+that cookies are neither hashed nor retained.
+
+Verification uses the shared task cache and previously authorized host execution:
+
+```sh
+go test -race ./internal/pkg/ssh -count=1
+go test -race -tags all ./internal/pkg/eventanalysis -count=1
+go test -race -tags all ./internal/pkg/eventconfig ./internal/pkg/events/... ./internal/pkg/eventquery ./internal/pkg/logschema ./internal/pkg/logstream/... ./internal/testutil/eventfixture -count=1
+go test -race -tags all ./internal/pkg/hunter ./internal/pkg/hunter/connection ./internal/pkg/processor ./internal/pkg/processor/upstream ./internal/pkg/remotecapture -count=1
+go test -race -tags all ./internal/pkg/tui ./internal/pkg/tui/components ./internal/pkg/tui/store -count=1
+go test -race -tags all ./cmd/sniff ./cmd/tap ./internal/pkg/hunter ./internal/pkg/processor ./internal/pkg/tui -run 'SSH|Ssh' -count=1
+make build-matrix
+make manual-check
+make manual
+```
+
+The prior full suites, byte-identical repository protobuf regeneration, dedicated
+`tui` partition, and final affected race checks passed. Evidence includes a real
+controlled `x/crypto/ssh` client/server exchange on a custom port through actual
+hunter transport/subscription/log, tap capture/log and sniff/log paths; published
+client and independently calculated OpenSSH-server reference hashes; malformed,
+partial, retry, expiry, isolation, mixed-version and globally bounded-state cases;
+and complete offline history beyond live retention. Supported non-CUDA and LI
+partitions compile and vet. CUDA-specific code is unchanged. All 47 manual helper
+tests passed, CA/DE catalogs have 5940/5940 current translations, and English,
+Catalan and German editions built with structural parity. The previously recorded
+mdBook helper/runtime warning remains nonblocking.
+
+The original TLS roadmap's Phase 5 and duplicate SSH wire/UI tasks are mapped to
+these delivered typed contracts. Its historical packet-message proposal is
+replaced by the current event wire path, as required by this umbrella's scope;
+full QUIC production, later corpus/coherence work and unrelated historical tasks
+remain separate. Experimental QUIC files and its report are excluded from this
+SSH release increment and will be committed afterward.

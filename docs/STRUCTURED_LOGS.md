@@ -149,3 +149,32 @@ and [schema contract](structured-protocol-log-schema.md#dns-security-notice-sche
 local-authority enablement, findings/suppression/loss, and command outcome and
 boundary accounting. Its log and dispatcher sink counters are shared totals
 across all streams; they do not attribute losses specifically to notices.
+
+## SSH handshake observations
+
+Select the optional `ssh` stream to write visible initial SSH handshake metadata:
+
+```bash
+lc sniff -r network.pcap --log-dir ./logs --log-streams ssh
+```
+
+Shared bounded TCP analysis recognizes supported SSH identification and KEXINIT
+on observed ports, including nonstandard ports. Banner observations and later
+complete/terminal observations are separate rows with the same flow UID, so row
+counts are not connection counts. Known endpoint roles permit HASSH 1.0 client
+or server fingerprints. Unknown roles and incomplete handshakes never acquire a
+fabricated fingerprint; exact ordered algorithm evidence remains available when
+complete. Banner-only, gap, malformed, expiry and other partial outcomes retain
+explicit status/reason information.
+
+The stream uses the existing queue limits, TSV/JSONL encoders, rotation and
+shutdown drain. Defaults remain the existing seven streams. Handshake metadata
+can be produced without file logging, and is ordinary subscriber metadata;
+credentials, authentication/session outcomes and encrypted rekey traffic are not
+captured. A required `ssh` stream needs SSH kind 13 and the source's
+`ssh_production` promise. An event relay with SSH enabled enforces that promise
+on each event-producing child; encoding support alone is insufficient. Explicit
+packet fallback requires enabled local SSH analysis. Optional unsupported
+observations report compatibility loss. See the
+[SSH schema contract](structured-protocol-log-schema.md#ssh-observation-stream-v1-additive-extension)
+for direction, exact fingerprint inputs, escaped banners and unset-field rules.

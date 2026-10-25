@@ -85,6 +85,8 @@ func canonicalRecord(event events.Event) (logstream.Record, bool) {
 		build = records.DHCP
 	case events.KindNTP:
 		build = records.NTP
+	case events.KindSSH:
+		build = records.SSH
 	case events.KindNotice:
 		build = records.Notice
 	case events.KindKnownHost:
@@ -147,6 +149,8 @@ func stringsToAny(v []string) []any {
 // Summary returns the same compact summary used by event timelines.
 func Summary(event events.Event) string {
 	switch e := event.(type) {
+	case events.SSHEvent:
+		return strings.TrimSpace(fmt.Sprintf("SSH %s %s %s %s", e.Role, e.Status, e.SoftwareVersion, e.HASSH))
 	case events.NoticeEvent:
 		if e.DNS != nil {
 			return fmt.Sprintf("%s %s %s score=%.3f threshold=%.3f queries=%d", e.Severity, e.Category, e.DNS.Domain, e.DNS.Score, e.DNS.Threshold, e.DNS.Queries)

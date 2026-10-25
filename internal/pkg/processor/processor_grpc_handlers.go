@@ -244,9 +244,11 @@ func negotiateEventForwarding(c *management.EventForwardingCapabilities, require
 	}
 	inventoryProduction := false
 	noticeProduction := false
+	sshProduction := false
 	for _, feature := range c.StatefulAnalysisFeatures {
 		inventoryProduction = inventoryProduction || feature == protoadapter.InventoryProductionFeature
 		noticeProduction = noticeProduction || feature == protoadapter.DNSNoticeProductionFeature
+		sshProduction = sshProduction || feature == protoadapter.SSHProductionFeature
 	}
 	for _, required := range requiredKinds {
 		found := false
@@ -260,6 +262,9 @@ func negotiateEventForwarding(c *management.EventForwardingCapabilities, require
 			found = false
 		}
 		if required == eventsv1.EventKind_EVENT_KIND_NOTICE && !noticeProduction {
+			found = false
+		}
+		if required == eventsv1.EventKind_EVENT_KIND_SSH && !sshProduction {
 			found = false
 		}
 		if !found {
@@ -311,8 +316,26 @@ func (p *Processor) negotiateEventForwarding(c *management.EventForwardingCapabi
 	// packet fallback remains viable only with enabled local inventory below.
 	if p.config.UpstreamAddr != "" && p.config.UpstreamForwardMode == "events" {
 		required = upstream.RequiredInventoryKinds(required, p.config.EventAnalysis != nil && p.config.EventAnalysis.Inventory.Enabled)
+		required = protoadapter.RequiredSSHKinds(required, p.config.EventAnalysis != nil && p.config.EventAnalysis.EffectiveSSH().Enabled)
 	}
 
+	// A required SSH stream or relay production promise must be supplied by
+	// producer evidence, or by raw input analyzed here. Disabling local SSH
+	// makes raw fallback unable to satisfy that coverage requirement.
+	if p.config.EventAnalysis == nil || !p.config.EventAnalysis.EffectiveSSH().Enabled {
+		for _, kind := range required {
+			if kind != eventsv1.EventKind_EVENT_KIND_SSH {
+				continue
+			}
+			if c == nil || c.RequestedMode != management.ForwardingMode_FORWARDING_MODE_EVENTS {
+				return 0, 0, nil, 0, "", errors.New("SSH log stream requires an SSH-producing event source or enabled local SSH policy")
+			}
+			if c.AllowPacketFallback {
+				c = proto.Clone(c).(*management.EventForwardingCapabilities)
+				c.AllowPacketFallback = false
+			}
+		}
+	}
 	if p.config.EventAnalysis == nil || !p.config.EventAnalysis.EffectiveDNS().DetectTunneling {
 		for _, kind := range required {
 			if kind != eventsv1.EventKind_EVENT_KIND_NOTICE {

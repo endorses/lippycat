@@ -85,7 +85,7 @@ packets and leaves canonical protocol analysis to the processor, preserving
 central PCAP writing, packet views, virtual-interface output, and any feature
 that needs payload bytes.
 
-`--forward-mode events` runs normalized DNS, TLS, HTTP, SMTP, RADIUS, DHCP, NTP,
+`--forward-mode events` runs normalized DNS, TLS, HTTP, SMTP, RADIUS, DHCP, NTP, SSH,
 file-metadata, and connection analysis at the hunter and sends metadata events only. No raw
 packet bytes or file content are carried by the event transport. This reduces
 upstream bandwidth and limits disclosure, but the processor cannot reconstruct
@@ -103,6 +103,10 @@ acknowledges processor queue admission and can lose admitted events if the
 processor crashes. Bound the spool with `--event-spool-max-bytes` and
 `--event-spool-max-age`; exhaustion defaults to `drop_oldest`, with exact loss
 ranges reported, or can use `drop_new`.
+
+SSH events retain initial banner/KEXINIT evidence and role-aware HASSH values.
+Unsupported optional peers report compatibility loss; required streams must
+negotiate or use configured packet fallback. See [SSH observations](../../docs/SSH.md).
 
 ### DHCP/NTP and inventory events
 

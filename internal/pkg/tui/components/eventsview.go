@@ -811,6 +811,13 @@ func (v *EventsView) renderEventDetailsContent(item EventItem, width int) string
 			protocolRows = append(protocolRows, eventDetailRow{humanizeEventField(field.Name), field.Value})
 		}
 	}
+	if ssh, ok := item.Event.(events.SSHEvent); ok && ssh.HASSH == "" {
+		reason := "complete KEXINIT and proven endpoint role required"
+		if ssh.Status == events.SSHStatusComplete {
+			reason = "endpoint role unavailable"
+		}
+		protocolRows = append(protocolRows, eventDetailRow{"Fingerprint", "Unavailable (" + reason + ")"})
+	}
 	writeSection(eventKindSectionTitle(item.Event.Kind()), protocolRows)
 
 	interfaceValue := env.Provenance.InterfaceName
@@ -876,6 +883,35 @@ func wrapEventValue(value string, width int) []string {
 }
 
 func humanizeEventField(name string) string {
+	switch name {
+	case "hassh":
+		return "HASSH"
+	case "hassh_algorithms":
+		return "HASSH Input"
+	case "hassh_version":
+		return "HASSH Version"
+	case "kex_algorithms":
+		return "KEX Algorithms"
+	case "server_host_key_algorithms":
+		return "Host Key Algos"
+	case "encryption_client_server":
+		return "Encryption C→S"
+	case "encryption_server_client":
+		return "Encryption S→C"
+	case "mac_client_server":
+		return "MAC C→S"
+	case "mac_server_client":
+		return "MAC S→C"
+	case "compression_client_server":
+		return "Compress C→S"
+	case "compression_server_client":
+		return "Compress S→C"
+	case "languages_client_server":
+		return "Languages C→S"
+	case "languages_server_client":
+		return "Languages S→C"
+	}
+
 	replacer := strings.NewReplacer("id.orig_h", "Source Address", "id.orig_p", "Source Port", "id.resp_h", "Destination Address", "id.resp_p", "Destination Port", "ja3s", "JA3S", "ja3", "JA3", "ja4", "JA4", "rtt", "RTT", "uid", "UID", "fuid", "FUID", "ttls", "TTLs", "qclass", "Query Class", "qtype", "Query Type", "rcode", "Response Code", "_", " ")
 	words := strings.Fields(replacer.Replace(name))
 	for i := range words {
@@ -886,6 +922,8 @@ func humanizeEventField(name string) string {
 
 func eventKindIcon(kind events.Kind) string {
 	switch kind {
+	case events.KindSSH:
+		return "🗝"
 	case events.KindTLS:
 		return "🔐"
 	case events.KindHTTP:
@@ -940,6 +978,8 @@ func (v *EventsView) eventColor(kind events.Kind) lipgloss.Color {
 	switch kind {
 	case events.KindNotice:
 		return v.theme.WarningColor
+	case events.KindSSH:
+		return v.theme.SSHColor
 	case events.KindTLS:
 		return v.theme.TLSColor
 	case events.KindHTTP:

@@ -136,31 +136,31 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 	contracts := map[string]tapProtocolContract{
 		"dns": {
 			cmd: dnsTapCmd, short: "Standalone DNS capture with full processor capabilities",
-			helpHash: "603375aae1654b8839661c722c1867bd74dac5d2242f4d8da031a95b4d3f6864",
+			helpHash: "864bb172afc53ed526fd3d5c1c9866d0865e627720ecd91b458db5adef71eebc",
 			flags:    tapFlagDefaults("detect-tunneling", "true", "dns-port", "53", "domain", "", "domains-file", "", "tunneling-command", "", "tunneling-debounce", "5m", "tunneling-threshold", "0.7", "udp-only", "false"),
 			bindings: tapBindings("detect-tunneling", "dns.detect_tunneling", "dns-port", "tap.dns.ports", "domain", "tap.dns.domain_pattern", "domains-file", "tap.dns.domains_file", "tunneling-command", "processor.tunneling_command", "tunneling-debounce", "processor.tunneling_debounce", "tunneling-threshold", "processor.tunneling_threshold", "udp-only", "tap.dns.udp_only"),
 		},
 		"http": {
 			cmd: httpTapCmd, short: "Standalone HTTP capture with full processor capabilities",
-			helpHash: "9ead3c7b7a94bf58bf7e58f2690b4e828733d5ec657f331200c99ba828d55cbc",
+			helpHash: "5b00b2b2fb12caf2af282ebc0c5e8204306444da065227bdd546c0a32a551640",
 			flags:    tapFlagDefaults("capture-body", "false", "content-type", "", "content-types-file", "", "host", "", "hosts-file", "", "http-port", "80,8080,8000,3000,8888", "keywords-file", "", "max-body-size", "65536", "method", "", "path", "", "paths-file", "", "status", "", "tls-keylog", "", "tls-keylog-pipe", "", "user-agent", "", "user-agents-file", ""),
 			bindings: tapBindings("capture-body", "tap.http.capture_body", "content-type", "tap.http.content_type_pattern", "content-types-file", "tap.http.content_types_file", "host", "tap.http.host_pattern", "hosts-file", "tap.http.hosts_file", "http-port", "tap.http.ports", "keywords-file", "tap.http.keywords_file", "max-body-size", "tap.http.max_body_size", "method", "tap.http.methods", "path", "tap.http.path_pattern", "paths-file", "tap.http.paths_file", "status", "tap.http.status_codes", "tls-keylog", "tap.http.tls_keylog", "tls-keylog-pipe", "tap.http.tls_keylog_pipe", "user-agent", "tap.http.user_agent_pattern", "user-agents-file", "tap.http.user_agents_file"),
 		},
 		"tls": {
 			cmd: tlsTapCmd, short: "Standalone TLS capture with full processor capabilities",
-			helpHash: "732b0f12343c69f1e2d1c22e070a6185c2a2acf111ae80e8caf4529451f6c5f2",
+			helpHash: "ed773d5916cdff26a81ef15011bdb1c05de73f4a1446f171b3b0bed9ddf957ea",
 			flags:    tapFlagDefaults("sni", "", "sni-file", "", "tls-port", "443"),
 			bindings: tapBindings("sni", "tap.tls.sni_pattern", "sni-file", "tap.tls.sni_file", "tls-port", "tap.tls.ports"),
 		},
 		"email": {
 			cmd: emailTapCmd, short: "Standalone email capture with full processor capabilities",
-			helpHash: "56c7d8472e3b2f654e85e18f872d3e664f5a1389e8606d9a961d68e2075b1a40",
+			helpHash: "c0b45a78df2f1c6d892d93a8c25124d7c0ed1aea957ccb406fd4baa253aaa99b",
 			flags:    tapFlagDefaults("address", "", "addresses-file", "", "capture-body", "false", "command", "", "imap-port", "143,993", "keywords-file", "", "mailbox", "", "max-body-size", "65536", "pop3-port", "110,995", "protocol", "all", "recipient", "", "recipients-file", "", "sender", "", "senders-file", "", "smtp-port", "25,587,465", "subject", "", "subjects-file", ""),
 			bindings: tapBindings("address", "tap.email.address_pattern", "addresses-file", "tap.email.addresses_file", "capture-body", "tap.email.capture_body", "command", "tap.email.command_pattern", "imap-port", "tap.email.imap_ports", "keywords-file", "tap.email.keywords_file", "mailbox", "tap.email.mailbox_pattern", "max-body-size", "tap.email.max_body_size", "pop3-port", "tap.email.pop3_ports", "protocol", "tap.email.protocol", "recipient", "tap.email.recipient_pattern", "recipients-file", "tap.email.recipients_file", "sender", "tap.email.sender_pattern", "senders-file", "tap.email.senders_file", "smtp-port", "tap.email.smtp_ports", "subject", "tap.email.subject_pattern", "subjects-file", "tap.email.subjects_file"),
 		},
 		"voip": {
 			cmd: voipTapCmd, short: "Standalone VoIP capture with full processor capabilities",
-			helpHash: "7895119ee15a8fa7508ce9e75358400b93c148222281eb6e21a67a95fa0d7c58",
+			helpHash: "86bd19d3ec66fb36ac0758d82cfe56b2020edf8eaa7413d812c2b08ac438dfea",
 			flags:    tapFlagDefaults("sms-keywords", "[]", "sms-keywords-file", "", "signalling-policy", "matched", "media-policy", "local", "rtp-ebpf", "false", "rtp-ebpf-mode", "enforce", "rtp-ebpf-failure-policy", "open", "rtp-ebpf-shadow-sample-every", "1", "pattern-algorithm", "auto", "pattern-buffer-mb", "64", "pcap-closed-call-ttl", "1h0m0s", "pcap-grace-period", "5s", "per-call-pcap", "false", "per-call-pcap-dir", "./pcaps", "per-call-pcap-max-idle", "10m0s", "per-call-pcap-max-writers", "0", "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "rtp-port-range", "", "sip-port", "", "sip-retry-window", "2m0s", "sip-user", "", "sipuser", "", "tcp-max-streams", "0", "tcp-performance-mode", "balanced", "tcp-reassembly-shards", "1", "tcp-sip-idle-timeout", "0s", "udp-only", "false"),
 			bindings: tapBindings("sms-keywords", "tap.voip.sms.keywords", "sms-keywords-file", "tap.voip.sms.keywords_file", "signalling-policy", "tap.voip.signalling_policy", "media-policy", "tap.voip.media_policy", "rtp-ebpf", "tap.voip.rtp_ebpf.enabled", "rtp-ebpf-mode", "tap.voip.rtp_ebpf.mode", "rtp-ebpf-failure-policy", "tap.voip.rtp_ebpf.failure_policy", "rtp-ebpf-shadow-sample-every", "tap.voip.rtp_ebpf.shadow_sample_every", "pattern-algorithm", "tap.voip.pattern_algorithm", "pattern-buffer-mb", "tap.voip.pattern_buffer_mb", "pcap-closed-call-ttl", "tap.per_call_pcap.closed_call_ttl", "pcap-grace-period", "tap.per_call_pcap.grace_period", "per-call-pcap", "tap.per_call_pcap.enabled", "per-call-pcap-dir", "tap.per_call_pcap.output_dir", "per-call-pcap-max-idle", "tap.per_call_pcap.max_idle", "per-call-pcap-max-writers", "tap.per_call_pcap.max_writers", "per-call-pcap-pattern", "tap.per_call_pcap.file_pattern", "rtp-port-range", "tap.voip.rtp_port_ranges", "sip-port", "tap.voip.sip_ports", "sip-retry-window", "tap.voip.sip_retry_window", "sip-user", "tap.voip.sip_user", "tcp-max-streams", "voip.max_streams", "tcp-performance-mode", "tap.voip.tcp_performance_mode", "tcp-reassembly-shards", "tap.voip.tcp_reassembly_shards", "tcp-sip-idle-timeout", "voip.tcp_sip_idle_timeout", "udp-only", "tap.voip.udp_only"),
 		},

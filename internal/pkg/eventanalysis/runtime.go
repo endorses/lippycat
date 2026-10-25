@@ -87,6 +87,7 @@ type Stats struct {
 	DHCP                                                          dhcp.Stats
 	NTP                                                           ntp.Stats
 	Inventory                                                     inventory.Stats
+	SSH                                                           SSHStats
 }
 
 type Runtime struct {
@@ -571,7 +572,7 @@ func applicationProtocolHint(meta *data.PacketMetadata) string {
 		return "smtp"
 	}
 	switch strings.ToLower(meta.Protocol) {
-	case "http", "tls", "smtp", "dns":
+	case "http", "tls", "smtp", "dns", "ssh":
 		return strings.ToLower(meta.Protocol)
 	default:
 		return ""

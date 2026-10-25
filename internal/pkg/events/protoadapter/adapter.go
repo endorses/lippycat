@@ -78,6 +78,14 @@ func DecodeEvent(in *eventsv1.ProtocolEvent) (DecodedEvent, error) {
 	}
 	var ev events.Event
 	switch payload := in.Payload.(type) {
+	case *eventsv1.ProtocolEvent_Ssh:
+		if payload == nil {
+			return DecodedEvent{}, errors.New("decode SSH: nil payload wrapper")
+		}
+		ev, err = decodeSSH(payload.Ssh, env)
+		if err != nil {
+			return DecodedEvent{}, err
+		}
 	case *eventsv1.ProtocolEvent_Notice:
 		if payload == nil {
 			return DecodedEvent{}, errors.New("decode notice: nil payload wrapper")
@@ -277,6 +285,8 @@ func ToProto(ev events.Event) (*eventsv1.ProtocolEvent, error) {
 	}
 	out := &eventsv1.ProtocolEvent{EventId: ev.Envelope().EventID, EventSequence: ev.Envelope().EventSequence, Envelope: env}
 	switch e := ev.(type) {
+	case events.SSHEvent:
+		out.Payload = &eventsv1.ProtocolEvent_Ssh{Ssh: encodeSSH(e)}
 	case events.NoticeEvent:
 		out.Payload = &eventsv1.ProtocolEvent_Notice{Notice: encodeNotice(e)}
 	case events.DHCPEvent, events.NTPEvent, events.KnownHostEvent, events.KnownServiceEvent:
@@ -473,6 +483,8 @@ func validateEventCollections(ev events.Event) error {
 	var values []string
 	collections := [][]string{}
 	switch e := ev.(type) {
+	case events.SSHEvent:
+		return validateSSH(e)
 	case events.NoticeEvent:
 		return validateNotice(e)
 	case events.DHCPEvent, events.NTPEvent, events.KnownHostEvent, events.KnownServiceEvent:
@@ -567,6 +579,11 @@ func validateEventCollections(ev events.Event) error {
 
 func eventValue(ev events.Event) (events.Event, error) {
 	switch e := ev.(type) {
+	case *events.SSHEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil SSH pointer")
+		}
+		return e.Clone(), nil
 	case *events.NoticeEvent:
 		if e == nil {
 			return nil, errors.New("event is a nil notice pointer")

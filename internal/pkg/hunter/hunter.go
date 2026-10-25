@@ -488,6 +488,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 			OpenMediaRules:     h.openMediaRules,
 			InventoryEnabled:   h.config.EventAnalysis.Inventory.Enabled,
 			DNSNoticesEnabled:  h.config.EventAnalysis.EffectiveDNS().DetectTunneling,
+			SSHEnabled:         h.config.EventAnalysis.EffectiveSSH().Enabled,
 			RequiredEventKinds: protoadapter.RequiredDNSNoticeKinds(nil, h.config.EventAnalysis.EffectiveDNS().DetectTunneling),
 			ProcessorAddr:      "", // Processors is the normalized source of truth.
 			Processors:         append([]failover.Endpoint(nil), h.config.Processors...),

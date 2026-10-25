@@ -40,6 +40,7 @@ const (
 	EventKind_EVENT_KIND_KNOWN_HOST    EventKind = 10
 	EventKind_EVENT_KIND_KNOWN_SERVICE EventKind = 11
 	EventKind_EVENT_KIND_NOTICE        EventKind = 12
+	EventKind_EVENT_KIND_SSH           EventKind = 13
 )
 
 // Enum value maps for EventKind.
@@ -58,6 +59,7 @@ var (
 		10: "EVENT_KIND_KNOWN_HOST",
 		11: "EVENT_KIND_KNOWN_SERVICE",
 		12: "EVENT_KIND_NOTICE",
+		13: "EVENT_KIND_SSH",
 	}
 	EventKind_value = map[string]int32{
 		"EVENT_KIND_UNSPECIFIED":   0,
@@ -73,6 +75,7 @@ var (
 		"EVENT_KIND_KNOWN_HOST":    10,
 		"EVENT_KIND_KNOWN_SERVICE": 11,
 		"EVENT_KIND_NOTICE":        12,
+		"EVENT_KIND_SSH":           13,
 	}
 )
 
@@ -2911,6 +2914,219 @@ func (x *NoticeEvent) GetEvidenceRedacted() bool {
 	return false
 }
 
+// One observed initial cleartext SSH direction. Role refers to envelope flow source.
+type SSHEvent struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	Role                    string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	RoleEvidence            string                 `protobuf:"bytes,2,opt,name=role_evidence,json=roleEvidence,proto3" json:"role_evidence,omitempty"`
+	Status                  string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	Reason                  string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	Banner                  string                 `protobuf:"bytes,5,opt,name=banner,proto3" json:"banner,omitempty"`
+	BannerEscaped           bool                   `protobuf:"varint,6,opt,name=banner_escaped,json=bannerEscaped,proto3" json:"banner_escaped,omitempty"`
+	ProtocolVersion         string                 `protobuf:"bytes,7,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	SoftwareVersion         string                 `protobuf:"bytes,8,opt,name=software_version,json=softwareVersion,proto3" json:"software_version,omitempty"`
+	KexAlgorithms           string                 `protobuf:"bytes,9,opt,name=kex_algorithms,json=kexAlgorithms,proto3" json:"kex_algorithms,omitempty"`
+	ServerHostKeyAlgorithms string                 `protobuf:"bytes,10,opt,name=server_host_key_algorithms,json=serverHostKeyAlgorithms,proto3" json:"server_host_key_algorithms,omitempty"`
+	EncryptionClientServer  string                 `protobuf:"bytes,11,opt,name=encryption_client_server,json=encryptionClientServer,proto3" json:"encryption_client_server,omitempty"`
+	EncryptionServerClient  string                 `protobuf:"bytes,12,opt,name=encryption_server_client,json=encryptionServerClient,proto3" json:"encryption_server_client,omitempty"`
+	MacClientServer         string                 `protobuf:"bytes,13,opt,name=mac_client_server,json=macClientServer,proto3" json:"mac_client_server,omitempty"`
+	MacServerClient         string                 `protobuf:"bytes,14,opt,name=mac_server_client,json=macServerClient,proto3" json:"mac_server_client,omitempty"`
+	CompressionClientServer string                 `protobuf:"bytes,15,opt,name=compression_client_server,json=compressionClientServer,proto3" json:"compression_client_server,omitempty"`
+	CompressionServerClient string                 `protobuf:"bytes,16,opt,name=compression_server_client,json=compressionServerClient,proto3" json:"compression_server_client,omitempty"`
+	LanguagesClientServer   string                 `protobuf:"bytes,17,opt,name=languages_client_server,json=languagesClientServer,proto3" json:"languages_client_server,omitempty"`
+	LanguagesServerClient   string                 `protobuf:"bytes,18,opt,name=languages_server_client,json=languagesServerClient,proto3" json:"languages_server_client,omitempty"`
+	FirstKexPacketFollows   bool                   `protobuf:"varint,19,opt,name=first_kex_packet_follows,json=firstKexPacketFollows,proto3" json:"first_kex_packet_follows,omitempty"`
+	Hassh                   string                 `protobuf:"bytes,20,opt,name=hassh,proto3" json:"hassh,omitempty"`
+	HasshAlgorithms         string                 `protobuf:"bytes,21,opt,name=hassh_algorithms,json=hasshAlgorithms,proto3" json:"hassh_algorithms,omitempty"`
+	HasshVersion            string                 `protobuf:"bytes,22,opt,name=hassh_version,json=hasshVersion,proto3" json:"hassh_version,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *SSHEvent) Reset() {
+	*x = SSHEvent{}
+	mi := &file_events_v1_events_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SSHEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SSHEvent) ProtoMessage() {}
+
+func (x *SSHEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_events_v1_events_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SSHEvent.ProtoReflect.Descriptor instead.
+func (*SSHEvent) Descriptor() ([]byte, []int) {
+	return file_events_v1_events_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *SSHEvent) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetRoleEvidence() string {
+	if x != nil {
+		return x.RoleEvidence
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetBanner() string {
+	if x != nil {
+		return x.Banner
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetBannerEscaped() bool {
+	if x != nil {
+		return x.BannerEscaped
+	}
+	return false
+}
+
+func (x *SSHEvent) GetProtocolVersion() string {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetSoftwareVersion() string {
+	if x != nil {
+		return x.SoftwareVersion
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetKexAlgorithms() string {
+	if x != nil {
+		return x.KexAlgorithms
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetServerHostKeyAlgorithms() string {
+	if x != nil {
+		return x.ServerHostKeyAlgorithms
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetEncryptionClientServer() string {
+	if x != nil {
+		return x.EncryptionClientServer
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetEncryptionServerClient() string {
+	if x != nil {
+		return x.EncryptionServerClient
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetMacClientServer() string {
+	if x != nil {
+		return x.MacClientServer
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetMacServerClient() string {
+	if x != nil {
+		return x.MacServerClient
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetCompressionClientServer() string {
+	if x != nil {
+		return x.CompressionClientServer
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetCompressionServerClient() string {
+	if x != nil {
+		return x.CompressionServerClient
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetLanguagesClientServer() string {
+	if x != nil {
+		return x.LanguagesClientServer
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetLanguagesServerClient() string {
+	if x != nil {
+		return x.LanguagesServerClient
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetFirstKexPacketFollows() bool {
+	if x != nil {
+		return x.FirstKexPacketFollows
+	}
+	return false
+}
+
+func (x *SSHEvent) GetHassh() string {
+	if x != nil {
+		return x.Hassh
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetHasshAlgorithms() string {
+	if x != nil {
+		return x.HasshAlgorithms
+	}
+	return ""
+}
+
+func (x *SSHEvent) GetHasshVersion() string {
+	if x != nil {
+		return x.HasshVersion
+	}
+	return ""
+}
+
 type ProtocolEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// event_id is an opaque, retry-stable representation of node ID, producer
@@ -2932,6 +3148,7 @@ type ProtocolEvent struct {
 	//	*ProtocolEvent_KnownHost
 	//	*ProtocolEvent_KnownService
 	//	*ProtocolEvent_Notice
+	//	*ProtocolEvent_Ssh
 	Payload       isProtocolEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2939,7 +3156,7 @@ type ProtocolEvent struct {
 
 func (x *ProtocolEvent) Reset() {
 	*x = ProtocolEvent{}
-	mi := &file_events_v1_events_proto_msgTypes[19]
+	mi := &file_events_v1_events_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2951,7 +3168,7 @@ func (x *ProtocolEvent) String() string {
 func (*ProtocolEvent) ProtoMessage() {}
 
 func (x *ProtocolEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[19]
+	mi := &file_events_v1_events_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2964,7 +3181,7 @@ func (x *ProtocolEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolEvent.ProtoReflect.Descriptor instead.
 func (*ProtocolEvent) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{19}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ProtocolEvent) GetEventId() string {
@@ -3103,6 +3320,15 @@ func (x *ProtocolEvent) GetNotice() *NoticeEvent {
 	return nil
 }
 
+func (x *ProtocolEvent) GetSsh() *SSHEvent {
+	if x != nil {
+		if x, ok := x.Payload.(*ProtocolEvent_Ssh); ok {
+			return x.Ssh
+		}
+	}
+	return nil
+}
+
 type isProtocolEvent_Payload interface {
 	isProtocolEvent_Payload()
 }
@@ -3155,6 +3381,10 @@ type ProtocolEvent_Notice struct {
 	Notice *NoticeEvent `protobuf:"bytes,21,opt,name=notice,proto3,oneof"`
 }
 
+type ProtocolEvent_Ssh struct {
+	Ssh *SSHEvent `protobuf:"bytes,22,opt,name=ssh,proto3,oneof"`
+}
+
 func (*ProtocolEvent_Conn) isProtocolEvent_Payload() {}
 
 func (*ProtocolEvent_Dns) isProtocolEvent_Payload() {}
@@ -3179,6 +3409,8 @@ func (*ProtocolEvent_KnownService) isProtocolEvent_Payload() {}
 
 func (*ProtocolEvent_Notice) isProtocolEvent_Payload() {}
 
+func (*ProtocolEvent_Ssh) isProtocolEvent_Payload() {}
+
 type SequenceRange struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	First         uint64                 `protobuf:"varint,1,opt,name=first,proto3" json:"first,omitempty"`
@@ -3189,7 +3421,7 @@ type SequenceRange struct {
 
 func (x *SequenceRange) Reset() {
 	*x = SequenceRange{}
-	mi := &file_events_v1_events_proto_msgTypes[20]
+	mi := &file_events_v1_events_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3201,7 +3433,7 @@ func (x *SequenceRange) String() string {
 func (*SequenceRange) ProtoMessage() {}
 
 func (x *SequenceRange) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[20]
+	mi := &file_events_v1_events_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3214,7 +3446,7 @@ func (x *SequenceRange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SequenceRange.ProtoReflect.Descriptor instead.
 func (*SequenceRange) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{20}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SequenceRange) GetFirst() uint64 {
@@ -3245,7 +3477,7 @@ type EventLoss struct {
 
 func (x *EventLoss) Reset() {
 	*x = EventLoss{}
-	mi := &file_events_v1_events_proto_msgTypes[21]
+	mi := &file_events_v1_events_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3257,7 +3489,7 @@ func (x *EventLoss) String() string {
 func (*EventLoss) ProtoMessage() {}
 
 func (x *EventLoss) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[21]
+	mi := &file_events_v1_events_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3270,7 +3502,7 @@ func (x *EventLoss) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventLoss.ProtoReflect.Descriptor instead.
 func (*EventLoss) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{21}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *EventLoss) GetKind() LossKind {
@@ -3317,7 +3549,7 @@ type EventBatchStats struct {
 
 func (x *EventBatchStats) Reset() {
 	*x = EventBatchStats{}
-	mi := &file_events_v1_events_proto_msgTypes[22]
+	mi := &file_events_v1_events_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3329,7 +3561,7 @@ func (x *EventBatchStats) String() string {
 func (*EventBatchStats) ProtoMessage() {}
 
 func (x *EventBatchStats) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[22]
+	mi := &file_events_v1_events_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3342,7 +3574,7 @@ func (x *EventBatchStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventBatchStats.ProtoReflect.Descriptor instead.
 func (*EventBatchStats) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{22}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *EventBatchStats) GetLosses() []*EventLoss {
@@ -3368,7 +3600,7 @@ type ProtocolEventBatch struct {
 
 func (x *ProtocolEventBatch) Reset() {
 	*x = ProtocolEventBatch{}
-	mi := &file_events_v1_events_proto_msgTypes[23]
+	mi := &file_events_v1_events_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3380,7 +3612,7 @@ func (x *ProtocolEventBatch) String() string {
 func (*ProtocolEventBatch) ProtoMessage() {}
 
 func (x *ProtocolEventBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[23]
+	mi := &file_events_v1_events_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3393,7 +3625,7 @@ func (x *ProtocolEventBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolEventBatch.ProtoReflect.Descriptor instead.
 func (*ProtocolEventBatch) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{23}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ProtocolEventBatch) GetSourceNodeId() string {
@@ -3469,7 +3701,7 @@ type EventIngressOpen struct {
 
 func (x *EventIngressOpen) Reset() {
 	*x = EventIngressOpen{}
-	mi := &file_events_v1_events_proto_msgTypes[24]
+	mi := &file_events_v1_events_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3481,7 +3713,7 @@ func (x *EventIngressOpen) String() string {
 func (*EventIngressOpen) ProtoMessage() {}
 
 func (x *EventIngressOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[24]
+	mi := &file_events_v1_events_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3494,7 +3726,7 @@ func (x *EventIngressOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventIngressOpen.ProtoReflect.Descriptor instead.
 func (*EventIngressOpen) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{24}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *EventIngressOpen) GetSourceNodeId() string {
@@ -3559,7 +3791,7 @@ type EventIngressMessage struct {
 
 func (x *EventIngressMessage) Reset() {
 	*x = EventIngressMessage{}
-	mi := &file_events_v1_events_proto_msgTypes[25]
+	mi := &file_events_v1_events_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3571,7 +3803,7 @@ func (x *EventIngressMessage) String() string {
 func (*EventIngressMessage) ProtoMessage() {}
 
 func (x *EventIngressMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[25]
+	mi := &file_events_v1_events_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3584,7 +3816,7 @@ func (x *EventIngressMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventIngressMessage.ProtoReflect.Descriptor instead.
 func (*EventIngressMessage) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{25}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *EventIngressMessage) GetMessage() isEventIngressMessage_Message {
@@ -3644,7 +3876,7 @@ type EventIngressControl struct {
 
 func (x *EventIngressControl) Reset() {
 	*x = EventIngressControl{}
-	mi := &file_events_v1_events_proto_msgTypes[26]
+	mi := &file_events_v1_events_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3656,7 +3888,7 @@ func (x *EventIngressControl) String() string {
 func (*EventIngressControl) ProtoMessage() {}
 
 func (x *EventIngressControl) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[26]
+	mi := &file_events_v1_events_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3669,7 +3901,7 @@ func (x *EventIngressControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventIngressControl.ProtoReflect.Descriptor instead.
 func (*EventIngressControl) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{26}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *EventIngressControl) GetKind() EventIngressControlKind {
@@ -3740,7 +3972,7 @@ type EventSubscribeRequest struct {
 
 func (x *EventSubscribeRequest) Reset() {
 	*x = EventSubscribeRequest{}
-	mi := &file_events_v1_events_proto_msgTypes[27]
+	mi := &file_events_v1_events_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3752,7 +3984,7 @@ func (x *EventSubscribeRequest) String() string {
 func (*EventSubscribeRequest) ProtoMessage() {}
 
 func (x *EventSubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[27]
+	mi := &file_events_v1_events_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3765,7 +3997,7 @@ func (x *EventSubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventSubscribeRequest.ProtoReflect.Descriptor instead.
 func (*EventSubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{27}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *EventSubscribeRequest) GetEventKinds() []EventKind {
@@ -3856,7 +4088,7 @@ type EventSubscriptionControl struct {
 
 func (x *EventSubscriptionControl) Reset() {
 	*x = EventSubscriptionControl{}
-	mi := &file_events_v1_events_proto_msgTypes[28]
+	mi := &file_events_v1_events_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3868,7 +4100,7 @@ func (x *EventSubscriptionControl) String() string {
 func (*EventSubscriptionControl) ProtoMessage() {}
 
 func (x *EventSubscriptionControl) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[28]
+	mi := &file_events_v1_events_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3881,7 +4113,7 @@ func (x *EventSubscriptionControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventSubscriptionControl.ProtoReflect.Descriptor instead.
 func (*EventSubscriptionControl) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{28}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *EventSubscriptionControl) GetKind() SubscriptionControlKind {
@@ -3955,7 +4187,7 @@ type EventSubscriptionMessage struct {
 
 func (x *EventSubscriptionMessage) Reset() {
 	*x = EventSubscriptionMessage{}
-	mi := &file_events_v1_events_proto_msgTypes[29]
+	mi := &file_events_v1_events_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3967,7 +4199,7 @@ func (x *EventSubscriptionMessage) String() string {
 func (*EventSubscriptionMessage) ProtoMessage() {}
 
 func (x *EventSubscriptionMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[29]
+	mi := &file_events_v1_events_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3980,7 +4212,7 @@ func (x *EventSubscriptionMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventSubscriptionMessage.ProtoReflect.Descriptor instead.
 func (*EventSubscriptionMessage) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{29}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *EventSubscriptionMessage) GetDeliverySequence() uint64 {
@@ -4307,7 +4539,31 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x12evidence_truncated\x18\n" +
 	" \x01(\bR\x11evidenceTruncated\x127\n" +
 	"\x03dns\x18\v \x01(\v2%.lippycat.events.v1.DNSNoticeEvidenceR\x03dns\x12+\n" +
-	"\x11evidence_redacted\x18\f \x01(\bR\x10evidenceRedacted\"\xf2\x06\n" +
+	"\x11evidence_redacted\x18\f \x01(\bR\x10evidenceRedacted\"\xbf\a\n" +
+	"\bSSHEvent\x12\x12\n" +
+	"\x04role\x18\x01 \x01(\tR\x04role\x12#\n" +
+	"\rrole_evidence\x18\x02 \x01(\tR\froleEvidence\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x16\n" +
+	"\x06banner\x18\x05 \x01(\tR\x06banner\x12%\n" +
+	"\x0ebanner_escaped\x18\x06 \x01(\bR\rbannerEscaped\x12)\n" +
+	"\x10protocol_version\x18\a \x01(\tR\x0fprotocolVersion\x12)\n" +
+	"\x10software_version\x18\b \x01(\tR\x0fsoftwareVersion\x12%\n" +
+	"\x0ekex_algorithms\x18\t \x01(\tR\rkexAlgorithms\x12;\n" +
+	"\x1aserver_host_key_algorithms\x18\n" +
+	" \x01(\tR\x17serverHostKeyAlgorithms\x128\n" +
+	"\x18encryption_client_server\x18\v \x01(\tR\x16encryptionClientServer\x128\n" +
+	"\x18encryption_server_client\x18\f \x01(\tR\x16encryptionServerClient\x12*\n" +
+	"\x11mac_client_server\x18\r \x01(\tR\x0fmacClientServer\x12*\n" +
+	"\x11mac_server_client\x18\x0e \x01(\tR\x0fmacServerClient\x12:\n" +
+	"\x19compression_client_server\x18\x0f \x01(\tR\x17compressionClientServer\x12:\n" +
+	"\x19compression_server_client\x18\x10 \x01(\tR\x17compressionServerClient\x126\n" +
+	"\x17languages_client_server\x18\x11 \x01(\tR\x15languagesClientServer\x126\n" +
+	"\x17languages_server_client\x18\x12 \x01(\tR\x15languagesServerClient\x127\n" +
+	"\x18first_kex_packet_follows\x18\x13 \x01(\bR\x15firstKexPacketFollows\x12\x14\n" +
+	"\x05hassh\x18\x14 \x01(\tR\x05hassh\x12)\n" +
+	"\x10hassh_algorithms\x18\x15 \x01(\tR\x0fhasshAlgorithms\x12#\n" +
+	"\rhassh_version\x18\x16 \x01(\tR\fhasshVersion\"\xa4\a\n" +
 	"\rProtocolEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12%\n" +
 	"\x0eevent_sequence\x18\x02 \x01(\x04R\reventSequence\x12=\n" +
@@ -4325,7 +4581,8 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"known_host\x18\x13 \x01(\v2\".lippycat.events.v1.KnownHostEventH\x00R\tknownHost\x12L\n" +
 	"\rknown_service\x18\x14 \x01(\v2%.lippycat.events.v1.KnownServiceEventH\x00R\fknownService\x129\n" +
-	"\x06notice\x18\x15 \x01(\v2\x1f.lippycat.events.v1.NoticeEventH\x00R\x06noticeB\t\n" +
+	"\x06notice\x18\x15 \x01(\v2\x1f.lippycat.events.v1.NoticeEventH\x00R\x06notice\x120\n" +
+	"\x03ssh\x18\x16 \x01(\v2\x1c.lippycat.events.v1.SSHEventH\x00R\x03sshB\t\n" +
 	"\apayloadJ\x04\b\x04\x10\x05R\x0eobservation_id\"9\n" +
 	"\rSequenceRange\x12\x14\n" +
 	"\x05first\x18\x01 \x01(\x04R\x05first\x12\x12\n" +
@@ -4393,7 +4650,7 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x11delivery_sequence\x18\x01 \x01(\x04R\x10deliverySequence\x12H\n" +
 	"\acontrol\x18\x02 \x01(\v2,.lippycat.events.v1.EventSubscriptionControlH\x00R\acontrol\x12>\n" +
 	"\x05batch\x18\x03 \x01(\v2&.lippycat.events.v1.ProtocolEventBatchH\x00R\x05batchB\t\n" +
-	"\amessage*\xbc\x02\n" +
+	"\amessage*\xd0\x02\n" +
 	"\tEventKind\x12\x1a\n" +
 	"\x16EVENT_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fEVENT_KIND_CONN\x10\x01\x12\x12\n" +
@@ -4408,7 +4665,8 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x15EVENT_KIND_KNOWN_HOST\x10\n" +
 	"\x12\x1c\n" +
 	"\x18EVENT_KIND_KNOWN_SERVICE\x10\v\x12\x15\n" +
-	"\x11EVENT_KIND_NOTICE\x10\f*a\n" +
+	"\x11EVENT_KIND_NOTICE\x10\f\x12\x12\n" +
+	"\x0eEVENT_KIND_SSH\x10\r*a\n" +
 	"\fCaptureScope\x12\x1d\n" +
 	"\x19CAPTURE_SCOPE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12CAPTURE_SCOPE_FULL\x10\x01\x12\x1a\n" +
@@ -4472,7 +4730,7 @@ func file_events_v1_events_proto_rawDescGZIP() []byte {
 }
 
 var file_events_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
-var file_events_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_events_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_events_v1_events_proto_goTypes = []any{
 	(EventKind)(0),                   // 0: lippycat.events.v1.EventKind
 	(CaptureScope)(0),                // 1: lippycat.events.v1.CaptureScope
@@ -4501,33 +4759,34 @@ var file_events_v1_events_proto_goTypes = []any{
 	(*NoticeEvidenceReference)(nil),  // 24: lippycat.events.v1.NoticeEvidenceReference
 	(*DNSNoticeEvidence)(nil),        // 25: lippycat.events.v1.DNSNoticeEvidence
 	(*NoticeEvent)(nil),              // 26: lippycat.events.v1.NoticeEvent
-	(*ProtocolEvent)(nil),            // 27: lippycat.events.v1.ProtocolEvent
-	(*SequenceRange)(nil),            // 28: lippycat.events.v1.SequenceRange
-	(*EventLoss)(nil),                // 29: lippycat.events.v1.EventLoss
-	(*EventBatchStats)(nil),          // 30: lippycat.events.v1.EventBatchStats
-	(*ProtocolEventBatch)(nil),       // 31: lippycat.events.v1.ProtocolEventBatch
-	(*EventIngressOpen)(nil),         // 32: lippycat.events.v1.EventIngressOpen
-	(*EventIngressMessage)(nil),      // 33: lippycat.events.v1.EventIngressMessage
-	(*EventIngressControl)(nil),      // 34: lippycat.events.v1.EventIngressControl
-	(*EventSubscribeRequest)(nil),    // 35: lippycat.events.v1.EventSubscribeRequest
-	(*EventSubscriptionControl)(nil), // 36: lippycat.events.v1.EventSubscriptionControl
-	(*EventSubscriptionMessage)(nil), // 37: lippycat.events.v1.EventSubscriptionMessage
-	nil,                              // 38: lippycat.events.v1.HTTPEvent.HeadersEntry
-	(*timestamppb.Timestamp)(nil),    // 39: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),      // 40: google.protobuf.Duration
+	(*SSHEvent)(nil),                 // 27: lippycat.events.v1.SSHEvent
+	(*ProtocolEvent)(nil),            // 28: lippycat.events.v1.ProtocolEvent
+	(*SequenceRange)(nil),            // 29: lippycat.events.v1.SequenceRange
+	(*EventLoss)(nil),                // 30: lippycat.events.v1.EventLoss
+	(*EventBatchStats)(nil),          // 31: lippycat.events.v1.EventBatchStats
+	(*ProtocolEventBatch)(nil),       // 32: lippycat.events.v1.ProtocolEventBatch
+	(*EventIngressOpen)(nil),         // 33: lippycat.events.v1.EventIngressOpen
+	(*EventIngressMessage)(nil),      // 34: lippycat.events.v1.EventIngressMessage
+	(*EventIngressControl)(nil),      // 35: lippycat.events.v1.EventIngressControl
+	(*EventSubscribeRequest)(nil),    // 36: lippycat.events.v1.EventSubscribeRequest
+	(*EventSubscriptionControl)(nil), // 37: lippycat.events.v1.EventSubscriptionControl
+	(*EventSubscriptionMessage)(nil), // 38: lippycat.events.v1.EventSubscriptionMessage
+	nil,                              // 39: lippycat.events.v1.HTTPEvent.HeadersEntry
+	(*timestamppb.Timestamp)(nil),    // 40: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),      // 41: google.protobuf.Duration
 }
 var file_events_v1_events_proto_depIdxs = []int32{
-	39, // 0: lippycat.events.v1.EventEnvelope.timestamp:type_name -> google.protobuf.Timestamp
+	40, // 0: lippycat.events.v1.EventEnvelope.timestamp:type_name -> google.protobuf.Timestamp
 	8,  // 1: lippycat.events.v1.EventEnvelope.flow:type_name -> lippycat.events.v1.FlowTuple
 	1,  // 2: lippycat.events.v1.EventEnvelope.capture_scope:type_name -> lippycat.events.v1.CaptureScope
 	9,  // 3: lippycat.events.v1.EventEnvelope.provenance:type_name -> lippycat.events.v1.SourceProvenance
-	40, // 4: lippycat.events.v1.ConnEvent.duration:type_name -> google.protobuf.Duration
-	40, // 5: lippycat.events.v1.DNSEvent.rtt:type_name -> google.protobuf.Duration
-	40, // 6: lippycat.events.v1.DNSEvent.ttls:type_name -> google.protobuf.Duration
-	38, // 7: lippycat.events.v1.HTTPEvent.headers:type_name -> lippycat.events.v1.HTTPEvent.HeadersEntry
-	40, // 8: lippycat.events.v1.FileMetadataEvent.duration:type_name -> google.protobuf.Duration
+	41, // 4: lippycat.events.v1.ConnEvent.duration:type_name -> google.protobuf.Duration
+	41, // 5: lippycat.events.v1.DNSEvent.rtt:type_name -> google.protobuf.Duration
+	41, // 6: lippycat.events.v1.DNSEvent.ttls:type_name -> google.protobuf.Duration
+	39, // 7: lippycat.events.v1.HTTPEvent.headers:type_name -> lippycat.events.v1.HTTPEvent.HeadersEntry
+	41, // 8: lippycat.events.v1.FileMetadataEvent.duration:type_name -> google.protobuf.Duration
 	3,  // 9: lippycat.events.v1.DHCPEvent.association:type_name -> lippycat.events.v1.AssociationStatus
-	39, // 10: lippycat.events.v1.NTPTimestamp.time:type_name -> google.protobuf.Timestamp
+	40, // 10: lippycat.events.v1.NTPTimestamp.time:type_name -> google.protobuf.Timestamp
 	20, // 11: lippycat.events.v1.NTPEvent.reference:type_name -> lippycat.events.v1.NTPTimestamp
 	20, // 12: lippycat.events.v1.NTPEvent.origin:type_name -> lippycat.events.v1.NTPTimestamp
 	20, // 13: lippycat.events.v1.NTPEvent.receive:type_name -> lippycat.events.v1.NTPTimestamp
@@ -4535,7 +4794,7 @@ var file_events_v1_events_proto_depIdxs = []int32{
 	3,  // 15: lippycat.events.v1.NTPEvent.association:type_name -> lippycat.events.v1.AssociationStatus
 	4,  // 16: lippycat.events.v1.KnownHostEvent.evidence:type_name -> lippycat.events.v1.InventoryEvidence
 	4,  // 17: lippycat.events.v1.KnownServiceEvent.evidence:type_name -> lippycat.events.v1.InventoryEvidence
-	39, // 18: lippycat.events.v1.NoticeEvidenceReference.timestamp:type_name -> google.protobuf.Timestamp
+	40, // 18: lippycat.events.v1.NoticeEvidenceReference.timestamp:type_name -> google.protobuf.Timestamp
 	24, // 19: lippycat.events.v1.NoticeEvent.evidence:type_name -> lippycat.events.v1.NoticeEvidenceReference
 	25, // 20: lippycat.events.v1.NoticeEvent.dns:type_name -> lippycat.events.v1.DNSNoticeEvidence
 	10, // 21: lippycat.events.v1.ProtocolEvent.envelope:type_name -> lippycat.events.v1.EventEnvelope
@@ -4551,35 +4810,36 @@ var file_events_v1_events_proto_depIdxs = []int32{
 	22, // 31: lippycat.events.v1.ProtocolEvent.known_host:type_name -> lippycat.events.v1.KnownHostEvent
 	23, // 32: lippycat.events.v1.ProtocolEvent.known_service:type_name -> lippycat.events.v1.KnownServiceEvent
 	26, // 33: lippycat.events.v1.ProtocolEvent.notice:type_name -> lippycat.events.v1.NoticeEvent
-	2,  // 34: lippycat.events.v1.EventLoss.kind:type_name -> lippycat.events.v1.LossKind
-	28, // 35: lippycat.events.v1.EventLoss.event_sequence_ranges:type_name -> lippycat.events.v1.SequenceRange
-	29, // 36: lippycat.events.v1.EventBatchStats.losses:type_name -> lippycat.events.v1.EventLoss
-	27, // 37: lippycat.events.v1.ProtocolEventBatch.events:type_name -> lippycat.events.v1.ProtocolEvent
-	30, // 38: lippycat.events.v1.ProtocolEventBatch.stats:type_name -> lippycat.events.v1.EventBatchStats
-	0,  // 39: lippycat.events.v1.EventIngressOpen.event_kinds:type_name -> lippycat.events.v1.EventKind
-	5,  // 40: lippycat.events.v1.EventIngressOpen.profile:type_name -> lippycat.events.v1.IngressProfile
-	32, // 41: lippycat.events.v1.EventIngressMessage.open:type_name -> lippycat.events.v1.EventIngressOpen
-	31, // 42: lippycat.events.v1.EventIngressMessage.batch:type_name -> lippycat.events.v1.ProtocolEventBatch
-	6,  // 43: lippycat.events.v1.EventIngressControl.kind:type_name -> lippycat.events.v1.EventIngressControlKind
-	28, // 44: lippycat.events.v1.EventIngressControl.nack_batch_ranges:type_name -> lippycat.events.v1.SequenceRange
-	5,  // 45: lippycat.events.v1.EventIngressControl.accepted_profile:type_name -> lippycat.events.v1.IngressProfile
-	0,  // 46: lippycat.events.v1.EventSubscribeRequest.event_kinds:type_name -> lippycat.events.v1.EventKind
-	7,  // 47: lippycat.events.v1.EventSubscriptionControl.kind:type_name -> lippycat.events.v1.SubscriptionControlKind
-	39, // 48: lippycat.events.v1.EventSubscriptionControl.live_boundary:type_name -> google.protobuf.Timestamp
-	29, // 49: lippycat.events.v1.EventSubscriptionControl.losses:type_name -> lippycat.events.v1.EventLoss
-	0,  // 50: lippycat.events.v1.EventSubscriptionControl.supported_event_kinds:type_name -> lippycat.events.v1.EventKind
-	36, // 51: lippycat.events.v1.EventSubscriptionMessage.control:type_name -> lippycat.events.v1.EventSubscriptionControl
-	31, // 52: lippycat.events.v1.EventSubscriptionMessage.batch:type_name -> lippycat.events.v1.ProtocolEventBatch
-	14, // 53: lippycat.events.v1.HTTPEvent.HeadersEntry.value:type_name -> lippycat.events.v1.HeaderValues
-	33, // 54: lippycat.events.v1.EventService.StreamEvents:input_type -> lippycat.events.v1.EventIngressMessage
-	35, // 55: lippycat.events.v1.EventService.SubscribeEvents:input_type -> lippycat.events.v1.EventSubscribeRequest
-	34, // 56: lippycat.events.v1.EventService.StreamEvents:output_type -> lippycat.events.v1.EventIngressControl
-	37, // 57: lippycat.events.v1.EventService.SubscribeEvents:output_type -> lippycat.events.v1.EventSubscriptionMessage
-	56, // [56:58] is the sub-list for method output_type
-	54, // [54:56] is the sub-list for method input_type
-	54, // [54:54] is the sub-list for extension type_name
-	54, // [54:54] is the sub-list for extension extendee
-	0,  // [0:54] is the sub-list for field type_name
+	27, // 34: lippycat.events.v1.ProtocolEvent.ssh:type_name -> lippycat.events.v1.SSHEvent
+	2,  // 35: lippycat.events.v1.EventLoss.kind:type_name -> lippycat.events.v1.LossKind
+	29, // 36: lippycat.events.v1.EventLoss.event_sequence_ranges:type_name -> lippycat.events.v1.SequenceRange
+	30, // 37: lippycat.events.v1.EventBatchStats.losses:type_name -> lippycat.events.v1.EventLoss
+	28, // 38: lippycat.events.v1.ProtocolEventBatch.events:type_name -> lippycat.events.v1.ProtocolEvent
+	31, // 39: lippycat.events.v1.ProtocolEventBatch.stats:type_name -> lippycat.events.v1.EventBatchStats
+	0,  // 40: lippycat.events.v1.EventIngressOpen.event_kinds:type_name -> lippycat.events.v1.EventKind
+	5,  // 41: lippycat.events.v1.EventIngressOpen.profile:type_name -> lippycat.events.v1.IngressProfile
+	33, // 42: lippycat.events.v1.EventIngressMessage.open:type_name -> lippycat.events.v1.EventIngressOpen
+	32, // 43: lippycat.events.v1.EventIngressMessage.batch:type_name -> lippycat.events.v1.ProtocolEventBatch
+	6,  // 44: lippycat.events.v1.EventIngressControl.kind:type_name -> lippycat.events.v1.EventIngressControlKind
+	29, // 45: lippycat.events.v1.EventIngressControl.nack_batch_ranges:type_name -> lippycat.events.v1.SequenceRange
+	5,  // 46: lippycat.events.v1.EventIngressControl.accepted_profile:type_name -> lippycat.events.v1.IngressProfile
+	0,  // 47: lippycat.events.v1.EventSubscribeRequest.event_kinds:type_name -> lippycat.events.v1.EventKind
+	7,  // 48: lippycat.events.v1.EventSubscriptionControl.kind:type_name -> lippycat.events.v1.SubscriptionControlKind
+	40, // 49: lippycat.events.v1.EventSubscriptionControl.live_boundary:type_name -> google.protobuf.Timestamp
+	30, // 50: lippycat.events.v1.EventSubscriptionControl.losses:type_name -> lippycat.events.v1.EventLoss
+	0,  // 51: lippycat.events.v1.EventSubscriptionControl.supported_event_kinds:type_name -> lippycat.events.v1.EventKind
+	37, // 52: lippycat.events.v1.EventSubscriptionMessage.control:type_name -> lippycat.events.v1.EventSubscriptionControl
+	32, // 53: lippycat.events.v1.EventSubscriptionMessage.batch:type_name -> lippycat.events.v1.ProtocolEventBatch
+	14, // 54: lippycat.events.v1.HTTPEvent.HeadersEntry.value:type_name -> lippycat.events.v1.HeaderValues
+	34, // 55: lippycat.events.v1.EventService.StreamEvents:input_type -> lippycat.events.v1.EventIngressMessage
+	36, // 56: lippycat.events.v1.EventService.SubscribeEvents:input_type -> lippycat.events.v1.EventSubscribeRequest
+	35, // 57: lippycat.events.v1.EventService.StreamEvents:output_type -> lippycat.events.v1.EventIngressControl
+	38, // 58: lippycat.events.v1.EventService.SubscribeEvents:output_type -> lippycat.events.v1.EventSubscriptionMessage
+	57, // [57:59] is the sub-list for method output_type
+	55, // [55:57] is the sub-list for method input_type
+	55, // [55:55] is the sub-list for extension type_name
+	55, // [55:55] is the sub-list for extension extendee
+	0,  // [0:55] is the sub-list for field type_name
 }
 
 func init() { file_events_v1_events_proto_init() }
@@ -4588,7 +4848,7 @@ func file_events_v1_events_proto_init() {
 		return
 	}
 	file_events_v1_events_proto_msgTypes[11].OneofWrappers = []any{}
-	file_events_v1_events_proto_msgTypes[19].OneofWrappers = []any{
+	file_events_v1_events_proto_msgTypes[20].OneofWrappers = []any{
 		(*ProtocolEvent_Conn)(nil),
 		(*ProtocolEvent_Dns)(nil),
 		(*ProtocolEvent_Tls)(nil),
@@ -4601,12 +4861,13 @@ func file_events_v1_events_proto_init() {
 		(*ProtocolEvent_KnownHost)(nil),
 		(*ProtocolEvent_KnownService)(nil),
 		(*ProtocolEvent_Notice)(nil),
+		(*ProtocolEvent_Ssh)(nil),
 	}
-	file_events_v1_events_proto_msgTypes[25].OneofWrappers = []any{
+	file_events_v1_events_proto_msgTypes[26].OneofWrappers = []any{
 		(*EventIngressMessage_Open)(nil),
 		(*EventIngressMessage_Batch)(nil),
 	}
-	file_events_v1_events_proto_msgTypes[29].OneofWrappers = []any{
+	file_events_v1_events_proto_msgTypes[30].OneofWrappers = []any{
 		(*EventSubscriptionMessage_Control)(nil),
 		(*EventSubscriptionMessage_Batch)(nil),
 	}
@@ -4616,7 +4877,7 @@ func file_events_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_events_v1_events_proto_rawDesc), len(file_events_v1_events_proto_rawDesc)),
 			NumEnums:      8,
-			NumMessages:   31,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

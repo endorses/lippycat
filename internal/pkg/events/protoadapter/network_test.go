@@ -214,9 +214,9 @@ func TestNetworkOptionalLeaseAndAssociations(t *testing.T) {
 }
 
 func TestKindMappingSeparatesSupportFromRequirements(t *testing.T) {
-	require.Len(t, SupportedKinds(false), 10)
-	require.Len(t, SupportedKinds(true), 12)
-	require.Equal(t, []int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 12}, SupportedKindIDs(false))
+	require.Len(t, SupportedKinds(false), 11)
+	require.Len(t, SupportedKinds(true), 13)
+	require.Equal(t, []int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13}, SupportedKindIDs(false))
 	for _, kind := range SupportedKinds(true) {
 		native, ok := NativeKind(kind)
 		require.True(t, ok)

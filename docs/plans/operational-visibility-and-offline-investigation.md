@@ -1,7 +1,7 @@
 # Operational visibility and offline investigation implementation plan
 
 **Date:** 2026-10-25
-**Status:** All six workstreams implemented and verified; final release recording and cleanup in progress
+**Status:** Complete; all six selected workstreams implemented, verified and committed
 **Assessment baseline:** `8ba8ed27`
 **Scope:** Six ordered workstreams selected from the existing plans and research
 
@@ -57,29 +57,29 @@ instead of recreating the older roadmap's proposed infrastructure.
 
 ## Shared implementation requirements
 
-- [ ] Record the starting commit and any existing working-tree changes for each
+- [x] Record the starting commit and any existing working-tree changes for each
       workstream. Preserve unrelated work and read the applicable directory
       `AGENTS.md` files before implementation.
-- [ ] Extend the shared analysis runtime and typed event contracts. Preserve
+- [x] Extend the shared analysis runtime and typed event contracts. Preserve
       processor authority in packet mode and edge authority in event mode; avoid
       producing the same canonical observation at both ends.
-- [ ] Preserve stable event identity, origin provenance, flow identity, configured
+- [x] Preserve stable event identity, origin provenance, flow identity, configured
       bounds, authorization, expiry, and existing durability semantics. Keep
       subscriber loss separate from producer loss and local retention eviction.
-- [ ] Make protobuf changes additive, regenerate checked-in code through the
+- [x] Make protobuf changes additive, regenerate checked-in code through the
       repository's generator, and test capability negotiation and mixed versions.
       Keep sensitive fields subject to existing projection policy.
-- [ ] Keep live packet processing independent of slow log/TUI sinks. Offline
+- [x] Keep live packet processing independent of slow log/TUI sinks. Offline
       complete-history construction may apply bounded backpressure to its own
       analysis pipeline; storage failure must produce an explicit failure rather
       than a falsely complete result.
-- [ ] Use the latest stable dependencies if a new dependency is necessary, verify
+- [x] Use the latest stable dependencies if a new dependency is necessary, verify
       compatibility and licensing, and prefer existing project facilities where
       they already satisfy the requirement.
-- [ ] Update affected user documentation with each delivered feature. For manual
+- [x] Update affected user documentation with each delivered feature. For manual
       edits, update every language in `docs/manual/languages.json`, review affected
       fuzzy translations, and run `make manual-check` and `make manual`.
-- [ ] Format changed files before staging, record relevant verification evidence,
+- [x] Format changed files before staging, record relevant verification evidence,
       update only the original checklist items actually fulfilled, and commit the
       implementation together with this plan's corresponding progress updates.
 
@@ -408,19 +408,19 @@ decryption, application attribution, and coherence scoring require separate scop
 
 ## Verification and progress recording
 
-- [ ] For each workstream, identify changed packages/build partitions, run focused
+- [x] For each workstream, identify changed packages/build partitions, run focused
       unit and meaningful integration tests, and use race tests for changed
       concurrency/lifecycle paths. Reuse generated fixtures and existing harnesses.
-- [ ] Run protobuf generation checks for wire changes and `make build-matrix` when
+- [x] Run protobuf generation checks for wire changes and `make build-matrix` when
       shared APIs or build-tagged integrations change. Use the configured CUDA
       builder only if changed code affects that partition; CUDA infrastructure
       provisioning is not an additional workstream here.
-- [ ] Run broader repository checks appropriate to the final change after focused
+- [x] Run broader repository checks appropriate to the final change after focused
       checks pass. Do not rerun unrelated benchmark/soak campaigns as a substitute
       for the named correctness scenarios.
-- [ ] If tests need to run outside the sandbox, request permission as required by
+- [x] If tests need to run outside the sandbox, request permission as required by
       project instructions. Remove task-owned temporary/cache artifacts afterward.
-- [ ] Record commit IDs, commands/results, delivered limitations, and original-plan
+- [x] Record commit IDs, commands/results, delivered limitations, and original-plan
       checklist mappings below as each release increment completes. Mark tasks
       complete only after the corresponding behavior and checks are verified.
 
@@ -432,7 +432,7 @@ decryption, application attribution, and coherence scoring require separate scop
 | 4. Offline event history     | `e966aefb`             | Complete storage/UI lifecycle race suites, build matrix and translated manual                  | Complete    |
 | 5. Compact-index Milestone B | `0856f6b6`             | Revision/pipeline/UI race checks, generated readiness report, build and manual                 | Complete    |
 | 6A. SSH/HASSH                | `f8139502`             | Parser/runtime, negotiated transport/log, local/remote/offline Events, manual and build checks | Complete    |
-| 6B. QUIC study               | This increment         | Independent reference/controlled packets, malformed/bounds/race/vet tests, reproducible report | Complete    |
+| 6B. QUIC study               | `0f6f5fe6`             | Independent reference/controlled packets, malformed/bounds/race/vet tests, reproducible report | Complete    |
 
 ## Deferred scope
 
@@ -898,3 +898,30 @@ supported. Permanent regressions, the integrated fixed-list check and final
 race/vet checks passed. **CLOSED**, discovery 1/1, primary 1/1, integrated 1/1,
 supplemental 0, with no remaining material finding. The original TLS roadmap's
 Phase 6 spike tasks are fulfilled; its production QUIC wire task stays unchecked.
+
+### Final completion recording — 2026-10-25
+
+All selected implementation and shared-verification checklist items are now
+fulfilled. Workstreams 1–5 retain their recorded closed decisions and commits;
+W6A is `f8139502`, followed independently by W6B `0f6f5fe6`. The separate offline
+ECH codec correction remains `7bdee794`. Requirement evidence, production loci,
+commands/results, original-plan mappings and intentional limits are recorded in
+each workstream's completion entry above. Final current-tree checks confirmed
+both release commits, additive SSH contracts and actual path regressions, the
+isolated experiment's passing race/vet/CLI evidence, and no production imports of
+that experiment. No new performance acceptance target was introduced.
+
+The final SSH runtime race suite passed after the supplemental HTTP-boundary fix
+(2.021 s); final focused sniff, tap, hunter, processor and TUI SSH race checks all
+passed. Build-matrix output covers the experiment as well as supported non-CUDA
+and LI partitions. Final manual checks/builds passed with 5940/5940 current CA/DE
+translations and all three editions structurally consistent. Existing CUDA-only
+infrastructure, unavailable private/representative captures, and optional future
+protocol/corpus work are not claimed as tested or completed.
+
+All 41 task-owned temporary cache, log, code-generation/review and inspection
+artifacts were removed, including the 9.5 GiB shared Go cache; no task temporary
+owner remains. Generated manual editions remain normal ignored build outputs.
+Only this final completion recording follows the independently reviewable feature
+commits. The complete selected umbrella objective is achieved; deferred scope
+above remains outside this implementation.

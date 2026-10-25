@@ -671,7 +671,7 @@ func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp ti
 func sourceNamespace(source Source) uint64 {
 	key := sourceReassemblyKey(source)
 	h := sha256.New()
-	for _, value := range []string{key.nodeID, key.captureSource, key.interfaceName, strconv.FormatUint(uint64(key.interfaceIndex), 10), key.inputFile} {
+	for _, value := range []string{key.nodeID, key.captureEpoch, key.captureSource, key.interfaceName, strconv.FormatUint(uint64(key.interfaceIndex), 10), key.inputFile} {
 		_, _ = h.Write([]byte(value))
 		_, _ = h.Write([]byte{0})
 	}

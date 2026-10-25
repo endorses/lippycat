@@ -118,16 +118,16 @@ packet and relay integration tests, and `test/` integration harnesses.
       downstream effect but before its completion checkpoint. Reuse existing fault
       hooks and assert the documented custody/deduplication boundaries and
       at-least-once output behavior.
-- [ ] Add generated TCP and SIP/RTP handover scenarios, including replay after a
+- [x] Add generated TCP and SIP/RTP handover scenarios, including replay after a
       configured protocol idle-expiry boundary and overlapping private addresses
       in different observation domains. Assert that expired/finalized state is not
       revived and independent processors do not inherit each other's analysis
       state. A common-upstream scenario must assert only the continuity supported
       by that topology.
-- [ ] Make readiness and completion assertions synchronize with explicit signals.
+- [x] Make readiness and completion assertions synchronize with explicit signals.
       Derive expiry cases from controlled clocks or configured timeouts, and keep
       test cleanup cancellable with all runtimes and owned storage joined/closed.
-- [ ] Correct only defects exposed within these supported scenarios, add focused
+- [x] Correct only defects exposed within these supported scenarios, add focused
       regressions, and document scenario coverage and remaining limitations.
 
 **Completion:** Real hunter-to-processor paths demonstrate the documented
@@ -424,15 +424,15 @@ decryption, application attribution, and coherence scoring require separate scop
       checklist mappings below as each release increment completes. Mark tasks
       complete only after the corresponding behavior and checks are verified.
 
-| Workstream                   | Implementation commits | Verification evidence                     | Disposition                                        |
-| ---------------------------- | ---------------------- | ----------------------------------------- | -------------------------------------------------- |
-| 1. Failover integration      | Pending scoped commit  | Runtime handover and custody checks below | In progress; protocol continuity scenarios pending |
-| 2. ECH visibility            | Pending                | Pending                                   | Not started                                        |
-| 3. DNS notices               | Pending                | Pending                                   | Not started                                        |
-| 4. Offline event history     | Pending                | Pending                                   | Not started                                        |
-| 5. Compact-index Milestone B | Pending                | Pending                                   | Not started                                        |
-| 6A. SSH/HASSH                | Pending                | Pending                                   | Not started                                        |
-| 6B. QUIC study               | Pending                | Pending                                   | Not started                                        |
+| Workstream                   | Implementation commits                       | Verification evidence                                           | Disposition |
+| ---------------------------- | -------------------------------------------- | --------------------------------------------------------------- | ----------- |
+| 1. Failover integration      | `9bd9b347` + protocol fix in this checkpoint | Runtime, custody, topology, expiry, race and build checks below | Complete    |
+| 2. ECH visibility            | Pending                                      | Pending                                                         | Not started |
+| 3. DNS notices               | Pending                                      | Pending                                                         | Not started |
+| 4. Offline event history     | Pending                                      | Pending                                                         | Not started |
+| 5. Compact-index Milestone B | Pending                                      | Pending                                                         | Not started |
+| 6A. SSH/HASSH                | Pending                                      | Pending                                                         | Not started |
+| 6B. QUIC study               | Pending                                      | Pending                                                         | Not started |
 
 ## Deferred scope
 
@@ -479,5 +479,29 @@ go test -tags all ./internal/pkg/processor -run '^TestRawCustody(RestartAfterOut
 go test -race -tags all ./internal/pkg/processor -run '^TestRawCustody(RestartAfterOutputBeforeCompletionCheckpoint|CommitBeforeLostReceiptRecoversAndDeduplicates)$' -count=1
 ```
 
-All listed checks passed. The generated TCP/SIP/RTP handover, scope, and expiry
-scenarios remain under implementation; this checkpoint does not close workstream 1.
+All listed checks passed. The initial checkpoint was committed as `9bd9b347`.
+
+### Workstream 1 completion — 2026-10-25
+
+The real mTLS protocol-handover scenarios now verify segmented TCP and SIP/RTP
+continuity only at a common analysis owner, absence of inherited state at
+independent processors, and isolation of identical private tuples across origin
+nodes and capture epochs. Controlled clocks exercise TCP idle expiry and late
+SIP/RTP replay after call finalization; packet subscribers and dispatcher flush
+barriers observe completed effects, including unchanged finalized PCAP contents.
+
+The cross-epoch test exposed a concrete production defect: the reassembly cache
+key included capture epoch, but the namespace digest omitted it. The digest now
+includes epoch, with both topology and hash-identity regressions.
+
+```sh
+go test -race -tags all ./internal/pkg/processor -run '^TestFailover(TCP|SIPRTP)' -count=10
+go test -race -tags all ./internal/pkg/eventanalysis -run 'Test.*(Reassembl|AssociationScope|CachedScope|NamespacedEndpoint|TypedReassembly|NetworkAssociationScope)' -count=1
+make build-matrix
+```
+
+These checks passed. The bounded W1 closure review found no material remaining
+findings: **CLOSED** for this workstream. The broader historical optional crash
+matrix, auxiliary TLS-key path, and LI deployment checks remain outside its
+selected scope. The remaining four workstreams and W2's separate release record
+are not completed by this W1 decision.

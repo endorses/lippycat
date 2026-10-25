@@ -595,17 +595,17 @@ Verified evidence:
       while policy mutation retains admin requirements. Focused race regressions
       passed, including retained origin data after a blocked send.
 
-Remaining unchecked tasks are explicit limits, not completed test claims:
+Follow-up status distinguishes verified additions from remaining limits:
 
 - [x] Add one deployment-level test switching an actual hunter between two
       independent processors in both raw and normalized-event modes. Existing
       connection tests use real local gRPC fake services; real TLS relay tests
       separately cover two origins, alternative relays, and common central custody.
-- [ ] Extend the composed crash-boundary scenario matrix beyond the existing
+- [x] Extend the composed crash-boundary scenario matrix beyond the existing
       spool/custody publication-fault, restart, duplicate-route, and lost-receipt
       tests. Output effects remain at least once after a crash between dispatch and
       completion checkpoint; no exactly-once PCAP/MDF guarantee is advertised.
-- [ ] Add TCP/VoIP handover and long-blackout semantic integration scenarios.
+- [x] Add TCP/VoIP handover and long-blackout semantic integration scenarios.
       Current source/epoch isolation and existing bounded protocol analyzers remain
       in force; replay does not extend idle timeouts or revive finalized state.
 - [ ] Complete matched-session TLS-key attachment and acknowledged retransmission.
@@ -644,4 +644,11 @@ The latter explicitly demonstrates the documented at-least-once output boundary.
 
 This completes the two-independent-processors checklist items above. The full
 historical crash matrix and auxiliary TLS-key delivery remain outside that claim;
-protocol handover/scope/expiry follow-up is still in progress.
+protocol handover, origin/epoch isolation and expiry/finalization scenarios now
+pass repeated race checks. Real mTLS relay tests verify TCP/SIP/RTP continuity at
+a common upstream and independent analysis at separate processors. Replay after
+configured expiry/finalization cannot restore discarded TCP prefixes or mutate
+finalized aggregate/PCAP state. The tests exposed and fixed a missing capture
+epoch in the TCP namespace digest. The umbrella W1 scope is closed; the broad
+original phase-8/phase-9 scenario lists remain unchecked where their entire
+historical combinations were not exercised.

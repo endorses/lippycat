@@ -16,14 +16,15 @@ func TestReassemblyNamespaceCachePreservesSourceHash(t *testing.T) {
 	r := &Runtime{}
 	sources := []Source{
 		{}, {NodeID: "node"}, {CaptureSource: "pcap"}, {InterfaceName: "eth0"},
+		{CaptureEpoch: "first"}, {CaptureEpoch: "second"},
 		{InterfaceIndex: 12345}, {InterfaceIndex: ^uint32(0)}, {InputFile: "/tmp/capture.pcap"},
 		{NodeID: "node", CaptureSource: "pcap", InterfaceName: "eth0", InterfaceIndex: 12, InputFile: "capture.pcap"},
 		{NodeID: "node\x00name", InputFile: "file\x00name"},
 		{},
 	}
 	for _, source := range sources {
-		legacyBytes := fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00", source.NodeID, source.CaptureSource, source.InterfaceName, source.InterfaceIndex, source.InputFile)
-		digest := sha256.Sum256([]byte(legacyBytes))
+		sourceBytes := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00", source.NodeID, source.CaptureEpoch, source.CaptureSource, source.InterfaceName, source.InterfaceIndex, source.InputFile)
+		digest := sha256.Sum256([]byte(sourceBytes))
 		want := binary.BigEndian.Uint64(digest[:])
 		require.Equal(t, want, sourceNamespace(source))
 		require.Equal(t, want, r.cachedSourceNamespace(source))

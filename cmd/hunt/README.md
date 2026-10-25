@@ -879,3 +879,15 @@ keywords disable filtering. Complete multipart text is matched across segment
 boundaries; selected contributing packets are retained until that decision.
 Ordinary calls and RTP keep their existing policies. Configuration and resource
 limits live under `hunter.voip.sms`; see [SMS-over-IMS](../../docs/SMS_OVER_IMS.md).
+
+### DNS security notice authority
+
+`--dns-notices` enables bounded canonical DNS tunneling findings. With packet
+forwarding, the processor owns detection; with `--forward-mode=events`, the hunter
+owns detection and forwards the typed notice with its original identity. Enabled
+notice requirements participate in negotiation; an older processor needs an
+explicitly allowed packet fallback. Hunters do not execute notice command hooks.
+The receiving processor can write the opt-in `notice.log` stream and serve
+scope-qualified, authorized TUI events. See the
+[DNS notice guide](../../docs/manual/src/part5-advanced/dns.md#structured-dns-security-notices)
+for threshold/debounce, capture-time state bounds and sensitive evidence rules.

@@ -85,6 +85,8 @@ func canonicalRecord(event events.Event) (logstream.Record, bool) {
 		build = records.DHCP
 	case events.KindNTP:
 		build = records.NTP
+	case events.KindNotice:
+		build = records.Notice
 	case events.KindKnownHost:
 		build = records.KnownHosts
 	case events.KindKnownService:
@@ -105,6 +107,12 @@ func canonicalRecord(event events.Event) (logstream.Record, bool) {
 func anyValues(v any) []any {
 	switch x := v.(type) {
 	case []netip.Addr:
+		r := make([]any, len(x))
+		for i := range x {
+			r[i] = x[i]
+		}
+		return r
+	case []time.Time:
 		r := make([]any, len(x))
 		for i := range x {
 			r[i] = x[i]
@@ -139,6 +147,11 @@ func stringsToAny(v []string) []any {
 // Summary returns the same compact summary used by event timelines.
 func Summary(event events.Event) string {
 	switch e := event.(type) {
+	case events.NoticeEvent:
+		if e.DNS != nil {
+			return fmt.Sprintf("%s %s %s score=%.3f threshold=%.3f queries=%d", e.Severity, e.Category, e.DNS.Domain, e.DNS.Score, e.DNS.Threshold, e.DNS.Queries)
+		}
+		return fmt.Sprintf("%s %s %s", e.Severity, e.Category, e.Detector)
 	case events.DNSEvent:
 		return strings.TrimSpace(fmt.Sprintf("%s qtype=%d rcode=%d", e.Query, e.QType, e.RCode))
 	case events.HTTPEvent:

@@ -33,8 +33,15 @@ func setSniffAnalysisConfig(t *testing.T, values map[string]any) {
 	t.Helper()
 	for key, value := range values {
 		previous := viper.Get(key)
+		wasSet := viper.IsSet(key)
 		viper.Set(key, value)
-		t.Cleanup(func() { viper.Set(key, previous) })
+		t.Cleanup(func() {
+			if wasSet {
+				viper.Set(key, previous)
+			} else {
+				viper.Set(key, nil)
+			}
+		})
 	}
 }
 

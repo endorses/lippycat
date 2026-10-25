@@ -837,3 +837,13 @@ older peer metadata do not contribute a false negative. Extension 65037 includes
 GREASE offers; presence does not prove server acceptance or reveal the inner
 ClientHello. See the [TLS manual](../../docs/manual/src/part5-advanced/tls.md#ech-offer-visibility)
 for packet/event metadata, structured-log fields, and TUI retention scope.
+
+### Structured DNS notices
+
+`--dns-notices` enables canonical DNS tunneling findings independently of command
+hooks; DNS mode retains its default-enabled `--detect-tunneling` option. Select
+`--log-dir ./logs --log-streams notice --log-format json` for optional JSONL output
+(the default stream set is unchanged). Offline analysis uses capture timestamps
+for detector debounce and expiry. Sniff does not own an external-command worker.
+See the [DNS notice guide](../../docs/manual/src/part5-advanced/dns.md#structured-dns-security-notices)
+for observation counting, resource bounds, scope and evidence fields.

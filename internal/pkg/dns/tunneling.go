@@ -2,6 +2,7 @@ package dns
 
 import (
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,10 +16,57 @@ type TunnelingAlert struct {
 	Domain    string
 	Score     float64
 	Entropy   float64
-	Queries   int64
+	Queries   int64 // DNS observations, including responses, as in the legacy detector.
 	SrcIPs    []string
 	HunterID  string
 	Timestamp time.Time
+	Threshold float64
+	// UniqueSubdomains is the retained distinct count, a lower bound when
+	// UniqueSubdomainsTruncated is true. SrcIPs is likewise bounded evidence.
+	UniqueSubdomains          int
+	UniqueSubdomainsTruncated bool
+	SrcIPsTruncated           bool
+}
+
+// TunnelingDecision is the synchronous result of one DNS observation. Suppressed
+// means the score reached Threshold but observation-clock debounce withheld an
+// alert. AnalyzeAt never invokes or queues a callback.
+type TunnelingDecision struct {
+	Alert          *TunnelingAlert
+	Domain         string
+	Score          float64
+	Entropy        float64
+	Threshold      float64
+	AboveThreshold bool
+	Suppressed     bool
+	Stopped        bool
+}
+
+// TunnelingStats reports retained evidence and callback delivery pressure.
+type TunnelingStats struct {
+	Domains, TrackedSubdomains, SourceIPs            int
+	Alerts, Suppressed                               uint64
+	CallbackQueued, CallbackDelivered, CallbackDrops uint64
+	Stopped                                          bool
+}
+
+type tunnelingCallback struct {
+	alert    TunnelingAlert
+	callback func(TunnelingAlert)
+}
+
+// One scoped key owns all evidence and debounce state under the detector's
+// global domain budget. Distinct capture domains cannot share a finding.
+type tunnelingDomainKey struct {
+	scope  string
+	domain string
+}
+
+func (key tunnelingDomainKey) less(other tunnelingDomainKey) bool {
+	if key.domain != other.domain {
+		return key.domain < other.domain
+	}
+	return key.scope < other.scope
 }
 
 // AlertConfig configures alert behavior for tunneling detection.
@@ -31,28 +79,36 @@ type AlertConfig struct {
 // TunnelingDetector detects potential DNS tunneling attempts.
 type TunnelingDetector struct {
 	mu            sync.RWMutex
-	domainStats   map[string]*domainStats
+	domainStats   map[tunnelingDomainKey]*domainStats
 	config        TunnelingConfig
 	maxDomains    int
 	cleanupTicker *time.Ticker
+	stop          chan struct{}
+	stopOnce      sync.Once
+	wg            sync.WaitGroup
+	stopped       bool
+	callbacks     chan tunnelingCallback
+	stats         TunnelingStats
 
 	// Alert tracking
 	alertConfig *AlertConfig
-	lastAlerted map[string]time.Time           // Last alert time per domain
-	srcIPs      map[string]map[string]struct{} // Source IPs per domain
+	lastAlerted map[tunnelingDomainKey]time.Time           // Last alert time per scoped domain
+	srcIPs      map[tunnelingDomainKey]map[string]struct{} // Source IPs per scoped domain
 }
 
 // domainStats tracks statistics for a domain to detect tunneling.
 type domainStats struct {
-	BaseDomain       string
-	SubdomainCount   int64
-	TotalQueryLength int64
-	QueryCount       int64
-	UniqueSubdomains map[string]struct{}
-	HighEntropyCount int64
-	TXTQueryCount    int64
-	NULLQueryCount   int64
-	LastSeen         time.Time
+	BaseDomain                string
+	SubdomainCount            int64
+	TotalQueryLength          int64
+	QueryCount                int64
+	UniqueSubdomains          map[string]struct{}
+	HighEntropyCount          int64
+	TXTQueryCount             int64
+	NULLQueryCount            int64
+	LastSeen                  time.Time
+	UniqueSubdomainsTruncated bool
+	SrcIPsTruncated           bool
 }
 
 // TunnelingConfig holds configuration for tunneling detection.
@@ -81,6 +137,20 @@ type TunnelingConfig struct {
 
 	// MaxAge is the maximum age for domain stats. Default: 1 hour
 	MaxAge time.Duration
+
+	// DisableJanitor makes expiry entirely observation-clock driven through
+	// Expire. Canonical and offline runtimes should enable this option.
+	DisableJanitor bool
+
+	// MaxTrackedSubdomains bounds distinct evidence per domain. Zero selects
+	// max(100, MaxUniqueSubdomains, 11), retaining score saturation by default.
+	// A smaller explicit cap can understate uniqueness scores; truncation is
+	// reported in alerts and reports instead of claiming an exact total.
+	MaxTrackedSubdomains int
+	// MaxSourceIPs bounds retained source addresses per domain. Default: 64.
+	MaxSourceIPs int
+	// CallbackQueueSize bounds pending legacy callbacks. Default: 128.
+	CallbackQueueSize int
 }
 
 // DefaultTunnelingConfig returns the default tunneling detection configuration.
@@ -93,6 +163,8 @@ func DefaultTunnelingConfig() TunnelingConfig {
 		MaxDomains:            5000,
 		CleanupInterval:       5 * time.Minute,
 		MaxAge:                1 * time.Hour,
+		MaxSourceIPs:          64,
+		CallbackQueueSize:     128,
 	}
 }
 
@@ -104,43 +176,65 @@ func NewTunnelingDetector(config TunnelingConfig) *TunnelingDetector {
 	if config.MinSubdomainLength == 0 {
 		config.MinSubdomainLength = 20
 	}
-	if config.MaxUniqueSubdomains == 0 {
+	if config.MaxUniqueSubdomains <= 0 {
 		config.MaxUniqueSubdomains = 100
 	}
 	if len(config.SuspiciousRecordTypes) == 0 {
 		config.SuspiciousRecordTypes = []string{"TXT", "NULL", "CNAME"}
 	}
-	if config.MaxDomains == 0 {
+	if config.MaxDomains <= 0 {
 		config.MaxDomains = 5000
 	}
-	if config.CleanupInterval == 0 {
+	if config.CleanupInterval <= 0 {
 		config.CleanupInterval = 5 * time.Minute
 	}
-	if config.MaxAge == 0 {
+	if config.MaxAge <= 0 {
 		config.MaxAge = 1 * time.Hour
 	}
+	if config.MaxTrackedSubdomains <= 0 {
+		config.MaxTrackedSubdomains = max(100, config.MaxUniqueSubdomains, 11)
+	}
+	if config.MaxSourceIPs <= 0 {
+		config.MaxSourceIPs = 64
+	}
+	if config.CallbackQueueSize <= 0 {
+		config.CallbackQueueSize = 128
+	}
+	config.SuspiciousRecordTypes = append([]string(nil), config.SuspiciousRecordTypes...)
 
 	td := &TunnelingDetector{
-		domainStats:   make(map[string]*domainStats),
-		config:        config,
-		maxDomains:    config.MaxDomains,
-		cleanupTicker: time.NewTicker(config.CleanupInterval),
-		lastAlerted:   make(map[string]time.Time),
-		srcIPs:        make(map[string]map[string]struct{}),
+		domainStats: make(map[tunnelingDomainKey]*domainStats),
+		config:      config,
+		maxDomains:  config.MaxDomains,
+		stop:        make(chan struct{}),
+		lastAlerted: make(map[tunnelingDomainKey]time.Time),
+		srcIPs:      make(map[tunnelingDomainKey]map[string]struct{}),
 	}
 
-	go td.cleanupLoop()
+	if !config.DisableJanitor {
+		td.cleanupTicker = time.NewTicker(config.CleanupInterval)
+		td.wg.Add(1)
+		go td.cleanupLoop()
+	}
 
 	return td
 }
 
-// SetAlertConfig configures alert behavior for the detector.
-// When set, the detector will call the callback when a domain's tunneling
-// score crosses the threshold, respecting the debounce interval.
+// SetAlertConfig configures threshold/debounce decisions, preserving explicit
+// zero values. A nonnil Callback opts legacy Analyze calls into bounded delivery;
+// synchronous AnalyzeAt callers should leave it nil.
 func (td *TunnelingDetector) SetAlertConfig(config AlertConfig) {
 	td.mu.Lock()
 	defer td.mu.Unlock()
+	if td.stopped {
+		return
+	}
 	td.alertConfig = &config
+	if config.Callback != nil && td.callbacks == nil {
+		td.callbacks = make(chan tunnelingCallback, td.config.CallbackQueueSize)
+		td.wg.Add(1)
+		go td.callbackLoop()
+	}
 }
 
 // Analyze analyzes a DNS query for tunneling indicators.
@@ -156,8 +250,25 @@ func (td *TunnelingDetector) Analyze(metadata *types.DNSMetadata) {
 // Updates the metadata with tunneling score and entropy.
 // Triggers alerts when score crosses threshold (if alertConfig is set).
 func (td *TunnelingDetector) AnalyzeWithContext(metadata *types.DNSMetadata, hunterID, srcIP string) {
+	td.analyzeAt(metadata, hunterID, srcIP, time.Now(), true, "")
+}
+
+// AnalyzeAt analyzes queries and responses using their observation time. It
+// updates metadata and returns threshold/debounce evidence without delivering
+// callbacks, even if a callback has been configured for legacy callers.
+func (td *TunnelingDetector) AnalyzeAt(metadata *types.DNSMetadata, hunterID, srcIP string, observedAt time.Time) TunnelingDecision {
+	return td.AnalyzeScopedAt(metadata, hunterID, srcIP, observedAt, "")
+}
+
+// AnalyzeScopedAt isolates evidence and debounce by capture scope while retaining
+// one global domain/evidence budget. Alert Domain remains the actual DNS domain.
+func (td *TunnelingDetector) AnalyzeScopedAt(metadata *types.DNSMetadata, hunterID, srcIP string, observedAt time.Time, scope string) TunnelingDecision {
+	return td.analyzeAt(metadata, hunterID, srcIP, observedAt, false, scope)
+}
+
+func (td *TunnelingDetector) analyzeAt(metadata *types.DNSMetadata, hunterID, srcIP string, observedAt time.Time, legacyCallback bool, scope string) TunnelingDecision {
 	if metadata == nil || metadata.QueryName == "" {
-		return
+		return TunnelingDecision{}
 	}
 
 	// Calculate entropy for the query name
@@ -167,13 +278,21 @@ func (td *TunnelingDetector) AnalyzeWithContext(metadata *types.DNSMetadata, hun
 	// Extract base domain and subdomain
 	baseDomain, subdomain := extractDomainParts(metadata.QueryName)
 	if baseDomain == "" {
-		return
+		return TunnelingDecision{}
 	}
 
 	td.mu.Lock()
 	defer td.mu.Unlock()
+	if td.stopped {
+		return TunnelingDecision{Stopped: true}
+	}
 
-	stats, exists := td.domainStats[baseDomain]
+	key := tunnelingDomainKey{scope: scope, domain: baseDomain}
+	stats, exists := td.domainStats[key]
+	if exists && stats.LastSeen.Before(observedAt.Add(-td.config.MaxAge)) {
+		td.removeDomain(key)
+		exists = false
+	}
 	if !exists {
 		if len(td.domainStats) >= td.maxDomains {
 			td.evictOldest()
@@ -182,17 +301,27 @@ func (td *TunnelingDetector) AnalyzeWithContext(metadata *types.DNSMetadata, hun
 			BaseDomain:       baseDomain,
 			UniqueSubdomains: make(map[string]struct{}),
 		}
-		td.domainStats[baseDomain] = stats
+		td.domainStats[key] = stats
 	}
 
 	// Update statistics
 	stats.QueryCount++
 	stats.TotalQueryLength += int64(len(metadata.QueryName))
-	stats.LastSeen = time.Now()
+	// Late observations may contribute evidence, but must not move retention
+	// backwards or become fresh merely because replay happened later.
+	if !exists || observedAt.After(stats.LastSeen) {
+		stats.LastSeen = observedAt
+	}
 
 	if subdomain != "" {
 		stats.SubdomainCount++
-		stats.UniqueSubdomains[subdomain] = struct{}{}
+		if _, known := stats.UniqueSubdomains[subdomain]; !known {
+			if len(stats.UniqueSubdomains) < td.config.MaxTrackedSubdomains {
+				stats.UniqueSubdomains[subdomain] = struct{}{}
+			} else {
+				stats.UniqueSubdomainsTruncated = true
+			}
+		}
 
 		// Check for high entropy subdomain
 		if len(subdomain) >= td.config.MinSubdomainLength {
@@ -217,47 +346,66 @@ func (td *TunnelingDetector) AnalyzeWithContext(metadata *types.DNSMetadata, hun
 
 	// Track source IP per domain
 	if srcIP != "" {
-		if td.srcIPs[baseDomain] == nil {
-			td.srcIPs[baseDomain] = make(map[string]struct{})
+		if td.srcIPs[key] == nil {
+			td.srcIPs[key] = make(map[string]struct{})
 		}
-		td.srcIPs[baseDomain][srcIP] = struct{}{}
+		if _, known := td.srcIPs[key][srcIP]; !known {
+			if len(td.srcIPs[key]) < td.config.MaxSourceIPs {
+				td.srcIPs[key][srcIP] = struct{}{}
+			} else {
+				stats.SrcIPsTruncated = true
+			}
+		}
 	}
 
 	// Calculate tunneling score
 	metadata.TunnelingScore = td.calculateScore(stats, metadata)
 
 	// Check alert threshold and debounce
-	td.checkAndTriggerAlert(baseDomain, stats, metadata, hunterID)
+	decision := td.decideAlert(key, stats, metadata, hunterID, observedAt, legacyCallback)
+	if legacyCallback && decision.Alert != nil {
+		select {
+		case td.callbacks <- tunnelingCallback{alert: *decision.Alert, callback: td.alertConfig.Callback}:
+			td.stats.CallbackQueued++
+		default:
+			td.stats.CallbackDrops++
+		}
+	}
+	return decision
 }
 
-// checkAndTriggerAlert checks if an alert should be triggered for the domain.
+// decideAlert checks whether the observation triggers a threshold/debounce decision.
 // Must be called with td.mu held.
-func (td *TunnelingDetector) checkAndTriggerAlert(baseDomain string, stats *domainStats, metadata *types.DNSMetadata, hunterID string) {
-	if td.alertConfig == nil || td.alertConfig.Callback == nil {
-		return
+func (td *TunnelingDetector) decideAlert(key tunnelingDomainKey, stats *domainStats, metadata *types.DNSMetadata, hunterID string, observedAt time.Time, legacyCallback bool) TunnelingDecision {
+	config := AlertConfig{Threshold: 0.7, Debounce: 5 * time.Minute}
+	if td.alertConfig != nil {
+		config = *td.alertConfig
 	}
-
-	// Check if score crosses threshold
-	if metadata.TunnelingScore < td.alertConfig.Threshold {
-		return
+	decision := TunnelingDecision{Domain: stats.BaseDomain, Score: metadata.TunnelingScore, Entropy: metadata.EntropyScore, Threshold: config.Threshold}
+	decision.AboveThreshold = metadata.TunnelingScore >= config.Threshold
+	if !decision.AboveThreshold || legacyCallback && config.Callback == nil {
+		return decision
 	}
 
 	// Check debounce
-	lastTime, exists := td.lastAlerted[baseDomain]
-	if exists && time.Since(lastTime) < td.alertConfig.Debounce {
-		return
+	lastTime, exists := td.lastAlerted[key]
+	if exists && observedAt.Sub(lastTime) < config.Debounce {
+		decision.Suppressed = true
+		td.stats.Suppressed++
+		return decision
 	}
 
 	// Update last alerted time
-	td.lastAlerted[baseDomain] = time.Now()
+	td.lastAlerted[key] = observedAt
 
 	// Build source IPs list
 	var srcIPsList []string
-	if ips, ok := td.srcIPs[baseDomain]; ok {
+	if ips, ok := td.srcIPs[key]; ok {
 		srcIPsList = make([]string, 0, len(ips))
 		for ip := range ips {
 			srcIPsList = append(srcIPsList, ip)
 		}
+		sort.Strings(srcIPsList)
 	}
 
 	// Use "local" as default hunter ID if not provided
@@ -266,19 +414,31 @@ func (td *TunnelingDetector) checkAndTriggerAlert(baseDomain string, stats *doma
 	}
 
 	// Create alert
-	alert := TunnelingAlert{
-		Domain:    baseDomain,
-		Score:     metadata.TunnelingScore,
-		Entropy:   metadata.EntropyScore,
-		Queries:   stats.QueryCount,
-		SrcIPs:    srcIPsList,
-		HunterID:  hunterID,
-		Timestamp: time.Now(),
+	decision.Alert = &TunnelingAlert{
+		Domain:                    stats.BaseDomain,
+		Score:                     metadata.TunnelingScore,
+		Entropy:                   metadata.EntropyScore,
+		Queries:                   stats.QueryCount,
+		SrcIPs:                    srcIPsList,
+		HunterID:                  hunterID,
+		Timestamp:                 observedAt,
+		Threshold:                 config.Threshold,
+		UniqueSubdomains:          len(stats.UniqueSubdomains),
+		UniqueSubdomainsTruncated: stats.UniqueSubdomainsTruncated,
+		SrcIPsTruncated:           stats.SrcIPsTruncated,
 	}
+	td.stats.Alerts++
+	return decision
+}
 
-	// Call callback in a goroutine to avoid blocking
-	callback := td.alertConfig.Callback
-	go callback(alert)
+func (td *TunnelingDetector) callbackLoop() {
+	defer td.wg.Done()
+	for job := range td.callbacks {
+		job.callback(job.alert)
+		td.mu.Lock()
+		td.stats.CallbackDelivered++
+		td.mu.Unlock()
+	}
 }
 
 // calculateScore computes a tunneling probability score.
@@ -358,7 +518,13 @@ func calculateEntropy(s string) float64 {
 
 	// Calculate entropy
 	var entropy float64
-	for _, count := range freq {
+	characters := make([]rune, 0, len(freq))
+	for character := range freq {
+		characters = append(characters, character)
+	}
+	sort.Slice(characters, func(i, j int) bool { return characters[i] < characters[j] })
+	for _, character := range characters {
+		count := freq[character]
 		p := float64(count) / float64(total)
 		if p > 0 {
 			entropy -= p * math.Log2(p)
@@ -453,69 +619,126 @@ func IsSuspiciousName(name string) bool {
 
 // evictOldest removes the oldest entry from domainStats.
 func (td *TunnelingDetector) evictOldest() {
-	var oldestKey string
+	var oldestKey tunnelingDomainKey
 	var oldestTime time.Time
+	found := false
 
 	for k, v := range td.domainStats {
-		if oldestKey == "" || v.LastSeen.Before(oldestTime) {
+		if !found || v.LastSeen.Before(oldestTime) || v.LastSeen.Equal(oldestTime) && k.less(oldestKey) {
 			oldestKey = k
 			oldestTime = v.LastSeen
+			found = true
 		}
 	}
 
-	if oldestKey != "" {
-		delete(td.domainStats, oldestKey)
+	if found {
+		td.removeDomain(oldestKey)
 	}
+}
+
+func (td *TunnelingDetector) removeDomain(domain tunnelingDomainKey) {
+	delete(td.domainStats, domain)
+	delete(td.srcIPs, domain)
+	delete(td.lastAlerted, domain)
 }
 
 // cleanupLoop periodically removes old domain stats.
 func (td *TunnelingDetector) cleanupLoop() {
-	for range td.cleanupTicker.C {
-		td.cleanup()
+	defer td.wg.Done()
+	defer td.cleanupTicker.Stop()
+	for {
+		select {
+		case at := <-td.cleanupTicker.C:
+			td.Expire(at)
+		case <-td.stop:
+			return
+		}
 	}
 }
 
 // cleanup removes entries older than MaxAge.
 func (td *TunnelingDetector) cleanup() {
-	cutoff := time.Now().Add(-td.config.MaxAge)
+	td.Expire(time.Now())
+}
 
+// Expire removes evidence strictly older than MaxAge on the supplied observation
+// clock. Entries exactly at the age boundary retain the existing cleanup semantics.
+func (td *TunnelingDetector) Expire(at time.Time) {
+	cutoff := at.Add(-td.config.MaxAge)
 	td.mu.Lock()
 	defer td.mu.Unlock()
+	if td.stopped {
+		return
+	}
 
 	for k, v := range td.domainStats {
 		if v.LastSeen.Before(cutoff) {
-			delete(td.domainStats, k)
-			// Also clean up related tracking data
-			delete(td.srcIPs, k)
-			delete(td.lastAlerted, k)
+			td.removeDomain(k)
 		}
 	}
 }
 
-// Stop stops the tunneling detector.
+// Stop joins the janitor and drains accepted legacy callbacks. Callbacks must
+// return and must not call Stop themselves. No worker is created unless opted in.
 func (td *TunnelingDetector) Stop() {
-	td.cleanupTicker.Stop()
+	td.stopOnce.Do(func() {
+		td.mu.Lock()
+		td.stopped = true
+		close(td.stop)
+		if td.callbacks != nil {
+			close(td.callbacks)
+		}
+		td.mu.Unlock()
+		td.wg.Wait()
+	})
 }
 
-// TunnelingReport represents a tunneling detection report.
+// Stats returns a race-safe snapshot of detector retention and callback pressure.
+func (td *TunnelingDetector) Stats() TunnelingStats {
+	td.mu.RLock()
+	defer td.mu.RUnlock()
+	stats := td.stats
+	stats.Domains, stats.Stopped = len(td.domainStats), td.stopped
+	for domain, evidence := range td.domainStats {
+		stats.TrackedSubdomains += len(evidence.UniqueSubdomains)
+		stats.SourceIPs += len(td.srcIPs[domain])
+	}
+	return stats
+}
+
+// TunnelingReport represents a tunneling detection report. UniqueSubdomains is
+// the retained distinct count, a lower bound when UniqueSubdomainsTruncated is
+// true. SrcIPs is the retained source evidence, incomplete when SrcIPsTruncated.
 type TunnelingReport struct {
-	Domain             string
-	Score              float64
-	QueryCount         int64
-	UniqueSubdomains   int
-	HighEntropyQueries int64
-	TXTQueries         int64
-	AvgQueryLength     float64
-	Indicators         []string
+	Domain                    string
+	Score                     float64
+	QueryCount                int64
+	UniqueSubdomains          int
+	HighEntropyQueries        int64
+	TXTQueries                int64
+	AvgQueryLength            float64
+	Indicators                []string
+	UniqueSubdomainsTruncated bool
+	SrcIPs                    []string
+	SrcIPsTruncated           bool
 }
 
 // GetSuspiciousDomains returns domains with high tunneling scores.
 func (td *TunnelingDetector) GetSuspiciousDomains(threshold float64, limit int) []TunnelingReport {
 	td.mu.RLock()
 	defer td.mu.RUnlock()
+	if limit <= 0 {
+		return nil
+	}
 
 	var reports []TunnelingReport
-	for _, stats := range td.domainStats {
+	keys := make([]tunnelingDomainKey, 0, len(td.domainStats))
+	for key := range td.domainStats {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].less(keys[j]) })
+	for _, key := range keys {
+		stats := td.domainStats[key]
 		// Recalculate score with a dummy metadata
 		avgLength := float64(0)
 		if stats.QueryCount > 0 {
@@ -542,14 +765,20 @@ func (td *TunnelingDetector) GetSuspiciousDomains(threshold float64, limit int) 
 		}
 
 		report := TunnelingReport{
-			Domain:             stats.BaseDomain,
-			QueryCount:         stats.QueryCount,
-			UniqueSubdomains:   len(stats.UniqueSubdomains),
-			HighEntropyQueries: stats.HighEntropyCount,
-			TXTQueries:         stats.TXTQueryCount,
-			AvgQueryLength:     avgLength,
-			Indicators:         indicators,
+			Domain:                    stats.BaseDomain,
+			QueryCount:                stats.QueryCount,
+			UniqueSubdomains:          len(stats.UniqueSubdomains),
+			HighEntropyQueries:        stats.HighEntropyCount,
+			TXTQueries:                stats.TXTQueryCount,
+			AvgQueryLength:            avgLength,
+			Indicators:                indicators,
+			UniqueSubdomainsTruncated: stats.UniqueSubdomainsTruncated,
+			SrcIPsTruncated:           stats.SrcIPsTruncated,
 		}
+		for ip := range td.srcIPs[key] {
+			report.SrcIPs = append(report.SrcIPs, ip)
+		}
+		sort.Strings(report.SrcIPs)
 
 		// Simple score estimation
 		report.Score = float64(len(indicators)) * 0.25
@@ -562,16 +791,12 @@ func (td *TunnelingDetector) GetSuspiciousDomains(threshold float64, limit int) 
 		}
 	}
 
-	// Sort by score (simple selection)
-	for i := 0; i < len(reports) && i < limit; i++ {
-		maxIdx := i
-		for j := i + 1; j < len(reports); j++ {
-			if reports[j].Score > reports[maxIdx].Score {
-				maxIdx = j
-			}
+	sort.SliceStable(reports, func(i, j int) bool {
+		if reports[i].Score != reports[j].Score {
+			return reports[i].Score > reports[j].Score
 		}
-		reports[i], reports[maxIdx] = reports[maxIdx], reports[i]
-	}
+		return reports[i].Domain < reports[j].Domain
+	})
 
 	if limit > len(reports) {
 		limit = len(reports)

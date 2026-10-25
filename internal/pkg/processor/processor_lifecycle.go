@@ -131,6 +131,12 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 			return fmt.Errorf("start structured log sink: %w", err)
 		}
 	}
+	if p.noticeCommands != nil {
+		// A separate lifetime lets shutdown drain accepted actions before cancellation.
+		if err := p.noticeCommands.Start(context.Background()); err != nil {
+			return fmt.Errorf("start notice command sink: %w", err)
+		}
+	}
 	if p.eventDispatcher != nil {
 		if err := p.eventDispatcher.Start(p.ctx); err != nil {
 			return fmt.Errorf("start event dispatcher: %w", err)
@@ -465,9 +471,10 @@ func (p *Processor) Shutdown() error {
 			p.callCorrelator.Stop()
 		}
 
-		// Stop DNS tunneling detector to stop cleanup goroutine
-		if p.dnsTunneling != nil {
-			p.dnsTunneling.Stop()
+		if p.noticeCommands != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			p.shutdownErr = errors.Join(p.shutdownErr, p.noticeCommands.Close(ctx))
+			cancel()
 		}
 
 		// Stop lifecycle observation before closing session-owned writers.

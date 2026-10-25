@@ -170,6 +170,14 @@ var Streams = []Stream{
 		{"capture_scope", "enum"},
 		{"partial", "bool"},
 	}),
+	stream("notice", []Field{
+		{"ts", "time"}, {"uid", "string"}, {"id.orig_h", "addr"}, {"id.orig_p", "port"}, {"id.resp_h", "addr"}, {"id.resp_p", "port"}, {"proto", "enum"},
+		{"schema_version", "count"}, {"detector", "string"}, {"detector_version", "string"}, {"category", "enum"}, {"severity", "enum"}, {"status", "enum"},
+		{"detector_node_id", "string"}, {"detector_generation", "string"}, {"domain", "string"}, {"score", "double"}, {"threshold", "double"}, {"entropy", "double"},
+		{"queries", "count"}, {"unique_subdomains", "count"}, {"source_ips", "vector[addr]"}, {"unique_subdomains_truncated", "bool"}, {"source_ips_truncated", "bool"},
+		{"evidence_node_ids", "vector[string]"}, {"evidence_uids", "vector[string]"}, {"evidence_timestamps", "vector[time]"}, {"evidence_truncated", "bool"}, {"evidence_redacted", "bool"},
+		{"event_id", "string"}, {"community_id", "string"}, {"node_id", "string"}, {"capture_scope", "enum"}, {"partial", "bool"},
+	}),
 }
 
 func stream(name string, fields []Field) Stream {

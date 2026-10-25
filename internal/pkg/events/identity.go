@@ -110,6 +110,8 @@ func isNilEvent(event Event) bool {
 		return true
 	}
 	switch ev := event.(type) {
+	case *NoticeEvent:
+		return ev == nil
 	case *DNSEvent:
 		return ev == nil
 	case *DHCPEvent:
@@ -246,6 +248,17 @@ func (p *Producer) Assign(event Event) Event {
 		return event
 	}
 	switch ev := event.(type) {
+	case NoticeEvent:
+		ev = ev.Clone()
+		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
+		return ev
+	case *NoticeEvent:
+		if ev == nil {
+			return ev
+		}
+		copy := ev.Clone()
+		copy.eventBase.EventEnvelope = p.envelope(copy.EventEnvelope)
+		return copy
 	case DNSEvent:
 		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
 		return ev
@@ -440,4 +453,9 @@ func (p *Producer) NewKnownHostEvent(env Envelope) KnownHostEvent {
 
 func (p *Producer) NewKnownServiceEvent(env Envelope) KnownServiceEvent {
 	return NewKnownServiceEvent(p.envelope(env))
+}
+
+// NewNoticeEvent assigns a notice identity at the canonical producer.
+func (p *Producer) NewNoticeEvent(env Envelope) NoticeEvent {
+	return NewNoticeEvent(p.envelope(env))
 }

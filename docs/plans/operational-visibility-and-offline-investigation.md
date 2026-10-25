@@ -1,7 +1,7 @@
 # Operational visibility and offline investigation implementation plan
 
 **Date:** 2026-10-25
-**Status:** In progress; workstreams 1 and 2 implemented and verified; workstream 3 in final verification; workstreams 4–6 pending
+**Status:** In progress; workstreams 1–3 implemented and verified; workstream 4 in progress; workstreams 5–6 pending
 **Assessment baseline:** `8ba8ed27`
 **Scope:** Six ordered workstreams selected from the existing plans and research
 
@@ -188,43 +188,43 @@ Reuse the current event/runtime/log/subscription platform.
 
 ### A. Typed notices and DNS production
 
-- [ ] Define a versioned typed security-notice event with detector/version,
+- [x] Define a versioned typed security-notice event with detector/version,
       category, severity, observation time, threshold/score evidence, and bounded
       references to contributing observations. Specify notice identity,
       debounce/suppression accounting, and the initial lifecycle semantics.
-- [ ] Anchor DNS notices in real observation provenance. A domain finding may
+- [x] Anchor DNS notices in real observation provenance. A domain finding may
       aggregate several flows; retain bounded evidence references rather than
       inventing one synthetic flow or requiring an unrelated non-flow envelope
       redesign.
-- [ ] Publish notices through existing bounded dispatch and negotiated event
+- [x] Publish notices through existing bounded dispatch and negotiated event
       delivery. Define the detector authority in packet/event modes and hierarchy
       emission behavior so retransmission or relay does not create a new finding.
-- [ ] Wire DNS notice production independently of `--tunneling-command` while
+- [x] Wire DNS notice production independently of `--tunneling-command` while
       preserving detector enablement, threshold, and debounce behavior. Use the
       offline observation clock for deterministic replay where applicable.
-- [ ] Keep the current command option through an opt-in notice sink using the
+- [x] Keep the current command option through an opt-in notice sink using the
       existing safe command-execution facilities. Preserve substitutions, failure
       reporting, and bounded execution; do not execute the same action again merely
       because a notice is relayed or replayed through another consumer.
 
 ### B. Durable output and interactive delivery
 
-- [ ] Add canonical `notice.log` TSV and JSONL schemas/records and integrate
+- [x] Add canonical `notice.log` TSV and JSONL schemas/records and integrate
       existing rotation, queue-pressure, drain, and sensitive-field controls.
       Document file-sink durability boundaries separately from best-effort TUI
       delivery and external command success.
-- [ ] Add event adapters, capability negotiation, canonical query projection,
+- [x] Add event adapters, capability negotiation, canonical query projection,
       summaries, filtering, details, and local/remote TUI scope support.
-- [ ] Expose notice emission, suppression, drop, and sink-failure observations
+- [x] Expose notice emission, suppression, drop, and sink-failure observations
       without making slow subscriber queues affect hunter flow control.
-- [ ] Test DNS findings with command execution disabled and enabled, threshold and
+- [x] Test DNS findings with command execution disabled and enabled, threshold and
       debounce boundaries, deterministic offline production, duplicate transport
       delivery, slow subscribers, sink failure, and graceful shutdown.
-- [ ] Add actual hunter-transport-to-log and tap-runtime-to-log coverage using
+- [x] Add actual hunter-transport-to-log and tap-runtime-to-log coverage using
       generated DNS traffic. Include compatible behavior when a peer lacks notice
       support; direct calls to an event-mapping helper alone do not cover these
       paths.
-- [ ] Document notice evidence, scope, retention, loss, and command compatibility
+- [x] Document notice evidence, scope, retention, loss, and command compatibility
       without promising exactly-once external actions across crashes.
 
 **Completion:** An enabled DNS detector can produce a structured notice without
@@ -424,15 +424,15 @@ decryption, application attribution, and coherence scoring require separate scop
       checklist mappings below as each release increment completes. Mark tasks
       complete only after the corresponding behavior and checks are verified.
 
-| Workstream                   | Implementation commits | Verification evidence                                                | Disposition |
-| ---------------------------- | ---------------------- | -------------------------------------------------------------------- | ----------- |
-| 1. Failover integration      | `9bd9b347`, `0e1c05d4` | Runtime, custody, topology, expiry, race and build checks below      | Complete    |
-| 2. ECH visibility            | `07945e59`             | Parser/runtime/wire/log/CLI/TUI race checks; manual and build matrix | Complete    |
-| 3. DNS notices               | Pending                | Pending                                                              | Not started |
-| 4. Offline event history     | Pending                | Pending                                                              | Not started |
-| 5. Compact-index Milestone B | Pending                | Pending                                                              | Not started |
-| 6A. SSH/HASSH                | Pending                | Pending                                                              | Not started |
-| 6B. QUIC study               | Pending                | Pending                                                              | Not started |
+| Workstream                   | Implementation commits | Verification evidence                                                          | Disposition |
+| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------ | ----------- |
+| 1. Failover integration      | `9bd9b347`, `0e1c05d4` | Runtime, custody, topology, expiry, race and build checks below                | Complete    |
+| 2. ECH visibility            | `07945e59`             | Parser/runtime/wire/log/CLI/TUI race checks; manual and build matrix           | Complete    |
+| 3. DNS notices               | This increment         | Canonical runtime/transport/log/action/UI race suites, manual and build matrix | Complete    |
+| 4. Offline event history     | Pending                | Event storage implemented and under integration                                | In progress |
+| 5. Compact-index Milestone B | Pending                | Pending                                                                        | Not started |
+| 6A. SSH/HASSH                | Pending                | Pending                                                                        | Not started |
+| 6B. QUIC study               | Pending                | Pending                                                                        | Not started |
 
 ## Deferred scope
 
@@ -559,3 +559,65 @@ Verification passed: focused codec round-trip/schema tests and
 `go test -race -tags all ./internal/pkg/offline -count=1`. Current/unsupported
 version tests were updated with the format decisions; unchanged packet and
 storage tests passed.
+
+### Workstream 3 completion — 2026-10-25
+
+Starting revision: `07945e59`; W3 started from the committed W1/W2 tree. The
+separate offline ECH correction is `7bdee794`. W4's new event-storage files and
+indexer integration are separate working-tree changes and are excluded from this
+W3 release increment.
+
+Schema-1 `dns.tunneling` notices now carry warning/triggered decisions, explicit
+detector authority/generation, real triggering-flow provenance, bounded evidence,
+score/threshold/entropy/counts and independent redaction/truncation flags. Complete
+UDP messages and bounded, ordered DNS-over-TCP frames feed one canonical detector.
+Per-scope state uses one globally bounded domain table; capture timestamps govern
+expiry and debounce. Independent enablement and existing DNS/command options are
+part of the shared analysis-policy fingerprint.
+
+The optional `notice` log stream, typed negotiated transport, canonical query
+projection, and local/remote DNS and All TUI views consume the same finding.
+Commands use an opt-in local emission route with a joined, bounded worker;
+received/recovered notice payloads cannot authorize effects, even with forged
+matching authority fields. Command completion, event/file output, subscriber loss
+and crash durability remain separate contracts. Fixed action bounds and the
+at-least-once crash/reanalysis limitation are documented.
+
+The independent review found one hierarchy defect: a raw-forwarding processor
+accepted an event-only child and could acknowledge notices without a route to
+the terminal. Shared registration now rejects that combination or selects the
+child's explicit packet fallback, using the effective upstream mode after initial
+negotiation. Authenticated hunter and processor registrations cover both choices;
+the integrated post-fix review resolved the finding. **CLOSED** for W3, with no
+additional discovery or remaining material finding.
+
+Verification passed with the shared task cache and authorized host test execution:
+
+```sh
+go test -race -tags all ./internal/pkg/dns ./internal/pkg/eventanalysis -count=1
+go test -race -tags all ./internal/pkg/eventconfig ./internal/pkg/events/... ./internal/pkg/hunter/connection ./internal/pkg/processor/upstream ./internal/pkg/statusclient -count=1
+go test -race -tags all ./internal/pkg/processor -count=1
+go test -race -tags all ./internal/pkg/processor -run '^(TestDNSNotice|TestNetwork|TestInventoryPromise|TestEffectivePacketMode)' -count=1
+go test -race -tags all ./internal/pkg/hunter -run '^TestDNSNoticeActualHunter' -count=1
+go test -race -tags all ./cmd/tap -count=1
+go test -race -tags all ./cmd/sniff -count=1
+go test -tags all ./cmd/sniff ./cmd/tap ./cmd/hunt ./cmd/process ./cmd/watch -count=1
+make build-matrix
+make manual-check
+make manual
+```
+
+Additional focused race suites passed for log schemas/records, event queries,
+coalescing, TUI components/store/model, remote capture, and authorized/redacted
+subscriptions. Tests exercise actual hunter runtime/spool/mTLS-to-log and tap
+libpcap/local-runtime-to-log paths, old-peer refusal, deterministic framing and
+scope isolation, retries, WAL recovery, slow subscribers, forced file-write
+failure, command pressure/cancellation and graceful drain. Management/status JSON
+reports local decision and command outcomes plus clearly labeled shared sink
+counters. Generated payloads were reproducible using the same current Go
+codegenerators and available `protoc` recorded for W2.
+
+English, Catalan and German manual editions built with structural parity; all 47
+manual helper tests passed and both translation catalogs contained 5933/5933
+current translations. Task-owned private generator/review artifacts were removed;
+the umbrella task's shared cache remains owned until final task cleanup.

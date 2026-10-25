@@ -44,6 +44,7 @@ type Config struct {
 	EventFallbackToPackets bool
 	RequiredEventKinds     []eventsv1.EventKind
 	InventoryEnabled       bool
+	DNSNoticesEnabled      bool
 }
 
 const defaultOutboundQueueSize = 256
@@ -357,7 +358,7 @@ func (m *Manager) connectEndpoint(endpoint failover.Endpoint) error {
 			logger.Warn("Upstream explicitly selected packet fallback", "notice", regResp.GetForwardingNotice())
 		}
 		if acceptedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
-			if err := validateAcceptedEventProfile(regResp, m.config.RequiredEventKinds...); err != nil {
+			if err := validateAcceptedEventProfile(regResp, protoadapter.RequiredDNSNoticeKinds(m.config.RequiredEventKinds, m.config.DNSNoticesEnabled)...); err != nil {
 				return fmt.Errorf("upstream accepted an insufficient event forwarding profile: %w", err)
 			}
 		}
@@ -496,6 +497,13 @@ func RequiredInventoryKinds(required []eventsv1.EventKind, inventoryEnabled bool
 
 func (m *Manager) eventAnalysisFeatures() []string {
 	features := []string{"relay"}
+	notices := m.config.DNSNoticesEnabled
+	for _, kind := range m.config.RequiredEventKinds {
+		notices = notices || kind == eventsv1.EventKind_EVENT_KIND_NOTICE
+	}
+	if notices {
+		features = append(features, protoadapter.DNSNoticeProductionFeature)
+	}
 	// Processor registration enforces both inventory kinds on event-mode
 	// children whenever either of these conditions makes an upstream promise.
 	// Merely having inventory codecs is deliberately insufficient.

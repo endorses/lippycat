@@ -100,7 +100,7 @@ func eventKindsForProtocol(protocol string) []events.Kind {
 	case "All":
 		return nil
 	case "DNS":
-		return []events.Kind{events.KindDNS}
+		return []events.Kind{events.KindDNS, events.KindNotice}
 	case "DHCP":
 		return []events.Kind{events.KindDHCP}
 	case "NTP":

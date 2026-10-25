@@ -243,8 +243,10 @@ func negotiateEventForwarding(c *management.EventForwardingCapabilities, require
 		}
 	}
 	inventoryProduction := false
+	noticeProduction := false
 	for _, feature := range c.StatefulAnalysisFeatures {
 		inventoryProduction = inventoryProduction || feature == protoadapter.InventoryProductionFeature
+		noticeProduction = noticeProduction || feature == protoadapter.DNSNoticeProductionFeature
 	}
 	for _, required := range requiredKinds {
 		found := false
@@ -255,6 +257,9 @@ func negotiateEventForwarding(c *management.EventForwardingCapabilities, require
 			}
 		}
 		if (required == eventsv1.EventKind_EVENT_KIND_KNOWN_HOST || required == eventsv1.EventKind_EVENT_KIND_KNOWN_SERVICE) && !inventoryProduction {
+			found = false
+		}
+		if required == eventsv1.EventKind_EVENT_KIND_NOTICE && !noticeProduction {
 			found = false
 		}
 		if !found {
@@ -290,6 +295,15 @@ func (p *Processor) negotiateEventForwarding(c *management.EventForwardingCapabi
 			return 0, 0, nil, 0, "", err
 		}
 	}
+	if p.config.EventAnalysis != nil && p.config.EventAnalysis.EffectiveDNS().DetectTunneling {
+		has := false
+		for _, kind := range required {
+			has = has || kind == eventsv1.EventKind_EVENT_KIND_NOTICE
+		}
+		if !has {
+			required = append(required, eventsv1.EventKind_EVENT_KIND_NOTICE)
+		}
+	}
 	// A forwarding relay's inventory_production feature promises coverage for
 	// every accepted source, including event-only children which bypass local
 	// packet analysis. Local policy alone cannot fill missing child events.
@@ -299,6 +313,20 @@ func (p *Processor) negotiateEventForwarding(c *management.EventForwardingCapabi
 		required = upstream.RequiredInventoryKinds(required, p.config.EventAnalysis != nil && p.config.EventAnalysis.Inventory.Enabled)
 	}
 
+	if p.config.EventAnalysis == nil || !p.config.EventAnalysis.EffectiveDNS().DetectTunneling {
+		for _, kind := range required {
+			if kind != eventsv1.EventKind_EVENT_KIND_NOTICE {
+				continue
+			}
+			if c == nil || c.RequestedMode != management.ForwardingMode_FORWARDING_MODE_EVENTS {
+				return 0, 0, nil, 0, "", errors.New("notice log stream requires a notice-producing event source or enabled local DNS notice policy")
+			}
+			if c.AllowPacketFallback {
+				c = proto.Clone(c).(*management.EventForwardingCapabilities)
+				c.AllowPacketFallback = false
+			}
+		}
+	}
 	if p.config.EventAnalysis == nil || !p.config.EventAnalysis.Inventory.Enabled {
 		needsInventory := false
 		for _, kind := range required {
@@ -317,6 +345,16 @@ func (p *Processor) negotiateEventForwarding(c *management.EventForwardingCapabi
 				break
 			}
 		}
+	}
+	// A raw forwarding hop cannot reconstruct packets from event-only input.
+	// Resolve the effective mode (including initial negotiated fallback), rather
+	// than acknowledging findings that can never reach the terminal authority.
+	if c != nil && c.RequestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && p.config.UpstreamAddr != "" && !p.monitorEventMode() {
+		reason := "upstream forwarding uses packets and cannot relay event-only input"
+		if !c.AllowPacketFallback {
+			return 0, 0, nil, 0, "", errors.New(reason + "; enable explicit packet fallback or configure event forwarding")
+		}
+		return management.ForwardingMode_FORWARDING_MODE_PACKETS, 0, nil, 0, "explicit packet fallback: " + reason, nil
 	}
 	return negotiateEventForwarding(c, required...)
 }

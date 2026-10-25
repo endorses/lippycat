@@ -1142,3 +1142,18 @@ keywords disable filtering and do not delay packet output. With filtering
 enabled, complete multipart text is matched across segment boundaries before
 eligible contributing packets are released. Configuration and resource limits
 live under `tap.voip.sms`; see [SMS-over-IMS](../../docs/SMS_OVER_IMS.md).
+
+### Structured DNS notices
+
+Use `--dns-notices --log-dir ./logs --log-streams notice` to record DNS tunneling
+findings without a command hook. DNS mode retains `--detect-tunneling`; the shared
+threshold/debounce options and existing aliases control one canonical detector.
+Raw upstream forwarding delegates findings to the processor; event forwarding
+produces them locally and preserves their identity upstream. Received notices and
+transport/WAL replay do not execute commands. Explicit local PCAP reanalysis may
+produce a fresh finding and run an operator-configured command.
+
+The default seven log streams remain unchanged. The
+[DNS notice guide](../../docs/manual/src/part5-advanced/dns.md#structured-dns-security-notices)
+describes bounded evidence, scoped capture clocks, TUI/query support, privacy,
+and command compatibility limits.

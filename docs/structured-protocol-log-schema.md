@@ -21,6 +21,7 @@ schema version.
 | `ntp`            | `ntp.log`            | Opt-in NTP time-message observations                                 |
 | `known_hosts`    | `known_hosts.log`    | Opt-in bounded, scoped host observations                             |
 | `known_services` | `known_services.log` | Opt-in bounded, scoped responder/service observations                |
+| `notice`         | `notice.log`         | Opt-in typed detector decisions with bounded references              |
 
 “Zeek-compatible” means the field has the same name, Zeek TSV type, and
 meaning. It does not promise that lippycat observes every value Zeek would.
@@ -72,13 +73,13 @@ Every event has this envelope:
 
 The typed event-kind set is `dns`, `smtp`, `tls`, `http`, `conn`,
 `file_metadata`, `file_content`, `radius`, `dhcp`, `ntp`, `known_host`, and
-`known_service`. Event kinds are stable lowercase wire labels; Go type names
+`known_service`, and `notice`. Event kinds are stable lowercase wire labels; Go type names
 and plural inventory stream names are not wire labels. `file_content` remains
 local-only and is never accepted on the protocol-event transport.
 
 ### Metadata versus content
 
-`DNSEvent`, `TLSEvent`, `ConnEvent`, and `FileMetadataEvent` are metadata-only.
+`DNSEvent`, `TLSEvent`, `ConnEvent`, `NoticeEvent`, and `FileMetadataEvent` are metadata-only.
 `SMTPEvent` contains SMTP envelope/header metadata only: HELO, sender,
 recipients, routing headers, message identifiers, subject, replies, TLS state,
 and file IDs. `HTTPEvent` contains request/response metadata only: method, host,
@@ -335,3 +336,92 @@ additional sensitive-field permission. Projection copies events and never
 mutates shared originals. Explicit local log selection includes these fields;
 operators must restrict file access and retention. Raw options, vendor contents,
 credentials and authentication material are excluded.
+
+## DNS security notice schema 1
+
+`notice.log` is selected explicitly with `--log-streams notice`; the default seven
+streams remain unchanged. Wire API v1 adds event kind `12` and typed oneof field
+`21`, without changing existing event messages or requiring notice support for
+workloads that do not request it. An unsupported optional kind is a compatibility
+omission; configured notice requirements must negotiate or use explicit packet
+fallback. `RequiredKinds` reflects selected streams rather than all supported
+encodings.
+
+A notice records a detector decision, not an external-action receipt. The initial
+producer uses detector `dns.tunneling`, detector version `1`, category `security`,
+severity `warning`, and status `triggered`. `ts` is capture observation time.
+Envelope endpoints and `uid` identify the real triggering flow; a domain finding
+can span several observations and never invents a synthetic aggregate flow.
+`node_id` remains the capture origin. `detector_node_id` and
+`detector_generation` identify the actual analysis authority independently of the
+origin. `event_id` and the event envelope's session/sequence retain delivery
+identity through retries and relays. Authority strings received over the wire do
+not authorize local command execution.
+
+`queries` is the legacy count of DNS observations, including responses, rather
+than a unique query or connection count. Unique subdomain/source-address evidence
+and references are bounded; truncation flags preserve that limitation. References
+are sorted by capture timestamp, then node and UID, and identify actual
+contributing observations without requiring a preassigned delivery event ID.
+The current producer retains the trigger reference and marks aggregated evidence
+incomplete when additional observations contributed. Source addresses are
+canonical, sorted, and unique. Wire collections are limited to 4096 entries;
+configured producer limits may be smaller. Scores and thresholds must be finite
+in `[0,1]`, entropy finite and nonnegative, and a triggered score must meet its
+threshold. Schema version, authority identity, timestamp order, positive counts,
+and collection limits are validated during encoding and decoding.
+
+The canonical field order is:
+
+| Field                         | Type             |
+| ----------------------------- | ---------------- |
+| `ts`                          | `time`           |
+| `uid`                         | `string`         |
+| `id.orig_h`                   | `addr`           |
+| `id.orig_p`                   | `port`           |
+| `id.resp_h`                   | `addr`           |
+| `id.resp_p`                   | `port`           |
+| `proto`                       | `enum`           |
+| `schema_version`              | `count`          |
+| `detector`                    | `string`         |
+| `detector_version`            | `string`         |
+| `category`                    | `enum`           |
+| `severity`                    | `enum`           |
+| `status`                      | `enum`           |
+| `detector_node_id`            | `string`         |
+| `detector_generation`         | `string`         |
+| `domain`                      | `string`         |
+| `score`                       | `double`         |
+| `threshold`                   | `double`         |
+| `entropy`                     | `double`         |
+| `queries`                     | `count`          |
+| `unique_subdomains`           | `count`          |
+| `source_ips`                  | `vector[addr]`   |
+| `unique_subdomains_truncated` | `bool`           |
+| `source_ips_truncated`        | `bool`           |
+| `evidence_node_ids`           | `vector[string]` |
+| `evidence_uids`               | `vector[string]` |
+| `evidence_timestamps`         | `vector[time]`   |
+| `evidence_truncated`          | `bool`           |
+| `evidence_redacted`           | `bool`           |
+| `event_id`                    | `string`         |
+| `community_id`                | `string`         |
+| `node_id`                     | `string`         |
+| `capture_scope`               | `enum`           |
+| `partial`                     | `bool`           |
+
+The three evidence vectors are aligned by position. JSONL preserves address and
+timestamp vectors as typed arrays; TSV uses ordinary vector escaping and the
+stream's canonical headers. Capacity truncation and authorization redaction are
+separate: a nonsensitive subscriber receives no source-address list or cross-flow
+references and has `evidence_redacted=true`, while original truncation flags stay
+unchanged. Removed vectors are unset. Domain, score/count evidence, identity,
+origin, authority, and triggering flow remain available. Local file selection is
+explicit and includes sensitive evidence; operators must protect those files.
+No packet/file body or executable command payload is part of the notice schema.
+
+Notice events pass through log coalescing unchanged. Per-stream queue bounds,
+overflow accounting, rotation and graceful drain apply as for existing streams.
+This file sink is independent of best-effort TUI subscriptions and asynchronous
+command actions. Neither stable event identity nor reliable ingress promises
+exactly-once file output or external side effects across crashes.

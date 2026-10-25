@@ -42,3 +42,7 @@
 #path	known_services
 #fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	host	port	transport	service	evidence	community_id	node_id	capture_scope	partial
 #types	time	string	addr	port	addr	port	enum	addr	port	enum	string	enum	string	string	enum	bool
+[notice.log]
+#path	notice
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	schema_version	detector	detector_version	category	severity	status	detector_node_id	detector_generation	domain	score	threshold	entropy	queries	unique_subdomains	source_ips	unique_subdomains_truncated	source_ips_truncated	evidence_node_ids	evidence_uids	evidence_timestamps	evidence_truncated	evidence_redacted	event_id	community_id	node_id	capture_scope	partial
+#types	time	string	addr	port	addr	port	enum	count	string	string	enum	enum	enum	string	string	string	double	double	double	count	count	vector[addr]	bool	bool	vector[string]	vector[string]	vector[time]	bool	bool	string	string	string	enum	bool

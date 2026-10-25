@@ -114,3 +114,38 @@ but access and local files also require protection. Sensitive HTTP, SMTP, DHCP, 
 file fields require both a subscriber request and
 `--event-allow-sensitive-fields`; file metadata additionally requires
 `--event-allow-file-metadata`. File content is never carried by this event API.
+
+## DNS security notices
+
+Enable findings independently of external commands with `--dns-notices`, then
+select the optional `notice` stream:
+
+```bash
+lc process --listen :55555 --dns-notices \
+  --log-dir ./logs --log-format json --log-streams notice
+```
+
+The seven default streams are unchanged. Notices carry schema/version, detector
+and analysis authority, capture-origin/flow identity, bounded DNS evidence and
+truncation flags. `queries` includes responses under the legacy observation
+counting rule. Findings use capture-time debounce and expiry, configured global
+and per-domain state bounds, and separate observation scopes. Event-forwarding
+sources own their findings; packet-forwarding sources delegate to upstream
+analysis. Relays preserve identity and do not rescore DNS or execute actions.
+
+TUI All/DNS Events supports `kind:notice`, `detector:dns.tunneling`,
+`score:>=0.7`, and domain/evidence predicates. Nonsensitive subscription projection
+removes cross-flow references/source lists and sets `evidence_redacted=true`
+without changing capacity-truncation flags. Local files include sensitive
+evidence and require suitable access controls. Queue overflow, sink failures,
+TUI retention, and command outcomes remain distinct from detector decisions;
+absence of a row is not an observed negative.
+
+See the [DNS operator guide](manual/src/part5-advanced/dns.md#structured-dns-security-notices),
+[stream guide](manual/src/part5-advanced/structured-protocol-logs.md#noticelog),
+and [schema contract](structured-protocol-log-schema.md#dns-security-notice-schema-1).
+
+`lc show status` exposes `dns_notices` for configured notice policy, including
+local-authority enablement, findings/suppression/loss, and command outcome and
+boundary accounting. Its log and dispatcher sink counters are shared totals
+across all streams; they do not attribute losses specifically to notices.

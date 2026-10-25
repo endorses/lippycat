@@ -4,9 +4,11 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -179,7 +181,12 @@ func (e *CommandExecutor) ExecuteTunnelingCommand(meta TunnelingMetadata) {
 	if e == nil || e.config.TunnelingCommand == "" {
 		return
 	}
+	command, fields := e.tunnelingCommand(meta)
+	go e.executeAsync(command, "tunneling", fields)
+}
 
+// tunnelingCommand preserves the legacy substitutions for both command paths.
+func (e *CommandExecutor) tunnelingCommand(meta TunnelingMetadata) (string, map[string]string) {
 	// Log warning if domain contains shell metacharacters
 	// Domain names come from DNS packets and could be attacker-controlled
 	if containsShellMetachars(meta.Domain) {
@@ -201,23 +208,91 @@ func (e *CommandExecutor) ExecuteTunnelingCommand(meta TunnelingMetadata) {
 	// Substitute all placeholders with shell-escaped values to prevent command injection.
 	// Domain comes from DNS packets and could be attacker-controlled.
 	// Other values are internally generated but escaped for consistency.
-	cmd := e.config.TunnelingCommand
-	cmd = strings.ReplaceAll(cmd, "%domain%", shellEscape(meta.Domain))
-	cmd = strings.ReplaceAll(cmd, "%score%", shellEscape(scoreStr))
-	cmd = strings.ReplaceAll(cmd, "%entropy%", shellEscape(entropyStr))
-	cmd = strings.ReplaceAll(cmd, "%queries%", shellEscape(queriesStr))
-	cmd = strings.ReplaceAll(cmd, "%srcips%", shellEscape(srcIPsStr))
-	cmd = strings.ReplaceAll(cmd, "%hunter%", shellEscape(meta.HunterID))
-	cmd = strings.ReplaceAll(cmd, "%timestamp%", shellEscape(meta.Timestamp.Format(time.RFC3339)))
+	// A single pass keeps placeholder-looking observation bytes opaque. Sequential
+	// replacements would reinterpret an inserted %hunter% inside already quoted
+	// domain data and could break its shell-escaping boundary.
+	cmd := strings.NewReplacer(
+		"%domain%", shellEscape(meta.Domain),
+		"%score%", shellEscape(scoreStr),
+		"%entropy%", shellEscape(entropyStr),
+		"%queries%", shellEscape(queriesStr),
+		"%srcips%", shellEscape(srcIPsStr),
+		"%hunter%", shellEscape(meta.HunterID),
+		"%timestamp%", shellEscape(meta.Timestamp.Format(time.RFC3339)),
+	).Replace(e.config.TunnelingCommand)
 
-	go e.executeAsync(cmd, "tunneling", map[string]string{
+	return cmd, map[string]string{
 		"domain":  meta.Domain,
 		"score":   scoreStr,
 		"hunter":  meta.HunterID,
 		"src_ips": srcIPsStr,
 		"queries": queriesStr,
 		"entropy": entropyStr,
-	})
+	}
+}
+
+var ErrCommandConcurrencyLimit = errors.New("command executor concurrency limit reached")
+
+// boundedCommandOutput retains a diagnostic prefix while draining the complete
+// output stream. stdout and stderr may write concurrently.
+type boundedCommandOutput struct {
+	mu        sync.Mutex
+	limit     int
+	bytes     []byte
+	truncated bool
+}
+
+func (w *boundedCommandOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	keep := min(len(p), w.limit-len(w.bytes))
+	w.bytes = append(w.bytes, p[:keep]...)
+	w.truncated = w.truncated || keep < len(p)
+	return len(p), nil
+}
+
+// ExecuteTunnelingCommandContext executes one admitted notice action and waits
+// for its completion. Unlike the legacy asynchronous helpers, the caller owns
+// cancellation, bounded diagnostics and shutdown of this execution.
+func (e *CommandExecutor) ExecuteTunnelingCommandContext(parent context.Context, meta TunnelingMetadata, maxOutputBytes int) error {
+	if !e.HasTunnelingCommand() {
+		return errors.New("tunneling command is not configured")
+	}
+	if parent == nil || maxOutputBytes <= 0 {
+		return errors.New("tunneling execution requires a context and positive output limit")
+	}
+	if err := parent.Err(); err != nil {
+		return err
+	}
+	select {
+	case e.sem <- struct{}{}:
+		defer func() { <-e.sem }()
+	default:
+		return ErrCommandConcurrencyLimit
+	}
+	command, _ := e.tunnelingCommand(meta)
+	if e.config.DryRun {
+		logger.Info("Notice command executor dry run", "type", "tunneling", "command", command)
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(parent, e.config.Timeout)
+	defer cancel()
+	// #nosec G204 -- Admin-configured template; every observation substitution is shell-escaped.
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	configureNoticeCommandProcess(cmd)
+	// Also bound waits for inherited output pipes on platforms where process
+	// groups are unavailable. Descendant termination is a Unix capability.
+	cmd.WaitDelay = 100 * time.Millisecond
+	output := &boundedCommandOutput{limit: maxOutputBytes}
+	cmd.Stdout, cmd.Stderr = output, output
+	err := cmd.Run()
+	if err != nil {
+		err = errors.Join(err, ctx.Err())
+		logger.Error("Notice tunneling command failed", "error", err, "output", string(output.bytes), "output_truncated", output.truncated)
+		return fmt.Errorf("execute tunneling command: %w", err)
+	}
+	logger.Debug("Notice tunneling command completed", "output", string(output.bytes), "output_truncated", output.truncated)
+	return nil
 }
 
 // executeAsync executes a command with timeout and concurrency control

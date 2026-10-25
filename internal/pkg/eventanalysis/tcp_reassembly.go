@@ -103,6 +103,7 @@ type applicationStream struct {
 	smtpContextSet    bool
 	partial           bool
 	protocolHint      string
+	dnsFramingLost    bool
 	tlsHandshake      []byte
 	tlsRecordVersion  uint16
 	tlsContext        reassemblyMark
@@ -128,7 +129,8 @@ func (s *applicationStream) ReassembledSG(sg reassembly.ScatterGather, _ reassem
 		return
 	}
 	ci := sg.CaptureInfo(available - 1)
-	if _, ok := captureContext(ci); !ok {
+	ctx, ok := captureContext(ci)
+	if !ok {
 		s.partial = true
 		return
 	}
@@ -136,9 +138,20 @@ func (s *applicationStream) ReassembledSG(sg reassembly.ScatterGather, _ reassem
 	if skip != 0 {
 		s.partial = true
 	}
+	if skip > 0 && s.isDNSStream(ctx.protocolHint) {
+		// A known byte gap destroys DNS frame alignment. Do not guess a new
+		// prefix by joining pre-gap data with post-gap bytes. A new connection
+		// gets a new stream and can establish framing normally.
+		s.dnsFramingLost = true
+		s.consume(len(s.buffer))
+		return
+	}
 	chunk := sg.Fetch(available)
 	if len(s.buffer)+len(chunk) > maxReassembledApplicationBytes {
-		s.buffer = s.buffer[:0]
+		s.consume(len(s.buffer))
+		if s.isDNSStream(ctx.protocolHint) {
+			s.dnsFramingLost = true
+		}
 		s.partial = true
 		s.runtime.stats.Invalid++
 		return
@@ -191,6 +204,8 @@ func (s *applicationStream) parse() {
 	}
 	srcPort, dstPort := flowPort(s.tcpFlow.Src()), flowPort(s.tcpFlow.Dst())
 	switch {
+	case s.isDNSStream(s.protocolHint):
+		s.parseDNS()
 	case s.protocolHint == "tls" || isTLSPort(srcPort) || isTLSPort(dstPort):
 		s.parseTLS()
 	case s.protocolHint == "http" || isHTTPPort(srcPort) || isHTTPPort(dstPort):
@@ -563,11 +578,13 @@ func (s *applicationStream) captureSMTPBody(line string) {
 }
 
 func (s *applicationStream) emit(ctx reassemblyContext, ci gopacket.CaptureInfo, tls *data.TLSMetadata, http *data.HTTPMetadata, email *data.EmailMetadata) {
-	metadata := &data.PacketMetadata{
-		SrcIp: s.netFlow.Src().String(), DstIp: s.netFlow.Dst().String(),
-		SrcPort: uint32(flowPort(s.tcpFlow.Src())), DstPort: uint32(flowPort(s.tcpFlow.Dst())),
-		Transport: "tcp", Tls: tls, Http: http, Email: email,
-	}
+	s.emitApplication(ctx, ci, &data.PacketMetadata{Tls: tls, Http: http, Email: email})
+}
+
+func (s *applicationStream) emitApplication(ctx reassemblyContext, ci gopacket.CaptureInfo, metadata *data.PacketMetadata) {
+	metadata.SrcIp, metadata.DstIp = s.netFlow.Src().String(), s.netFlow.Dst().String()
+	metadata.SrcPort, metadata.DstPort = uint32(flowPort(s.tcpFlow.Src())), uint32(flowPort(s.tcpFlow.Dst()))
+	metadata.Transport = "tcp"
 	scope := ctx.scope
 	if scope == "" {
 		scope = events.CaptureScopeFull
@@ -579,11 +596,13 @@ func (s *applicationStream) emit(ctx reassemblyContext, ci gopacket.CaptureInfo,
 	}
 	service := ""
 	switch {
-	case http != nil:
+	case metadata.Dns != nil:
+		service = "DNS"
+	case metadata.Http != nil:
 		service = "HTTP"
-	case tls != nil:
+	case metadata.Tls != nil:
 		service = "TLS"
-	case email != nil:
+	case metadata.Email != nil:
 		service = "SMTP"
 	}
 	analysisScope := s.runtime.associationScope(ctx.source, env)
@@ -598,7 +617,7 @@ func (s *applicationStream) emit(ctx reassemblyContext, ci gopacket.CaptureInfo,
 			s.runtime.emitInventory(proof)
 		}
 	}
-	s.runtime.emitMetadata(env, metadata)
+	s.runtime.emitMetadata(env, metadata, analysisScope)
 	s.partial = false
 }
 

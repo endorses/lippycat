@@ -642,6 +642,8 @@ func eventKindIcon(kind events.Kind) string {
 		return "🌐"
 	case events.KindDNS:
 		return "🔍"
+	case events.KindNotice:
+		return "⚠"
 	case events.KindDHCP:
 		return "📡"
 	case events.KindNTP:
@@ -686,6 +688,8 @@ func (v *EventsView) View() string { return v.RenderTimeline(v.width, v.height, 
 
 func (v *EventsView) eventColor(kind events.Kind) lipgloss.Color {
 	switch kind {
+	case events.KindNotice:
+		return v.theme.WarningColor
 	case events.KindTLS:
 		return v.theme.TLSColor
 	case events.KindHTTP:

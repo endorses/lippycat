@@ -285,7 +285,7 @@ lc process --listen :55555 \
 
 - Alerts trigger when a domain's tunneling score crosses the threshold
 - Debounce prevents alert fatigue (same domain won't alert again until debounce expires)
-- Source IPs are tracked across all hunters for cross-hunter correlation
+- Source IP evidence stays within its observation scope; independent hunters do not merge overlapping private-address findings
 - Commands execute asynchronously (don't block packet processing)
 
 ### Protocol Detection
@@ -1098,3 +1098,18 @@ interface and domain extension for compatible MDFs. It defaults to `false`.
 Processor delivery identity and sequencing remain stable across source changes;
 legacy journal bytes replay unchanged. See [central LI selection and the receiver
 contract](../../docs/DISTRIBUTED_MEDIA.md#li-central-task-selection).
+
+### Structured DNS notices
+
+`--dns-notices` enables canonical DNS tunneling findings without requiring
+`--tunneling-command`. Use `--log-dir ./logs --log-streams notice` for the optional
+TSV/JSONL notice stream; the default seven streams remain unchanged. Shared
+`--dns-notice-threshold` and `--dns-notice-debounce` options retain the existing
+threshold/debounce aliases. Packet-mode processors own analysis; event-mode
+processors receive and relay the edge's findings without rescoring or executing
+command hooks for received/replayed notices. Fresh local findings can still use
+the existing bounded command hook and substitutions.
+
+See the [DNS notice guide](../../docs/manual/src/part5-advanced/dns.md#structured-dns-security-notices)
+for capture-time state bounds, scope isolation, evidence/redaction, query fields,
+command limits, and separate log/TUI/action delivery guarantees.

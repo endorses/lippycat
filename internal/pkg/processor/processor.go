@@ -295,9 +295,10 @@ type Processor struct {
 	commandExecutor *CommandExecutor
 
 	// Protocol aggregators
-	callAggregator *voip.CallAggregator   // VoIP call state aggregation
-	callCorrelator *CallCorrelator        // Cross-B2BUA call correlation
-	dnsTunneling   *dns.TunnelingDetector // DNS tunneling detection aggregation
+	callAggregator   *voip.CallAggregator // VoIP call state aggregation
+	callCorrelator   *CallCorrelator      // Cross-B2BUA call correlation
+	noticeCommands   *NoticeCommandSink
+	noticeGeneration string
 
 	// Virtual interface manager
 	vifManager vinterface.Manager
@@ -324,6 +325,7 @@ type Processor struct {
 	eventAnalysisSubscribers int
 	eventAnalysisClosed      bool
 	eventRuntime             *eventanalysis.Runtime
+	finalEventStats          eventanalysis.Stats
 	localEventAnalysis       bool // Explicit local output requires analysis independently of upstream mode.
 	eventProducers           *events.ProducerSet
 	upstreamEventRouter      *upstream.EventRouter
@@ -375,11 +377,33 @@ func New(config Config) (_ *Processor, constructorErr error) {
 			return nil, fmt.Errorf("upstream failover: %w", err)
 		}
 	}
+	legacyDNS := config.EventAnalysis == nil || config.EventAnalysis.DNS == nil
 	policy, policyErr := eventconfig.Resolve(config.EventAnalysis)
 	if policyErr != nil {
 		return nil, fmt.Errorf("event analysis configuration: %w", policyErr)
 	}
 	config.EventAnalysis = policy
+	dnsPolicy := policy.EffectiveDNS()
+	hasTunnelingCommand := config.CommandExecutorConfig != nil && config.CommandExecutorConfig.TunnelingCommand != ""
+	if hasTunnelingCommand && legacyDNS {
+		dnsPolicy.DetectTunneling = true
+	}
+	if legacyDNS && config.TunnelingThreshold != 0 {
+		dnsPolicy.Threshold = config.TunnelingThreshold
+	}
+	if legacyDNS && config.TunnelingDebounce != 0 {
+		dnsPolicy.Debounce = config.TunnelingDebounce
+	}
+	policy.DNS = &dnsPolicy
+	if err := dnsPolicy.Validate(); err != nil {
+		return nil, fmt.Errorf("DNS notice policy: %w", err)
+	}
+	if hasTunnelingCommand && !dnsPolicy.DetectTunneling {
+		return nil, fmt.Errorf("tunneling command requires enabled DNS notices")
+	}
+	if hasTunnelingCommand && config.UpstreamAddr != "" && (config.UpstreamForwardMode != "events" || config.UpstreamEventFallbackToPackets) {
+		return nil, fmt.Errorf("tunneling command requires a canonical analysis owner; raw forwarding nodes delegate DNS detection to their upstream")
+	}
 
 	if config.ListenAddr == "" {
 		return nil, fmt.Errorf("listen address is required")
@@ -454,7 +478,15 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	if err := p.prepareLIStorage(); err != nil {
 		return nil, err
 	}
-	p.dnsTunneling = dns.NewTunnelingDetector(dns.DefaultTunnelingConfig())
+	authority := config.ProcessorID
+	if authority == "" {
+		authority = "local"
+	}
+	noticeProducer, noticeErr := events.NewLiveProducer(authority)
+	if noticeErr != nil {
+		return nil, fmt.Errorf("initialize notice generation: %w", noticeErr)
+	}
+	p.noticeGeneration = noticeProducer.SessionID()
 
 	eventQueueSize := config.EventQueueSize
 	if eventQueueSize <= 0 {
@@ -525,6 +557,8 @@ func New(config Config) (_ *Processor, constructorErr error) {
 				err = p.logSink.Register(events.KindKnownService, "known_services", logrecords.KnownServices)
 			case "radius":
 				err = p.logSink.Register(events.KindRADIUS, "radius", logrecords.RADIUS)
+			case "notice":
+				err = p.logSink.Register(events.KindNotice, "notice", logrecords.Notice)
 			case "dns":
 				err = p.logSink.Register(events.KindDNS, "dns", logrecords.DNS)
 			case "smtp":
@@ -548,7 +582,7 @@ func New(config Config) (_ *Processor, constructorErr error) {
 		if coalesceErr != nil {
 			return nil, fmt.Errorf("initialize structured log event coalescer: %w", coalesceErr)
 		}
-		if err = p.eventDispatcher.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
+		if err = p.eventDispatcher.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata, events.KindNotice); err != nil {
 			return nil, fmt.Errorf("register structured log event sink: %w", err)
 		}
 	}
@@ -574,36 +608,11 @@ func New(config Config) (_ *Processor, constructorErr error) {
 		}
 	}
 
-	// Wire DNS tunneling alert callback if tunneling command is configured
 	if p.commandExecutor != nil && p.commandExecutor.HasTunnelingCommand() {
-		// Apply defaults for threshold and debounce
-		threshold := config.TunnelingThreshold
-		if threshold == 0 {
-			threshold = 0.7 // Default threshold
+		p.noticeCommands, err = NewNoticeCommandSink(p.commandExecutor, NoticeCommandSinkConfig{AuthorityNodeID: authority, AuthorityGeneration: p.noticeGeneration, QueueSize: 128, MaxIdentities: 65536, MaxOutputBytes: 64 << 10})
+		if err != nil {
+			return nil, fmt.Errorf("initialize DNS notice command sink: %w", err)
 		}
-		debounce := config.TunnelingDebounce
-		if debounce == 0 {
-			debounce = 5 * time.Minute // Default debounce
-		}
-
-		p.dnsTunneling.SetAlertConfig(dns.AlertConfig{
-			Threshold: threshold,
-			Debounce:  debounce,
-			Callback: func(alert dns.TunnelingAlert) {
-				p.commandExecutor.ExecuteTunnelingCommand(TunnelingMetadata{
-					Domain:    alert.Domain,
-					Score:     alert.Score,
-					Entropy:   alert.Entropy,
-					Queries:   alert.Queries,
-					SrcIPs:    alert.SrcIPs,
-					HunterID:  alert.HunterID,
-					Timestamp: alert.Timestamp,
-				})
-			},
-		})
-		logger.Info("DNS tunneling alert configured",
-			"threshold", threshold,
-			"debounce", debounce)
 	}
 
 	// A shared call lifecycle is required for every VoIP path, including tap
@@ -793,12 +802,14 @@ func New(config Config) (_ *Processor, constructorErr error) {
 			return nil, fmt.Errorf("required upstream event kinds: %w", requiredErr)
 		}
 	}
+	requiredEventKinds = protoadapter.RequiredDNSNoticeKinds(requiredEventKinds, config.EventAnalysis.EffectiveDNS().DetectTunneling)
 	// Initialize upstream manager if configured
 	if config.UpstreamAddr != "" {
 		p.upstreamManager = upstream.NewManager(
 			upstream.Config{
 				OnEndpoint:             config.PrepareUpstream,
 				InventoryEnabled:       config.EventAnalysis.Inventory.Enabled,
+				DNSNoticesEnabled:      config.EventAnalysis.EffectiveDNS().DetectTunneling,
 				RequiredEventKinds:     requiredEventKinds,
 				Address:                "", // Endpoints is the normalized source of truth.
 				Endpoints:              append([]failover.Endpoint(nil), config.UpstreamProcessors...),
@@ -887,6 +898,7 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	p.callCorrelator = NewCallCorrelator()
 	p.initLIRuntime()
 	p.sdpDiagnostics = newProcessorSDPDiagnostics()
+	p.statsCollector.SetDNSNoticeProvider(p.dnsNoticeStatusProto)
 	p.statsCollector.SetRouteProvider(func() *management.RouteStatus {
 		route := &management.RouteStatus{PolicyReady: !p.filterProcessingBlocked()}
 		if manager := p.upstreamManager; manager != nil {
@@ -1076,15 +1088,17 @@ func (p *Processor) GetTLSKeylogWriter() *TLSKeylogWriter {
 }
 
 // GetSuspiciousDomains returns domains with high DNS tunneling scores.
-// This provides a cross-hunter view of potentially malicious DNS activity.
+// Findings remain isolated by capture source, epoch and interface scope.
 // Threshold is the minimum score (0.0-1.0) for a domain to be considered suspicious.
 // Limit is the maximum number of domains to return, sorted by score descending.
 // Returns nil if DNS tunneling detection is not enabled.
 func (p *Processor) GetSuspiciousDomains(threshold float64, limit int) []dns.TunnelingReport {
-	if p.dnsTunneling == nil {
+	p.eventAnalysisMu.RLock()
+	defer p.eventAnalysisMu.RUnlock()
+	if p.eventRuntime == nil {
 		return nil
 	}
-	return p.dnsTunneling.GetSuspiciousDomains(threshold, limit)
+	return p.eventRuntime.SuspiciousDomains(threshold, limit)
 }
 
 // SynthesizeVirtualHunter creates a synthetic ConnectedHunter representing

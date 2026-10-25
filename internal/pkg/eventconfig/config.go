@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const AnalysisRevision = "network-observations-v3"
+const AnalysisRevision = "network-observations-v4"
 
 type Inventory struct {
 	Enabled                        bool
@@ -26,6 +26,7 @@ type Inventory struct {
 	Retention                      time.Duration
 }
 type Config struct {
+	DNS       *DNSPolicy
 	DHCP      dhcp.Config
 	NTP       ntp.Config
 	Inventory Inventory
@@ -35,10 +36,15 @@ func Default() Config {
 	return Config{DHCP: dhcp.DefaultConfig(), NTP: ntp.DefaultConfig(), Inventory: Inventory{Enabled: true, MaxEntries: 16384, MaxEntriesPerScope: 4096, MaxBytes: 8 << 20, MaxBytesPerScope: 2 << 20, Retention: 24 * time.Hour}}
 }
 func (c Config) Clone() Config {
+	d := c.EffectiveDNS()
+	c.DNS = &d
 	c.Inventory.LocalCIDRs = append([]string(nil), c.Inventory.LocalCIDRs...)
 	return c
 }
 func (c Config) Validate() error {
+	if err := c.EffectiveDNS().Validate(); err != nil {
+		return err
+	}
 	if err := c.DHCP.Validate(); err != nil {
 		return err
 	}
@@ -68,6 +74,7 @@ func (c Config) Validate() error {
 // Equivalent ordering and host bits in CIDRs do not change the identity.
 func (c Config) Fingerprint() string {
 	c = c.Clone()
+	c.DNS.canonicalize()
 	for i, value := range c.Inventory.LocalCIDRs {
 		p, err := netip.ParsePrefix(value)
 		if err != nil {
@@ -99,6 +106,7 @@ func (c Config) Fingerprint() string {
 // zero/negative values survive to Validate instead of silently becoming defaults.
 func FromViper(v *viper.Viper) *Config {
 	c := Default()
+	c.DNS = readDNS(v)
 	setInt := func(key string, dst *int) {
 		if v.IsSet(key) {
 			*dst = v.GetInt(key)
@@ -133,6 +141,7 @@ func FromViper(v *viper.Viper) *Config {
 }
 
 var bindings = map[string]string{
+	"dns-notices": "events.dns.notices", "dns-notice-threshold": "events.dns.threshold", "dns-notice-debounce": "events.dns.debounce", "dns-analysis-ports": "events.dns.ports", "dns-notice-max-domains": "events.dns.max_domains", "dns-notice-max-subdomains": "events.dns.max_subdomains", "dns-notice-max-source-ips": "events.dns.max_source_ips", "dns-notice-retention": "events.dns.retention",
 	"inventory": "events.inventory.enabled", "inventory-local-cidrs": "events.inventory.local_cidrs",
 	"inventory-max-entries": "events.inventory.max_entries", "inventory-max-bytes": "events.inventory.max_bytes",
 	"inventory-scope-max-entries": "events.inventory.max_entries_per_scope", "inventory-scope-max-bytes": "events.inventory.max_bytes_per_scope",
@@ -144,6 +153,15 @@ var bindings = map[string]string{
 
 func Register(flags *pflag.FlagSet) {
 	c := Default()
+	d := c.EffectiveDNS()
+	flags.Bool("dns-notices", d.DetectTunneling, "Produce bounded DNS tunneling security notices independently of command hooks")
+	flags.Float64("dns-notice-threshold", d.Threshold, "DNS security notice score threshold (0..1)")
+	flags.Duration("dns-notice-debounce", d.Debounce, "Capture-time minimum interval between DNS notices per domain and scope")
+	flags.StringSlice("dns-analysis-ports", []string{"53", "5353"}, "Ports eligible for canonical DNS parsing")
+	flags.Int("dns-notice-max-domains", d.Detector.MaxDomains, "Maximum tracked DNS domains across capture scopes")
+	flags.Int("dns-notice-max-subdomains", d.Detector.MaxTrackedSubdomains, "Maximum retained distinct subdomains per domain")
+	flags.Int("dns-notice-max-source-ips", d.Detector.MaxSourceIPs, "Maximum source addresses retained per domain")
+	flags.Duration("dns-notice-retention", d.Detector.MaxAge, "Capture-time DNS detector retention")
 	flags.Bool("inventory", c.Inventory.Enabled, "Produce bounded known-host/service observations")
 	flags.StringSlice("inventory-local-cidrs", nil, "Optional IPv4/IPv6 CIDRs restricting inventory subjects (default: all observed unicast addresses)")
 	flags.Int("inventory-max-entries", c.Inventory.MaxEntries, "Maximum retained inventory entries")

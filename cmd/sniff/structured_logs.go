@@ -89,7 +89,8 @@ func newSniffEventSession(dir string, inputFiles []string, analysisProfile strin
 		return nil, err
 	}
 	tlsSummary := strings.HasPrefix(analysisProfile, "events-v1|scope=tls|")
-	if dir == "" && additionalSink == nil && !viper.GetBool("files.extract") && !tlsSummary {
+	policy := sniffAnalysisPolicy(analysisProfile)
+	if dir == "" && additionalSink == nil && !viper.GetBool("files.extract") && !tlsSummary && !policy.EffectiveDNS().DetectTunneling {
 		return nil, nil
 	}
 
@@ -116,7 +117,7 @@ func newSniffEventSession(dir string, inputFiles []string, analysisProfile strin
 	}
 	analysis, err := eventanalysis.New(eventanalysis.Config{
 		Dispatcher:              d,
-		Policy:                  eventconfig.FromViper(viper.GetViper()),
+		Policy:                  policy,
 		AnalysisEpoch:           producer.SessionID(),
 		Flow:                    flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute},
 		Connections:             conntrack.Config{MaxFlows: 100000, IdleTimeout: 5 * time.Minute, HalfOpenTimeout: 30 * time.Second},
@@ -162,7 +163,7 @@ func registerSniffLogSink(d *events.Dispatcher, dir string, queueSize int) (*log
 		kind  events.Kind
 		build logstream.Builder
 	}{
-		"dhcp": {events.KindDHCP, logrecords.DHCP}, "ntp": {events.KindNTP, logrecords.NTP},
+		"notice": {events.KindNotice, logrecords.Notice}, "dhcp": {events.KindDHCP, logrecords.DHCP}, "ntp": {events.KindNTP, logrecords.NTP},
 		"known_hosts": {events.KindKnownHost, logrecords.KnownHosts}, "known_services": {events.KindKnownService, logrecords.KnownServices},
 		"radius": {events.KindRADIUS, logrecords.RADIUS}, "dns": {events.KindDNS, logrecords.DNS}, "ssl": {events.KindTLS, logrecords.SSL}, "http": {events.KindHTTP, logrecords.HTTP}, "smtp": {events.KindSMTP, logrecords.SMTP}, "conn": {events.KindConn, logrecords.Conn}, "files": {events.KindFileMetadata, logrecords.Files},
 	}
@@ -179,7 +180,7 @@ func registerSniffLogSink(d *events.Dispatcher, dir string, queueSize int) (*log
 	if err != nil {
 		return nil, err
 	}
-	if err := d.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
+	if err := d.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata, events.KindNotice); err != nil {
 		return nil, err
 	}
 	return sink, nil
@@ -203,7 +204,7 @@ func sniffEventProducer(inputFiles []string, analysisProfile string) (*events.Pr
 func structuredLogAnalysisProfile(scope, effectiveFilter string) string {
 	return fmt.Sprintf("events-v1|scope=%s|filter=%s|headers=%t|email-body=%t|file-max=%d|file-total=%d|extract=%t|extract-dir=%s|policy=%s",
 		scope, effectiveFilter, viper.GetBool("logs.include_http_headers"), viper.GetBool("logs.include_email_body_preview"), viper.GetInt64("files.max_size"),
-		viper.GetInt64("files.total_size"), viper.GetBool("files.extract"), viper.GetString("files.extract_dir"), eventconfig.FromViper(viper.GetViper()).Fingerprint())
+		viper.GetInt64("files.total_size"), viper.GetBool("files.extract"), viper.GetString("files.extract_dir"), sniffAnalysisPolicy(scope).Fingerprint())
 }
 
 func (s *sniffEventSession) observe(info *capture.PacketInfo) {
@@ -253,4 +254,19 @@ func validateSniffAnalysisPolicy() error {
 		}
 	}
 	return nil
+}
+
+// Legacy DNS flags describe the DNS subcommand. Generic sniff opts in through
+// the shared notice flag rather than another subcommand's bound default.
+func sniffAnalysisPolicy(scope string) *eventconfig.Config {
+	policy := eventconfig.FromViper(viper.GetViper())
+	dns := policy.EffectiveDNS()
+	dnsScope := scope == "dns" || strings.HasPrefix(scope, "events-v1|scope=dns|")
+	if !dnsScope {
+		dns.DetectTunneling = viper.GetBool("events.dns.notices")
+	} else if !viper.IsSet("dns.detect_tunneling") && !viper.IsSet("events.dns.notices") {
+		dns.DetectTunneling = true
+	}
+	policy.DNS = &dns
+	return policy
 }

@@ -49,6 +49,7 @@ type Config struct {
 	VoIPMode         bool // Determines filter capabilities advertised to processor (legacy)
 	// Filter capabilities advertised to processor
 	InventoryEnabled     bool
+	DNSNoticesEnabled    bool
 	RADIUSIngress        bool     // Observation-aware capture and provenance transport are installed.
 	SupportedFilterTypes []string // If set, overrides VoIPMode-based defaults
 	// TLS settings
@@ -679,6 +680,9 @@ func (m *Manager) register() error {
 	}
 
 	features := []string{"tcp_reassembly", "connection_tracking", "file_metadata"}
+	if m.config.DNSNoticesEnabled {
+		features = append(features, protoadapter.DNSNoticeProductionFeature)
+	}
 	if m.config.InventoryEnabled {
 		features = append(features, protoadapter.InventoryProductionFeature)
 	}
@@ -725,7 +729,7 @@ func (m *Manager) register() error {
 		}
 	}
 	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS {
-		if err := validateAcceptedEventProfile(resp, m.config.RequiredEventKinds...); err != nil {
+		if err := validateAcceptedEventProfile(resp, protoadapter.RequiredDNSNoticeKinds(m.config.RequiredEventKinds, m.config.DNSNoticesEnabled)...); err != nil {
 			return fmt.Errorf("registration accepted an insufficient event forwarding profile: %w", err)
 		}
 	}

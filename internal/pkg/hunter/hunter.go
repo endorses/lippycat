@@ -484,12 +484,14 @@ func (h *Hunter) Start(ctx context.Context) error {
 	// Create and start connection manager (handles initial connect and reconnections)
 	h.connectionManager = connection.New(
 		connection.Config{
-			OpenPacketStream: h.reliablePacketStreamFactory(),
-			OpenMediaRules:   h.openMediaRules,
-			InventoryEnabled: h.config.EventAnalysis.Inventory.Enabled,
-			ProcessorAddr:    "", // Processors is the normalized source of truth.
-			Processors:       append([]failover.Endpoint(nil), h.config.Processors...),
-			Failover:         h.config.Failover,
+			OpenPacketStream:   h.reliablePacketStreamFactory(),
+			OpenMediaRules:     h.openMediaRules,
+			InventoryEnabled:   h.config.EventAnalysis.Inventory.Enabled,
+			DNSNoticesEnabled:  h.config.EventAnalysis.EffectiveDNS().DetectTunneling,
+			RequiredEventKinds: protoadapter.RequiredDNSNoticeKinds(nil, h.config.EventAnalysis.EffectiveDNS().DetectTunneling),
+			ProcessorAddr:      "", // Processors is the normalized source of truth.
+			Processors:         append([]failover.Endpoint(nil), h.config.Processors...),
+			Failover:           h.config.Failover,
 			OnEndpoint: func(ctx context.Context, endpoint failover.Endpoint) error {
 				// An attempted route does not replace the authenticated media
 				// session. Existing signed offline rules retain their bounded
@@ -822,7 +824,7 @@ func (h *Hunter) newEventPipeline(spool *eventspool.Spool, producer *events.Prod
 	if err = dispatcher.Register(sink); err != nil {
 		return nil, nil, nil, err
 	}
-	runtime, err := eventanalysis.New(eventanalysis.Config{Policy: h.config.EventAnalysis, AnalysisEpoch: producer.SessionID(), Dispatcher: dispatcher, LiveExpiry: true, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers")})
+	runtime, err := eventanalysis.New(eventanalysis.Config{Policy: h.config.EventAnalysis, DetectorNodeID: h.config.HunterID, AnalysisEpoch: producer.SessionID(), Dispatcher: dispatcher, LiveExpiry: true, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers")})
 	if err != nil {
 		return nil, nil, nil, err
 	}

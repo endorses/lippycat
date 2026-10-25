@@ -47,7 +47,7 @@ func TestReceiveEventsDecodesBatchesAndSurfacesLosses(t *testing.T) {
 	client.receiveEvents(context.Background(), stream)
 
 	require.Len(t, handler.EventBatches, 3)
-	require.Equal(t, uint64(4), handler.EventBatches[0].CompatibilityOmissions)
+	require.Equal(t, uint64(5), handler.EventBatches[0].CompatibilityOmissions)
 	require.Len(t, handler.EventBatches[1].Events, 1)
 	require.Equal(t, events.KindDNS, handler.EventBatches[1].Events[0].Kind())
 	require.Equal(t, eventsv1.LossKind_LOSS_KIND_SUBSCRIBER, handler.EventBatches[2].Losses[0].Kind)

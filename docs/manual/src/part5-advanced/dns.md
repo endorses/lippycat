@@ -137,3 +137,26 @@ sudo lc sniff dns -i eth0 --detect-tunneling 2>/dev/null | \
 ```
 
 High-entropy queries (long, random-looking subdomains) combined with high query volume to a single domain are strong indicators of DNS tunneling or data exfiltration.
+
+## Structured DNS security notices {#structured-dns-security-notices}
+
+`--dns-notices` enables typed DNS tunneling findings independently of command hooks. It is off by default for generic capture; DNS subcommands retain their `--detect-tunneling` option, enabled by default. A configured `--tunneling-command` retains the legacy default detector policy. `--dns-notice-threshold` (default `0.7`) and `--dns-notice-debounce` (default `5m`) control the shared decision policy; existing processor/tap threshold and debounce options remain aliases.
+
+Enable a notice log without running an external command:
+
+<!-- i18n:skip -->
+
+```bash
+sudo lc tap dns -i eth0 --insecure --dns-notices \
+  --log-dir ./logs --log-streams notice --log-format json
+```
+
+Each `dns.tunneling` notice has schema version `1`, category `security`, severity `warning`, and status `triggered`. It records the domain, heuristic score, threshold, entropy, retained unique subdomains and source addresses, and a reference to the triggering flow. `queries` preserves the legacy count of DNS observations, including responses. The score is evidence for investigation, not proof of tunneling. A domain finding can aggregate several observations; its bounded evidence references are not a complete packet inventory. Truncation flags identify retained lower bounds.
+
+Detector state and debounce use capture timestamps, making offline findings reproducible. `--dns-analysis-ports` selects eligible ports. `--dns-notice-max-domains` bounds tracked domains globally across capture scopes; `--dns-notice-max-subdomains` and `--dns-notice-max-source-ips` bound evidence per domain; `--dns-notice-retention` expires state by capture time. Hunters, capture epochs, interfaces, and offline inputs have separate observation scopes. Overlapping private addresses do not combine their findings.
+
+Packet forwarding delegates findings to the upstream analysis authority. A packet-forwarding hop rejects event-only children; the child must explicitly permit packet fallback or use an event-forwarding route. Event forwarding produces findings at the edge; receiving or relaying a notice does not rescore DNS or execute a command. TUI Events show notices in All and DNS scopes. Filters include `kind:notice`, `detector:dns.tunneling`, `score:>=0.7`, and `domain:example.test`. Subscriber policy removes cross-flow source-address lists and references unless sensitive fields are authorized, setting `evidence_redacted=true` independently of capacity truncation.
+
+`process` and `tap` command hooks accept only fresh local detector findings. Notice transport retries, received-notice recovery, and event ingress WAL replay do not execute them. Explicit local PCAP reanalysis can create a fresh finding and run a configured command; `sniff` and offline `watch` do not own a command worker. Existing substitutions are preserved. Actions have a bounded queue of `128`, a process-lifetime identity limit of `65536`, and an output limit of `64 KiB`; exhaustion and failures are reported separately from notices. Async command success, file-log durability, and best-effort TUI delivery are distinct outcomes. Exactly-once external actions across crashes are not promised.
+
+`lc show status` includes `dns_notices` when the notice policy is configured; `enabled` identifies local canonical detection. Counters separate emitted, suppressed, and dropped findings and dropped actions from command completion, failure, duplicates, queue depth, and process-lifetime identity accounting. `log_dropped`, `log_errors`, `dispatcher_sink_dropped`, and `dispatcher_sink_errors` are shared sink totals across all streams. A relay can receive notices while its local detector is disabled.

@@ -26,6 +26,7 @@ type cachedStats struct {
 
 // Collector collects and caches processor statistics
 type Collector struct {
+	noticeProvider    atomic.Value  // func() *management.DNSNoticeStats
 	learnedProvider   atomic.Value  // func() *management.LearnedRuleStatus
 	mediaProvider     atomic.Value  // func() *management.MediaRuleStatus
 	duplicateProvider atomic.Value  // func() *management.PacketDuplicateStatus
@@ -105,6 +106,10 @@ func (c *Collector) SetUpstreamProcessor(upstreamAddr string) {
 // GetProto returns statistics as protobuf message
 func (c *Collector) GetProto() *management.ProcessorStats {
 	stats := c.Get()
+	var notices *management.DNSNoticeStats
+	if provider := c.noticeProvider.Load(); provider != nil {
+		notices = provider.(func() *management.DNSNoticeStats)()
+	}
 	var learned *management.LearnedRuleStatus
 	if provider := c.learnedProvider.Load(); provider != nil {
 		learned = provider.(func() *management.LearnedRuleStatus)()
@@ -127,6 +132,7 @@ func (c *Collector) GetProto() *management.ProcessorStats {
 	}
 
 	return &management.ProcessorStats{
+		DnsNotices:            notices,
 		MediaRules:            media,
 		LearnedRules:          learned,
 		PacketDuplicates:      duplicates,
@@ -161,4 +167,8 @@ func (c *Collector) SetRouteProvider(provider func() *management.RouteStatus) {
 
 func (c *Collector) SetLearnedRuleProvider(provider func() *management.LearnedRuleStatus) {
 	c.learnedProvider.Store(provider)
+}
+
+func (c *Collector) SetDNSNoticeProvider(provider func() *management.DNSNoticeStats) {
+	c.noticeProvider.Store(provider)
 }

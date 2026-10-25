@@ -432,6 +432,10 @@ func safeEventProjector(includeSensitiveFields, includeFileMetadata bool) broadc
 			return event, true, nil
 		}
 		switch value := event.(type) {
+		case events.NoticeEvent:
+			return redactNoticeEvidence(value), true, nil
+		case *events.NoticeEvent:
+			return redactNoticeEvidence(*value), true, nil
 		case events.KnownHostEvent, *events.KnownHostEvent, events.KnownServiceEvent, *events.KnownServiceEvent:
 			return nil, false, broadcast.ErrPolicyOmission
 		case events.DHCPEvent:
@@ -492,4 +496,16 @@ func newEventStreamID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(id[:]), nil
+}
+
+// redactNoticeEvidence preserves detector decisions while excluding cross-flow
+// source inventory and contributing references from a nonsensitive subscriber.
+func redactNoticeEvidence(event events.NoticeEvent) events.NoticeEvent {
+	event = event.Clone()
+	event.EvidenceRedacted = true
+	event.Evidence = nil
+	if event.DNS != nil {
+		event.DNS.SourceIPs = nil
+	}
+	return event
 }

@@ -78,6 +78,14 @@ func DecodeEvent(in *eventsv1.ProtocolEvent) (DecodedEvent, error) {
 	}
 	var ev events.Event
 	switch payload := in.Payload.(type) {
+	case *eventsv1.ProtocolEvent_Notice:
+		if payload == nil {
+			return DecodedEvent{}, errors.New("decode notice: nil payload wrapper")
+		}
+		ev, err = decodeNotice(payload.Notice, env)
+		if err != nil {
+			return DecodedEvent{}, err
+		}
 	case *eventsv1.ProtocolEvent_Dhcp, *eventsv1.ProtocolEvent_Ntp, *eventsv1.ProtocolEvent_KnownHost, *eventsv1.ProtocolEvent_KnownService:
 		ev, err = decodeNetwork(in, env)
 		if err != nil {
@@ -269,6 +277,8 @@ func ToProto(ev events.Event) (*eventsv1.ProtocolEvent, error) {
 	}
 	out := &eventsv1.ProtocolEvent{EventId: ev.Envelope().EventID, EventSequence: ev.Envelope().EventSequence, Envelope: env}
 	switch e := ev.(type) {
+	case events.NoticeEvent:
+		out.Payload = &eventsv1.ProtocolEvent_Notice{Notice: encodeNotice(e)}
 	case events.DHCPEvent, events.NTPEvent, events.KnownHostEvent, events.KnownServiceEvent:
 		encodeNetwork(out, ev)
 	case events.RADIUSEvent:
@@ -463,6 +473,8 @@ func validateEventCollections(ev events.Event) error {
 	var values []string
 	collections := [][]string{}
 	switch e := ev.(type) {
+	case events.NoticeEvent:
+		return validateNotice(e)
 	case events.DHCPEvent, events.NTPEvent, events.KnownHostEvent, events.KnownServiceEvent:
 		return validateNetwork(ev)
 	case events.DNSEvent:
@@ -555,6 +567,11 @@ func validateEventCollections(ev events.Event) error {
 
 func eventValue(ev events.Event) (events.Event, error) {
 	switch e := ev.(type) {
+	case *events.NoticeEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil notice pointer")
+		}
+		return *e, nil
 	case *events.DHCPEvent:
 		if e == nil {
 			return nil, errors.New("event is a nil DHCP pointer")

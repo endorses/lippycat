@@ -153,6 +153,14 @@ transaction.
 | `answers`, `TTLs`, `rejected`                                            | `vector[string]`, `vector[interval]`, `bool`               |
 | `community_id`, `node_id`                                                | `string`, `string`                                         |
 
+### `notice.log` {#noticelog}
+
+Select `--log-streams notice` explicitly; the default seven streams are unchanged. This optional stream records versioned detector decisions without requiring a command hook. Schema `1` currently carries DNS tunneling evidence. `detector_node_id` and `detector_generation` identify the analysis authority; `node_id`, `uid`, and endpoints retain the actual triggering observation. `event_id` preserves delivery identity through retries and relays; it is not a promise of exactly-once file output after crashes.
+
+Notice fields include `schema_version`, `detector`, `detector_version`, `category`, `severity`, `status`, domain/score/threshold/entropy, observation and unique-subdomain counts, bounded source addresses, and aligned evidence node/flow/timestamp vectors. `evidence_truncated`, `source_ips_truncated`, and `unique_subdomains_truncated` describe incomplete retained evidence; `evidence_redacted` identifies subscriber-policy removal. Redacted vectors are unset (`-` in TSV, `null` in JSONL), independently of truncation flags. No packet body, extracted file, or executable action is carried by a notice.
+
+Notice logs reuse per-stream queue bounds, overflow counters, rotation, and graceful draining. Slow TUI subscribers do not control hunter capture pressure. Inspect detector suppression, dispatcher/stream loss, and sink failures separately; an absent notice is not proof that traffic was safe. Protect local notice files because explicit file logging retains sensitive evidence. See [DNS security notices](dns.md#structured-dns-security-notices) for enablement, scope, command compatibility, and capture-time bounds.
+
 ### `ssl.log` {#ssllog}
 
 One TLS handshake observation. It includes negotiated `version`, `cipher`,

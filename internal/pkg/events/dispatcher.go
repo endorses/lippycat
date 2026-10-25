@@ -163,6 +163,21 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 	return nil
 }
 
+// AssignIdentity reserves delivery identity before local side-effect admission.
+// It neither publishes the event nor grants authority to invoke an action.
+// Assign preserves already valid identities, so later queue admission is stable.
+func (d *Dispatcher) AssignIdentity(ev Event) Event {
+	if isNilEvent(ev) {
+		return nil
+	}
+	d.admissionMu.Lock()
+	defer d.admissionMu.Unlock()
+	if d.cfg.Producer != nil {
+		return d.cfg.Producer.Assign(ev)
+	}
+	return ev
+}
+
 // Enqueue never waits for a sink or for queue space.
 func (d *Dispatcher) Enqueue(ev Event) bool {
 	if isNilEvent(ev) {

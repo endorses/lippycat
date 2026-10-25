@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/testutil/noticefixture"
 	"github.com/stretchr/testify/require"
 )
 
@@ -284,4 +285,16 @@ func TestTLSCoalescingPreservesEveryClientHelloObservation(t *testing.T) {
 	}
 	require.Equal(t, uint64(2), total)
 	require.Equal(t, uint64(1), offers)
+}
+
+func TestNoticesPassThroughWithoutTransactionCoalescing(t *testing.T) {
+	next := &collectingSink{}
+	sink, err := New(next, Config{Timeout: time.Hour, MaxPending: 10})
+	require.NoError(t, err)
+	event := noticefixture.Event()
+	for range 2 {
+		require.NoError(t, sink.HandleEvent(context.Background(), event))
+	}
+	require.Equal(t, []events.Event{event, event}, next.snapshot(), "transport ingress owns retry deduplication, not log coalescing")
+	require.NoError(t, sink.Close(context.Background()))
 }

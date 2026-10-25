@@ -9,6 +9,7 @@ import (
 // InventoryProductionFeature distinguishes configured inventory production
 // (or a relay enforcing equivalent source requirements) from codec support.
 const InventoryProductionFeature = "inventory_production"
+const DNSNoticeProductionFeature = "dns_notice_production"
 
 // This additive mapping is independent of the semantic profile. Support is not
 // a promise that a particular source has enabled inventory production.
@@ -29,6 +30,7 @@ var kindMappings = []struct {
 	{events.KindNTP, eventsv1.EventKind_EVENT_KIND_NTP, "ntp", false},
 	{events.KindKnownHost, eventsv1.EventKind_EVENT_KIND_KNOWN_HOST, "known_hosts", true},
 	{events.KindKnownService, eventsv1.EventKind_EVENT_KIND_KNOWN_SERVICE, "known_services", true},
+	{events.KindNotice, eventsv1.EventKind_EVENT_KIND_NOTICE, "notice", false},
 }
 
 func WireKind(kind events.Kind) (eventsv1.EventKind, bool) {
@@ -101,4 +103,19 @@ func RequiredKinds(streams []string) ([]eventsv1.EventKind, error) {
 		}
 	}
 	return result, nil
+}
+
+// RequiredDNSNoticeKinds makes an enabled producer's notice coverage explicit.
+// It does not turn bare codec support into a detector-production promise.
+func RequiredDNSNoticeKinds(required []eventsv1.EventKind, enabled bool) []eventsv1.EventKind {
+	result := append([]eventsv1.EventKind(nil), required...)
+	if !enabled {
+		return result
+	}
+	for _, kind := range result {
+		if kind == eventsv1.EventKind_EVENT_KIND_NOTICE {
+			return result
+		}
+	}
+	return append(result, eventsv1.EventKind_EVENT_KIND_NOTICE)
 }

@@ -299,7 +299,7 @@ func TestCleanup_RemovesAlertTracking(t *testing.T) {
 
 	// Verify data exists
 	td.mu.RLock()
-	assert.Contains(t, td.srcIPs, "example.com")
+	assert.Contains(t, td.srcIPs, tunnelingDomainKey{domain: "example.com"})
 	td.mu.RUnlock()
 
 	// Wait for cleanup
@@ -308,8 +308,8 @@ func TestCleanup_RemovesAlertTracking(t *testing.T) {
 	// Data should be cleaned up
 	td.mu.RLock()
 	defer td.mu.RUnlock()
-	assert.NotContains(t, td.srcIPs, "example.com", "srcIPs should be cleaned up")
-	assert.NotContains(t, td.lastAlerted, "example.com", "lastAlerted should be cleaned up")
+	assert.NotContains(t, td.srcIPs, tunnelingDomainKey{domain: "example.com"}, "srcIPs should be cleaned up")
+	assert.NotContains(t, td.lastAlerted, tunnelingDomainKey{domain: "example.com"}, "lastAlerted should be cleaned up")
 }
 
 func TestTunnelingAlert_Fields(t *testing.T) {

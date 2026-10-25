@@ -3,6 +3,7 @@
 package processor
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -31,7 +32,7 @@ func (p *Processor) wantsEventAnalysisLocked() bool {
 	if p.eventAnalysisClosed {
 		return false
 	}
-	if p.localEventAnalysis || (p.eventAnalysisSubscribers > 0 && p.monitorEventMode()) {
+	if p.canonicalDNSOwner() || p.localEventAnalysis || (p.eventAnalysisSubscribers > 0 && p.monitorEventMode()) {
 		return true
 	}
 	if p.upstreamManager != nil {
@@ -63,7 +64,11 @@ func (p *Processor) initializeEventAnalysisLocked() error {
 		Dispatcher: p.eventDispatcher, Files: fileCfg,
 		Policy:             p.config.EventAnalysis,
 		IncludeHTTPHeaders: includeHeaders, IncludeEmailBodyPreview: includeEmailBody,
-		LiveExpiry: true,
+		LiveExpiry:     true,
+		DetectorNodeID: p.noticeAuthority(), DetectorGeneration: p.noticeGeneration,
+		DisableDNSNotices:  !p.canonicalDNSOwner(),
+		DNSNoticeAuthority: p.canonicalDNSOwner,
+		OnLocalNotice:      p.handleLocalNotice,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize event analysis runtime: %w", err)
@@ -128,6 +133,7 @@ func (p *Processor) endEventSubscription() {
 func (p *Processor) releaseUnusedEventAnalysisLocked() {
 	if p.eventRuntime != nil && !p.wantsEventAnalysisLocked() {
 		p.eventRuntime.Close()
+		p.finalEventStats = p.eventRuntime.Stats()
 		p.eventRuntime = nil
 	}
 }
@@ -147,5 +153,52 @@ func (p *Processor) eventAnalysisStats() eventanalysis.Stats {
 	if p.eventRuntime != nil {
 		return p.eventRuntime.Stats()
 	}
-	return eventanalysis.Stats{}
+	return p.finalEventStats
+}
+
+// Raw forwarding nodes delegate findings to the upstream analysis authority.
+// Event forwarding nodes own packet analysis; received events are never rescored.
+func (p *Processor) canonicalDNSOwner() bool {
+	if p.config.EventAnalysis == nil || !p.config.EventAnalysis.EffectiveDNS().DetectTunneling {
+		return false
+	}
+	if p.config.UpstreamAddr == "" {
+		return true
+	}
+	if p.upstreamManager != nil {
+		return p.upstreamManager.ForwardingEvents()
+	}
+	return p.config.UpstreamForwardMode == "events"
+}
+func (p *Processor) noticeAuthority() string {
+	if p.config.ProcessorID != "" {
+		return p.config.ProcessorID
+	}
+	return "local"
+}
+func (p *Processor) handleLocalNotice(notice events.NoticeEvent) error {
+	if p.noticeCommands == nil {
+		return nil
+	}
+	if err := p.noticeCommands.HandleLocalNotice(context.Background(), notice); err != nil {
+		logger.Warn("DNS notice command admission failed", "event_id", notice.Envelope().EventID, "error", err)
+		return err
+	}
+	return nil
+}
+
+// NoticeStats separates detector decisions, producer drops and command outcomes.
+// Relayed findings do not increment this node's detector/action counters.
+type NoticeStats struct {
+	Emitted, Suppressed, Dropped, ActionDropped uint64
+	Commands                                    NoticeCommandSinkStats
+}
+
+func (p *Processor) GetNoticeStats() NoticeStats {
+	analysis := p.eventAnalysisStats()
+	result := NoticeStats{Emitted: analysis.DNSNotices, Suppressed: analysis.DNSSuppressed, Dropped: analysis.DNSNoticeDropped, ActionDropped: analysis.DNSActionDropped}
+	if p.noticeCommands != nil {
+		result.Commands = p.noticeCommands.Stats()
+	}
+	return result
 }

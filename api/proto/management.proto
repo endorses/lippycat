@@ -735,6 +735,27 @@ message ProcessorStats {
     LearnedRuleStatus learned_rules = 24;
     // Selective IRI policy graph and decisions. No policy or target content.
     LIIRIPolicyStats li_iri_policy = 25;
+    // Local DNS notice decisions and optional action outcomes; not relayed counts.
+    DNSNoticeStats dns_notices = 26;
+}
+
+// Bounded local detector and sink observations. No domains or source addresses.
+message DNSNoticeStats {
+    bool enabled = 1;
+    uint64 emitted = 2;
+    uint64 suppressed = 3;
+    uint64 dropped = 4;
+    uint64 action_dropped = 5;
+    uint64 command_completed = 6;
+    uint64 command_failed = 7;
+    uint64 command_dropped = 8;
+    uint64 command_duplicate = 9;
+    uint64 command_queued = 10;
+    uint64 command_identities = 11;
+    uint64 log_dropped = 12;
+    uint64 log_errors = 13;
+    uint64 dispatcher_sink_dropped = 14;
+    uint64 dispatcher_sink_errors = 15;
 }
 
 // Fixed-cardinality current capture-control state. No selectors or call IDs.

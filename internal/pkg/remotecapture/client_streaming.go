@@ -305,7 +305,7 @@ func unsupportedEventKindCount(supported []eventsv1.EventKind) uint64 {
 	for _, kind := range supported {
 		available[kind] = struct{}{}
 	}
-	wanted := [...]eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP}
+	wanted := [...]eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_NOTICE}
 	var missing uint64
 	for _, kind := range wanted {
 		if _, ok := available[kind]; !ok {

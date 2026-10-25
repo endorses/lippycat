@@ -51,7 +51,14 @@ type Config struct {
 	// Policy is an owned snapshot; nil selects finite defaults.
 	Policy *eventconfig.Config
 	// AnalysisEpoch is the producer session identity when available.
-	AnalysisEpoch           string
+	AnalysisEpoch      string
+	DetectorNodeID     string
+	DetectorGeneration string
+	// OnLocalNotice is invoked only for newly produced findings, never ingress.
+	// It must admit work without blocking packet processing.
+	OnLocalNotice           func(events.NoticeEvent) error
+	DisableDNSNotices       bool
+	DNSNoticeAuthority      func() bool
 	Dispatcher              *events.Dispatcher
 	Flow                    flowid.Config
 	Connections             conntrack.Config
@@ -73,11 +80,13 @@ type Config struct {
 }
 
 type Stats struct {
-	Observed, Emitted, Invalid, Dropped, ReassemblyEvicted uint64
-	TLSClientHelloCount, TLSECHOfferedCount                uint64
-	DHCP                                                   dhcp.Stats
-	NTP                                                    ntp.Stats
-	Inventory                                              inventory.Stats
+	Observed, Emitted, Invalid, Dropped, ReassemblyEvicted        uint64
+	TLSClientHelloCount, TLSECHOfferedCount                       uint64
+	DNSNotices, DNSSuppressed, DNSNoticeDropped, DNSActionDropped uint64
+	DNS                                                           dnsparser.TunnelingStats
+	DHCP                                                          dhcp.Stats
+	NTP                                                           ntp.Stats
+	Inventory                                                     inventory.Stats
 }
 
 type Runtime struct {
@@ -103,6 +112,8 @@ type Runtime struct {
 	associationValid  bool
 	files             *fileanalysis.Analyzer
 	dns               *dnsparser.Parser
+	dnsTunneling      *dnsparser.TunnelingDetector
+	dnsScope          string
 	nextExpiry        time.Time
 	closed            bool
 	stats             Stats
@@ -157,6 +168,9 @@ func New(cfg Config) (*Runtime, error) {
 			return nil, fmt.Errorf("create analysis epoch: %w", err)
 		}
 		cfg.AnalysisEpoch = hex.EncodeToString(epoch[:])
+	}
+	if cfg.DetectorGeneration == "" {
+		cfg.DetectorGeneration = cfg.AnalysisEpoch
 	}
 	r := &Runtime{cfg: cfg}
 	if err := r.resetState(); err != nil {
@@ -221,6 +235,15 @@ func (r *Runtime) resetState() error {
 		return fmt.Errorf("initialize file analysis: %w", err)
 	}
 	r.dns = dnsparser.NewParser()
+	if r.dnsTunneling != nil {
+		r.dnsTunneling.Stop()
+		r.dnsTunneling = nil
+	}
+	policy := r.cfg.Policy.EffectiveDNS()
+	if policy.DetectTunneling && !r.cfg.DisableDNSNotices {
+		r.dnsTunneling = dnsparser.NewTunnelingDetector(policy.Detector)
+		r.dnsTunneling.SetAlertConfig(dnsparser.AlertConfig{Threshold: policy.Threshold, Debounce: policy.Debounce})
+	}
 	r.resetReassembly()
 	r.nextExpiry = time.Time{}
 	return nil
@@ -298,9 +321,7 @@ func (r *Runtime) ObservePacket(source Source, info capture.PacketInfo) error {
 		r.stats.Invalid++
 		return fmt.Errorf("capture packet metadata enrichment failed")
 	}
-	if parsed := r.dns.Parse(info.Packet); parsed != nil {
-		meta.Dns = dnsToProto(parsed)
-	}
+
 	timestamp := time.Time{}
 	if packetMetadata := info.Packet.Metadata(); packetMetadata != nil {
 		timestamp = packetMetadata.Timestamp
@@ -445,12 +466,24 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 		if protocolHint == "" {
 			protocolHint = applicationProtocolHint(raw.Metadata)
 		}
-		metadata.Tls, metadata.Http, metadata.Email = nil, nil, nil
-		r.emitMetadata(env, metadata)
+		metadata.Tls, metadata.Http, metadata.Email, metadata.Dns = nil, nil, nil, nil
+		r.emitMetadata(env, metadata, r.associationScope(source, env))
 		r.observeTCP(source, packet, ts, scope, source.Partial || scope == events.CaptureScopeFiltered, protocolHint)
 	} else {
 		// Keep compatibility with metadata-only captured packets.
-		r.emitMetadata(env, raw.Metadata)
+		metadata := raw.Metadata
+		if _, udp := packet.TransportLayer().(*layers.UDP); udp {
+			metadata = proto.Clone(raw.Metadata).(*data.PacketMetadata)
+			hint := protocolHint
+			if hint == "" {
+				hint = applicationProtocolHint(raw.Metadata)
+			}
+			metadata.Dns = nil
+			if !truncated {
+				metadata.Dns = r.rawDNSDatagram(packet, hint)
+			}
+		}
+		r.emitMetadata(env, metadata, r.associationScope(source, env))
 	}
 	return ts, nil
 }
@@ -528,6 +561,8 @@ func applicationProtocolHint(meta *data.PacketMetadata) string {
 		return ""
 	}
 	switch {
+	case meta.Dns != nil:
+		return "dns"
 	case meta.Http != nil:
 		return "http"
 	case meta.Tls != nil:
@@ -536,7 +571,7 @@ func applicationProtocolHint(meta *data.PacketMetadata) string {
 		return "smtp"
 	}
 	switch strings.ToLower(meta.Protocol) {
-	case "http", "tls", "smtp":
+	case "http", "tls", "smtp", "dns":
 		return strings.ToLower(meta.Protocol)
 	default:
 		return ""
@@ -576,9 +611,10 @@ func (r *Runtime) emit(ev events.Event) {
 	}
 }
 
-func (r *Runtime) emitMetadata(env events.Envelope, meta *data.PacketMetadata) {
+func (r *Runtime) emitMetadata(env events.Envelope, meta *data.PacketMetadata, scope ...string) {
 	if meta.Dns != nil {
 		r.emit(MapDNS(env, meta.Dns))
+		r.observeDNSNotice(env, meta.Dns, scope)
 	}
 	if meta.Email != nil {
 		e := events.NewSMTPEvent(env)
@@ -691,6 +727,9 @@ func (r *Runtime) expireState(now time.Time, idle bool) {
 		r.expiryWatermark = now
 	}
 	r.inventory.Advance(r.expiryWatermark)
+	if r.dnsTunneling != nil {
+		r.dnsTunneling.Expire(r.expiryWatermark)
+	}
 	if idle {
 		r.dhcp.ExpireIdle(now)
 		r.ntp.ExpireIdle(now)
@@ -723,6 +762,9 @@ func (r *Runtime) EOF() {
 	}
 	for _, ev := range r.connections.Close() {
 		r.emitConnection(ev)
+	}
+	if r.dnsTunneling != nil {
+		r.dnsTunneling.Stop()
 	}
 	r.dhcp.Reset()
 	r.ntp.Reset()
@@ -757,6 +799,9 @@ func (r *Runtime) Close() {
 	for _, ev := range r.connections.Close() {
 		r.emitConnection(ev)
 	}
+	if r.dnsTunneling != nil {
+		r.dnsTunneling.Stop()
+	}
 	r.dhcp.Reset()
 	r.ntp.Reset()
 	r.inventory.Reset()
@@ -770,6 +815,9 @@ func (r *Runtime) Stats() Stats {
 	stats.DHCP = r.dhcp.Stats()
 	stats.NTP = r.ntp.Stats()
 	stats.Inventory = r.inventory.Stats()
+	if r.dnsTunneling != nil {
+		stats.DNS = r.dnsTunneling.Stats()
+	}
 	return stats
 }
 

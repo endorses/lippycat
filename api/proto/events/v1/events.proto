@@ -21,6 +21,7 @@ enum EventKind {
   EVENT_KIND_NTP = 9;
   EVENT_KIND_KNOWN_HOST = 10;
   EVENT_KIND_KNOWN_SERVICE = 11;
+  EVENT_KIND_NOTICE = 12;
 }
 
 enum CaptureScope {
@@ -309,6 +310,39 @@ message KnownServiceEvent {
   InventoryEvidence evidence = 5;
 }
 
+// Notice references identify real contributing observations; they need not have
+// been assigned a protocol-event delivery identity at detector decision time.
+message NoticeEvidenceReference {
+  string node_id = 1;
+  string uid = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+message DNSNoticeEvidence {
+  string domain = 1;
+  double score = 2;
+  double threshold = 3;
+  double entropy = 4;
+  uint64 queries = 5;
+  uint32 unique_subdomains = 6;
+  repeated string source_ips = 7;
+  bool unique_subdomains_truncated = 8;
+  bool source_ips_truncated = 9;
+}
+message NoticeEvent {
+  uint32 schema_version = 1;
+  string detector = 2;
+  string detector_version = 3;
+  string category = 4;
+  string severity = 5;
+  string status = 6;
+  string detector_node_id = 7;
+  string detector_generation = 8;
+  repeated NoticeEvidenceReference evidence = 9;
+  bool evidence_truncated = 10;
+  DNSNoticeEvidence dns = 11;
+  bool evidence_redacted = 12;
+}
+
 message ProtocolEvent {
   // event_id is an opaque, retry-stable representation of node ID, producer
   // session ID, and event sequence.
@@ -332,6 +366,7 @@ message ProtocolEvent {
     NTPEvent ntp = 18;
     KnownHostEvent known_host = 19;
     KnownServiceEvent known_service = 20;
+    NoticeEvent notice = 21;
   }
 }
 

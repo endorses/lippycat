@@ -7,6 +7,7 @@ import (
 
 // StatusJSON represents processor status in JSON-friendly format
 type StatusJSON struct {
+	DNSNotices        *management.DNSNoticeStats         `json:"dns_notices,omitempty"`
 	LearnedRules      *management.LearnedRuleStatus      `json:"learned_rules,omitempty"`
 	MediaRules        *management.MediaRuleStatus        `json:"media_rules,omitempty"`
 	PacketDuplicates  *management.PacketDuplicateStatus  `json:"packet_duplicates,omitempty"`
@@ -113,6 +114,7 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 
 	if resp.ProcessorStats != nil {
 		status.MediaRules = resp.ProcessorStats.MediaRules
+		status.DNSNotices = resp.ProcessorStats.DnsNotices
 		status.LearnedRules = resp.ProcessorStats.LearnedRules
 		status.PacketDuplicates = resp.ProcessorStats.PacketDuplicates
 		status.RawPackets = resp.ProcessorStats.RawPackets

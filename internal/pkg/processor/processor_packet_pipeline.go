@@ -255,36 +255,6 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		}
 	}
 
-	// Aggregate DNS tunneling statistics from hunter-provided metadata
-	// This builds a cross-hunter view of suspicious domains
-	if p.dnsTunneling != nil {
-		for index, packet := range packets {
-			if packet.Metadata != nil && packet.Metadata.Dns != nil {
-				claim, include := p.beginPacketConsumer(batch, index, "analysis/dns")
-				if !include {
-					continue
-				}
-				dnsProto := packet.Metadata.Dns
-				// Convert proto DNS metadata to types.DNSMetadata for analysis
-				dnsMeta := &types.DNSMetadata{
-					QueryName:      dnsProto.QueryName,
-					QueryType:      dnsProto.QueryType,
-					IsResponse:     dnsProto.IsResponse,
-					TunnelingScore: dnsProto.TunnelingScore,
-					EntropyScore:   dnsProto.EntropyScore,
-				}
-				// Extract source IP from packet metadata for tracking
-				srcIP := ""
-				if packet.Metadata != nil {
-					srcIP = packet.Metadata.SrcIp
-				}
-				// AnalyzeWithContext updates aggregated domain statistics with hunter/source tracking
-				p.dnsTunneling.AnalyzeWithContext(dnsMeta, sourceID, srcIP)
-				finishPacketConsumer(claim, true)
-			}
-		}
-	}
-
 	// Process LI (Lawful Interception) if enabled
 	// This is a no-op if built without -tags li or if LI is not enabled
 	packetAdmissions := make([]*CallAdmission, len(packets))

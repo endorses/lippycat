@@ -13,7 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
-// Schema-v2 field order remains the prefix of schema-v2.5, independent of Go
+// Schema-v2 field order remains the prefix of schema-v2.6, independent of Go
 // declaration order. Packet observation-domain fields are appended to rows.
 // Field additions require an explicit schema-version decision. Integer
 // widths follow the declared fixed-width types; Go int is always signed 64-bit.
@@ -35,7 +35,7 @@ var compactFieldNames = map[reflect.Type][]string{
 	reflect.TypeOf(types.DNSMetadata{}):       {"TransactionID", "IsResponse", "Opcode", "ResponseCode", "Authoritative", "Truncated", "RecursionDesired", "RecursionAvailable", "AuthenticatedData", "CheckingDisabled", "QuestionCount", "AnswerCount", "AuthorityCount", "AdditionalCount", "QueryName", "QueryType", "QueryClass", "Answers", "QueryResponseTimeMs", "CorrelatedQuery", "TunnelingScore", "EntropyScore"},
 	reflect.TypeOf(types.DNSAnswer{}):         {"Name", "Type", "Class", "TTL", "Data"},
 	reflect.TypeOf(types.EmailMetadata{}):     {"Protocol", "IsServer", "MailFrom", "RcptTo", "Subject", "MessageID", "ContentType", "Command", "ResponseCode", "ResponseText", "STARTTLSOffered", "STARTTLSRequested", "Encrypted", "AuthMethod", "AuthUser", "SessionID", "ServerBanner", "ClientHelo", "Timestamp", "MessageSize", "BodyPreview", "BodySize", "BodyTruncated", "TransactionTimeMs", "Correlated", "IMAPTag", "IMAPCommand", "IMAPMailbox", "IMAPUID", "IMAPSeqNum", "IMAPStatus", "IMAPFlags", "IMAPExists", "IMAPRecent", "IMAPUIDNext", "IMAPUIDValidity", "POP3Command", "POP3Status", "POP3MsgNum", "POP3MsgSize", "POP3MsgCount", "POP3TotalSize"},
-	reflect.TypeOf(types.TLSMetadata{}):       {"Version", "VersionRaw", "RecordVersion", "HandshakeType", "IsServer", "SessionID", "SNI", "CipherSuites", "Extensions", "SupportedVersions", "SupportedGroups", "SignatureAlgos", "ECPointFormats", "ALPNProtocols", "SelectedCipher", "Compression", "JA3String", "JA3Fingerprint", "JA3SString", "JA3SFingerprint", "JA4String", "JA4Fingerprint", "FlowKey", "CorrelatedPeer", "HandshakeTimeMs", "RiskScore", "RiskFlags"},
+	reflect.TypeOf(types.TLSMetadata{}):       {"Version", "VersionRaw", "RecordVersion", "HandshakeType", "IsServer", "SessionID", "SNI", "CipherSuites", "Extensions", "SupportedVersions", "SupportedGroups", "SignatureAlgos", "ECPointFormats", "ALPNProtocols", "SelectedCipher", "Compression", "JA3String", "JA3Fingerprint", "JA3SString", "JA3SFingerprint", "JA4String", "JA4Fingerprint", "FlowKey", "CorrelatedPeer", "HandshakeTimeMs", "RiskScore", "RiskFlags", "ClientHelloObserved", "ECHOffered"},
 	reflect.TypeOf(types.HTTPMetadata{}):      {"Type", "IsServer", "Method", "Path", "Version", "StatusCode", "StatusReason", "Host", "Server", "ContentType", "ContentLength", "UserAgent", "SessionID", "RequestTime", "ResponseTime", "IsHTTPS", "HasAuth", "CorrelatedResponse", "RequestResponseTimeMs", "Headers", "QueryString", "BodyPreview", "BodySize", "BodyTruncated"},
 }
 

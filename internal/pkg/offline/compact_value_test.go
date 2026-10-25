@@ -102,12 +102,12 @@ func TestCompactValueFixedWidthsAndCanonicalMaps(t *testing.T) {
 	}
 }
 
-// Pin schema-v2.5 field order, field types, integer widths and sparse projection
+// Pin schema-v2.6 field order, field types, integer widths and sparse projection
 // groups. A declaration edit must never silently reinterpret completed blocks.
 func TestCompactValueSchemaFingerprint(t *testing.T) {
-	require.Equal(t, 5, compactSchemaMinor)
+	require.Equal(t, 6, compactSchemaMinor)
 	var schema bytes.Buffer
-	schema.WriteString("schema-v2.5; little-endian; int=8; timestamp=seconds8+nanos4; string=length4+bytes; container=presence1+length4; pointer=presence1; bool=1; float64=8; array=fixed-elements\n")
+	schema.WriteString("schema-v2.6; little-endian; int=8; timestamp=seconds8+nanos4; string=length4+bytes; container=presence1+length4; pointer=presence1; bool=1; float64=8; array=fixed-elements\n")
 	var structs []reflect.Type
 	for typ := range compactFieldNames {
 		structs = append(structs, typ)
@@ -132,7 +132,7 @@ func TestCompactValueSchemaFingerprint(t *testing.T) {
 		require.NoError(t, err)
 	}
 	digest := sha256.Sum256(schema.Bytes())
-	require.Equal(t, "5c1c4f7cc4b93a224578ac5858ab2990efe7732b00fbbd7096f8b2f92365f743", hex.EncodeToString(digest[:]), "schema-v2.5 changed: review compatibility and explicitly version the format")
+	require.Equal(t, "f3aca04418b1fb5bfc088923720780b0b7231e2db6cb24c867da6719786f8fc5", hex.EncodeToString(digest[:]), "schema-v2.6 changed: review compatibility and explicitly version the format")
 }
 
 func TestCompactValueRejectsDuplicateMapKeys(t *testing.T) {

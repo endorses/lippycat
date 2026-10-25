@@ -1,7 +1,7 @@
 # Operational visibility and offline investigation implementation plan
 
 **Date:** 2026-10-25
-**Status:** In progress; workstreams 1 and 2 implemented and verified; workstreams 3–6 pending
+**Status:** In progress; workstreams 1 and 2 implemented and verified; workstream 3 in final verification; workstreams 4–6 pending
 **Assessment baseline:** `8ba8ed27`
 **Scope:** Six ordered workstreams selected from the existing plans and research
 
@@ -427,7 +427,7 @@ decryption, application attribution, and coherence scoring require separate scop
 | Workstream                   | Implementation commits | Verification evidence                                                | Disposition |
 | ---------------------------- | ---------------------- | -------------------------------------------------------------------- | ----------- |
 | 1. Failover integration      | `9bd9b347`, `0e1c05d4` | Runtime, custody, topology, expiry, race and build checks below      | Complete    |
-| 2. ECH visibility            | ECH release increment  | Parser/runtime/wire/log/CLI/TUI race checks; manual and build matrix | Complete    |
+| 2. ECH visibility            | `07945e59`             | Parser/runtime/wire/log/CLI/TUI race checks; manual and build matrix | Complete    |
 | 3. DNS notices               | Pending                | Pending                                                              | Not started |
 | 4. Offline event history     | Pending                | Pending                                                              | Not started |
 | 5. Compact-index Milestone B | Pending                | Pending                                                              | Not started |
@@ -543,3 +543,19 @@ The [original TLS roadmap](tls-fingerprinting-roadmap.md) marks its Phase 1 and
 duplicate ECH-statistics task complete. Later fingerprinting/corpus phases stay
 separate. The shared task cache remains owned by the ongoing umbrella
 implementation and must be removed when that task finishes.
+
+### Offline ECH codec correction — 2026-10-25
+
+While validating W4's event storage against the full offline package, the tests
+exposed an integration omission from W2: the compact TLS field list still omitted
+`ClientHelloObserved` and `ECHOffered`, and the declaration-order packet codec's
+version still described the previous layout. The compact format now appends both
+fields and advances to 2.6; the declaration-order format advances to version 7.
+Older temporary formats are rejected instead of silently reinterpreted. Repeated
+known, absent and unknown ECH observations round-trip through both codecs. This
+is a focused repair of the affected offline boundary, with no new W2 audit.
+
+Verification passed: focused codec round-trip/schema tests and
+`go test -race -tags all ./internal/pkg/offline -count=1`. Current/unsupported
+version tests were updated with the format decisions; unchanged packet and
+storage tests passed.

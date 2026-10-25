@@ -215,12 +215,12 @@ func schemaShape(t reflect.Type, b *strings.Builder) {
 	}
 	b.WriteByte(']')
 }
-func TestCodecSchemaV6Shape(t *testing.T) {
-	require.EqualValues(t, 6, RecordSchemaVersion)
+func TestCodecSchemaV7Shape(t *testing.T) {
+	require.EqualValues(t, 7, RecordSchemaVersion)
 	var b strings.Builder
 	schemaShape(reflect.TypeOf(summaryWire{}), &b)
 	schemaShape(reflect.TypeOf(detailWire{}), &b)
-	require.Equal(t, "4a6023c6fb3b3376f82f1d3ec17224f9539826e1135443d8de0c13eb21de064b", fmt.Sprintf("%x", sha256.Sum256([]byte(b.String()))), "Persisted field layout changed: explicitly version the schema before accepting the new shape")
+	require.Equal(t, "ffb8f52f2ed754656aff6eb2176164e527a331d951fab9f5503f1ee879726927", fmt.Sprintf("%x", sha256.Sum256([]byte(b.String()))), "Persisted field layout changed: explicitly version the schema before accepting the new shape")
 }
 
 func TestCodecOmitsTransientCaptureIdentity(t *testing.T) {

@@ -42,7 +42,7 @@ func compactCompressedFixture(t *testing.T) (*Storage, *diskDataset, Detail) {
 }
 
 func TestCompactCompressionSchemaMinorRejection(t *testing.T) {
-	for _, minor := range []uint16{0, 1, 2, 3, 4, 6, 65535} {
+	for _, minor := range []uint16{0, 1, 2, 3, 4, 5, 7, 65535} {
 		t.Run(fmt.Sprintf("minor-%d", minor), func(t *testing.T) {
 			s, b, detail, provenance := compactReviewBuilder(t)
 			require.NoError(t, b.AppendCompact(context.Background(), detail, provenance))

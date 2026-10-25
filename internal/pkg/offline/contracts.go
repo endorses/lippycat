@@ -147,11 +147,11 @@ type RecordHeader struct {
 	ID           PacketID
 }
 
-// RecordSchemaVersion identifies the declaration-order oracle format. Version 6
-// adds owned decoded SMS metadata to VoIP packet metadata. Readers
+// RecordSchemaVersion identifies the declaration-order oracle format. Version 7
+// adds explicit ClientHello availability and ECH offer metadata. Readers
 // reject other versions; major 2 identifies the separate compact format.
 // Persistent reuse or migration of completed datasets is not supported.
-const RecordSchemaVersion uint16 = 6
+const RecordSchemaVersion uint16 = 7
 
 // ResourceLimits are explicit validated budgets, shared across the current and
 // replacement session. Zero is invalid; defaults are selected after baselines.

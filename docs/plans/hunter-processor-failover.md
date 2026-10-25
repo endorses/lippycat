@@ -238,7 +238,7 @@ and sender-ownership checks pass.
 - [x] Distinguish connection availability from durable delivery. Preserve honest
       packet-drop reporting and document existing disconnected capture/disk-buffer
       limits; do not relabel current overflow as durable spooling.
-- [ ] Add non-LI integration coverage with two independent processors and no
+- [x] Add non-LI integration coverage with two independent processors and no
       upstream, for raw packets and normalized events. State explicitly that their
       output files, analysis state, and deduplication stores are independent.
 - [x] Update hunt usage, config examples, architecture notes, and affected manual
@@ -597,7 +597,7 @@ Verified evidence:
 
 Remaining unchecked tasks are explicit limits, not completed test claims:
 
-- [ ] Add one deployment-level test switching an actual hunter between two
+- [x] Add one deployment-level test switching an actual hunter between two
       independent processors in both raw and normalized-event modes. Existing
       connection tests use real local gRPC fake services; real TLS relay tests
       separately cover two origins, alternative relays, and common central custody.
@@ -630,3 +630,18 @@ The bounded closure review finished with no remaining material findings in the
 implemented scope after the two repairs above. The release decision is
 `CLOSED_WITH_DEFERRALS` for the documented profiles and explicitly listed external
 fixture/optional-work limits; it is not closure of every optional plan task.
+
+## Integration follow-up checkpoint — 2026-10-25
+
+The [operational visibility implementation plan](operational-visibility-and-offline-investigation.md)
+adds actual-hunter failover coverage with two independent production processors
+for packet and normalized-event modes. The test validates filter and ingress
+readiness, sticky backup selection after primary recovery, producer provenance,
+independent processor analysis, edge-owned event continuity, and raw PCAP output.
+Sender restart recovery and the new receiver commit/lost-receipt and
+output-before-processing-checkpoint scenarios pass focused normal and race checks.
+The latter explicitly demonstrates the documented at-least-once output boundary.
+
+This completes the two-independent-processors checklist items above. The full
+historical crash matrix and auxiliary TLS-key delivery remain outside that claim;
+protocol handover/scope/expiry follow-up is still in progress.

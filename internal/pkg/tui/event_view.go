@@ -37,6 +37,7 @@ func (m Model) handleEventBatchMsg(msg EventBatchMsg) (Model, tea.Cmd) {
 		}
 		hasLoss = hasLoss || len(batch.Losses) > 0 || batch.CompatibilityOmissions > 0
 	}
+	m.uiState.StatisticsView.SetTLSObservations(m.eventStore.TLSObservations())
 	if hasLoss {
 		stats := m.eventStore.Stats()
 		return m, m.uiState.Toast.Show(
@@ -166,6 +167,7 @@ func (m *Model) syncEventsViewAt(now time.Time) {
 		return
 	}
 	m.uiState.EventsView.SetOfflinePacketNavigation(m.offlineSession != nil)
+	m.uiState.StatisticsView.SetTLSObservations(m.eventStore.TLSObservations())
 	m.eventViewDirty = false
 	m.lastEventViewUpdate = now
 	m.eventViewSyncCount++

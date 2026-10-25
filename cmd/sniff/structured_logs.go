@@ -88,7 +88,8 @@ func newSniffEventSession(dir string, inputFiles []string, analysisProfile strin
 	if err := validateSniffAnalysisPolicy(); err != nil {
 		return nil, err
 	}
-	if dir == "" && additionalSink == nil && !viper.GetBool("files.extract") {
+	tlsSummary := strings.HasPrefix(analysisProfile, "events-v1|scope=tls|")
+	if dir == "" && additionalSink == nil && !viper.GetBool("files.extract") && !tlsSummary {
 		return nil, nil
 	}
 

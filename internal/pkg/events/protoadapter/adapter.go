@@ -137,6 +137,10 @@ func DecodeEvent(in *eventsv1.ProtocolEvent) (DecodedEvent, error) {
 		e.CertificateFileIDs, e.ClientCertificateFileIDs = cloneStrings(p.CertificateFileIds), cloneStrings(p.ClientCertificateFileIds)
 		e.Subject, e.Issuer, e.ClientSubject, e.ClientIssuer, e.ValidationStatus = p.Subject, p.Issuer, p.ClientSubject, p.ClientIssuer, p.ValidationStatus
 		e.JA3, e.JA3S, e.JA4 = p.Ja3, p.Ja3S, p.Ja4
+		e.ClientHelloCount, e.ECHOfferedCount = p.ClientHelloCount, p.EchOfferedCount
+		if e.ECHOfferedCount > e.ClientHelloCount {
+			return DecodedEvent{}, errors.New("decode TLS event: ECH count exceeds ClientHello count")
+		}
 		ev = e
 	case *eventsv1.ProtocolEvent_Http:
 		if payload.Http == nil {
@@ -278,7 +282,10 @@ func ToProto(ev events.Event) (*eventsv1.ProtocolEvent, error) {
 		}
 		out.Payload = &eventsv1.ProtocolEvent_Dns{Dns: p}
 	case events.TLSEvent:
-		out.Payload = &eventsv1.ProtocolEvent_Tls{Tls: &eventsv1.TLSEvent{Version: e.Version, Cipher: e.Cipher, Curve: e.Curve, ServerName: e.ServerName, Resumed: e.Resumed, LastAlert: e.LastAlert, NextProtocol: e.NextProtocol, Established: e.Established, CertificateFileIds: cloneStrings(e.CertificateFileIDs), ClientCertificateFileIds: cloneStrings(e.ClientCertificateFileIDs), Subject: e.Subject, Issuer: e.Issuer, ClientSubject: e.ClientSubject, ClientIssuer: e.ClientIssuer, ValidationStatus: e.ValidationStatus, Ja3: e.JA3, Ja3S: e.JA3S, Ja4: e.JA4}}
+		if e.ECHOfferedCount > e.ClientHelloCount {
+			return nil, errors.New("encode TLS event: ECH count exceeds ClientHello count")
+		}
+		out.Payload = &eventsv1.ProtocolEvent_Tls{Tls: &eventsv1.TLSEvent{Version: e.Version, Cipher: e.Cipher, Curve: e.Curve, ServerName: e.ServerName, Resumed: e.Resumed, LastAlert: e.LastAlert, NextProtocol: e.NextProtocol, Established: e.Established, CertificateFileIds: cloneStrings(e.CertificateFileIDs), ClientCertificateFileIds: cloneStrings(e.ClientCertificateFileIDs), Subject: e.Subject, Issuer: e.Issuer, ClientSubject: e.ClientSubject, ClientIssuer: e.ClientIssuer, ValidationStatus: e.ValidationStatus, Ja3: e.JA3, Ja3S: e.JA3S, Ja4: e.JA4, ClientHelloCount: e.ClientHelloCount, EchOfferedCount: e.ECHOfferedCount}}
 	case events.HTTPEvent:
 		p := &eventsv1.HTTPEvent{TransactionDepth: e.TransactionDepth, Method: e.Method, Host: e.Host, Uri: e.URI, Referrer: e.Referrer, Version: e.Version, UserAgent: e.UserAgent, Origin: e.Origin, RequestBodyLength: e.RequestBodyLength, ResponseBodyLength: e.ResponseBodyLength, StatusCode: uint32(e.StatusCode), InformationalCode: uint32(e.InformationalCode), StatusMessage: e.StatusMessage, InformationalMessage: e.InformationalMessage, Tags: cloneStrings(e.Tags), Username: e.Username, Proxies: cloneStrings(e.Proxies), RequestFileIds: cloneStrings(e.RequestFileIDs), RequestFilenames: cloneStrings(e.RequestFilenames), RequestMimeTypes: cloneStrings(e.RequestMIMETypes), ResponseFileIds: cloneStrings(e.ResponseFileIDs), ResponseFilenames: cloneStrings(e.ResponseFilenames), ResponseMimeTypes: cloneStrings(e.ResponseMIMETypes)}
 		if e.Headers != nil {

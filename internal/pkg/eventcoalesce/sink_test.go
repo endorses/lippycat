@@ -259,3 +259,29 @@ func TestCloseEmitsPending(t *testing.T) {
 	require.NoError(t, sink.Close(context.Background()))
 	require.Len(t, next.snapshot(), 1)
 }
+
+func TestTLSCoalescingPreservesEveryClientHelloObservation(t *testing.T) {
+	next := &collectingSink{}
+	sink, err := New(next, Config{Timeout: time.Hour, MaxPending: 10})
+	require.NoError(t, err)
+	first := events.NewTLSEvent(envelope())
+	first.ClientHelloCount, first.ECHOfferedCount = 1, 1
+	second := events.NewTLSEvent(envelope())
+	second.ClientHelloCount = 1
+	server := events.NewTLSEvent(envelope())
+	server.Established = true
+	for _, event := range []events.Event{first, second, server} {
+		require.NoError(t, sink.HandleEvent(context.Background(), event))
+	}
+	require.NoError(t, sink.Close(context.Background()))
+	got := next.snapshot()
+	require.Len(t, got, 2)
+	var total, offers uint64
+	for _, event := range got {
+		tls := event.(events.TLSEvent)
+		total += tls.ClientHelloCount
+		offers += tls.ECHOfferedCount
+	}
+	require.Equal(t, uint64(2), total)
+	require.Equal(t, uint64(1), offers)
+}

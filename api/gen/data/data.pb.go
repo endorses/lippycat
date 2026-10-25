@@ -1370,6 +1370,9 @@ type TLSMetadata struct {
 	HandshakeTimeMs     int64                  `protobuf:"varint,21,opt,name=handshake_time_ms,json=handshakeTimeMs,proto3" json:"handshake_time_ms,omitempty"`
 	RiskScore           float64                `protobuf:"fixed64,22,opt,name=risk_score,json=riskScore,proto3" json:"risk_score,omitempty"`
 	RiskFlags           int32                  `protobuf:"varint,23,opt,name=risk_flags,json=riskFlags,proto3" json:"risk_flags,omitempty"`
+	// False preserves unknown availability from partial input and older peers.
+	ClientHelloObserved bool `protobuf:"varint,24,opt,name=client_hello_observed,json=clientHelloObserved,proto3" json:"client_hello_observed,omitempty"`
+	EchOffered          bool `protobuf:"varint,25,opt,name=ech_offered,json=echOffered,proto3" json:"ech_offered,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -1563,6 +1566,20 @@ func (x *TLSMetadata) GetRiskFlags() int32 {
 		return x.RiskFlags
 	}
 	return 0
+}
+
+func (x *TLSMetadata) GetClientHelloObserved() bool {
+	if x != nil {
+		return x.ClientHelloObserved
+	}
+	return false
+}
+
+func (x *TLSMetadata) GetEchOffered() bool {
+	if x != nil {
+		return x.EchOffered
+	}
+	return false
 }
 
 type HTTPMetadata struct {
@@ -4076,7 +4093,7 @@ const file_data_proto_rawDesc = "" +
 	"\x04http\x18\x0e \x01(\v2\x1b.lippycat.data.HTTPMetadataR\x04http\x1a:\n" +
 	"\fDetailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9d\x06\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf2\x06\n" +
 	"\vTLSMetadata\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x1f\n" +
 	"\vversion_raw\x18\x02 \x01(\rR\n" +
@@ -4107,7 +4124,10 @@ const file_data_proto_rawDesc = "" +
 	"\n" +
 	"risk_score\x18\x16 \x01(\x01R\triskScore\x12\x1d\n" +
 	"\n" +
-	"risk_flags\x18\x17 \x01(\x05R\triskFlags\"\xd2\x06\n" +
+	"risk_flags\x18\x17 \x01(\x05R\triskFlags\x122\n" +
+	"\x15client_hello_observed\x18\x18 \x01(\bR\x13clientHelloObserved\x12\x1f\n" +
+	"\vech_offered\x18\x19 \x01(\bR\n" +
+	"echOffered\"\xd2\x06\n" +
 	"\fHTTPMetadata\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x1b\n" +
 	"\tis_server\x18\x02 \x01(\bR\bisServer\x12\x16\n" +

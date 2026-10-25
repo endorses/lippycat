@@ -1,7 +1,7 @@
 # Operational visibility and offline investigation implementation plan
 
 **Date:** 2026-10-25
-**Status:** In progress; workstreams 1 and 2 are under implementation
+**Status:** In progress; workstreams 1 and 2 implemented and verified; workstreams 3–6 pending
 **Assessment baseline:** `8ba8ed27`
 **Scope:** Six ordered workstreams selected from the existing plans and research
 
@@ -146,28 +146,28 @@ JA3/JA3S/JA4 baseline work is already complete.
 
 ### Implementation
 
-- [ ] Define and document the counting unit as accepted, completely framed
+- [x] Define and document the counting unit as accepted, completely framed
       ClientHello observations at the canonical analysis authority. Distinguish
       observation counts from unique connections; define retransmission and
       midstream-capture behavior explicitly. Transport retry, serialization, and
       subscriber fan-out must not increment capture observations again.
-- [ ] Add explicit ECH-offer detection for the extension identified in the
+- [x] Add explicit ECH-offer detection for the extension identified in the
       original plan and carry observation availability with the result. Preserve
       unknown/not-observed versus an observed ClientHello without that extension,
       including data received from older peers.
-- [ ] Extend existing TLS domain and wire metadata, runtime mappings, and typed
+- [x] Extend existing TLS domain and wire metadata, runtime mappings, and typed
       event projections as needed. Ensure handshake coalescing does not erase the
       evidence needed by the documented numerator and denominator; do not assume
       every TLS summary represents exactly one ClientHello.
-- [ ] Expose ECH-offered and total-ClientHello counts in TLS summaries and the
+- [x] Expose ECH-offered and total-ClientHello counts in TLS summaries and the
       applicable TUI statistics/detail views. Carry sufficient typed evidence for
       equivalent reporting from sniff, tap, processor packet mode, hunter event
       mode, and offline analysis without a second counter authority.
-- [ ] Test complete and segmented ClientHellos, extension absence/presence,
+- [x] Test complete and segmented ClientHellos, extension absence/presence,
       malformed/truncated extension bodies, ServerHello-only input, transport
       retries, and older metadata without the new fields. Retain byte-for-byte
       JA3/JA3S/JA4 regression expectations.
-- [ ] Document ECH offer visibility as an observation, without claiming acceptance
+- [x] Document ECH offer visibility as an observation, without claiming acceptance
       by the server, visibility into the inner ClientHello, or application identity.
 
 **Completion:** The reported fraction has a defined counting unit and preserves
@@ -424,15 +424,15 @@ decryption, application attribution, and coherence scoring require separate scop
       checklist mappings below as each release increment completes. Mark tasks
       complete only after the corresponding behavior and checks are verified.
 
-| Workstream                   | Implementation commits                       | Verification evidence                                           | Disposition |
-| ---------------------------- | -------------------------------------------- | --------------------------------------------------------------- | ----------- |
-| 1. Failover integration      | `9bd9b347` + protocol fix in this checkpoint | Runtime, custody, topology, expiry, race and build checks below | Complete    |
-| 2. ECH visibility            | Pending                                      | Pending                                                         | Not started |
-| 3. DNS notices               | Pending                                      | Pending                                                         | Not started |
-| 4. Offline event history     | Pending                                      | Pending                                                         | Not started |
-| 5. Compact-index Milestone B | Pending                                      | Pending                                                         | Not started |
-| 6A. SSH/HASSH                | Pending                                      | Pending                                                         | Not started |
-| 6B. QUIC study               | Pending                                      | Pending                                                         | Not started |
+| Workstream                   | Implementation commits | Verification evidence                                                | Disposition |
+| ---------------------------- | ---------------------- | -------------------------------------------------------------------- | ----------- |
+| 1. Failover integration      | `9bd9b347`, `0e1c05d4` | Runtime, custody, topology, expiry, race and build checks below      | Complete    |
+| 2. ECH visibility            | ECH release increment  | Parser/runtime/wire/log/CLI/TUI race checks; manual and build matrix | Complete    |
+| 3. DNS notices               | Pending                | Pending                                                              | Not started |
+| 4. Offline event history     | Pending                | Pending                                                              | Not started |
+| 5. Compact-index Milestone B | Pending                | Pending                                                              | Not started |
+| 6A. SSH/HASSH                | Pending                | Pending                                                              | Not started |
+| 6B. QUIC study               | Pending                | Pending                                                              | Not started |
 
 ## Deferred scope
 
@@ -505,3 +505,41 @@ findings: **CLOSED** for this workstream. The broader historical optional crash
 matrix, auxiliary TLS-key path, and LI deployment checks remain outside its
 selected scope. The remaining four workstreams and W2's separate release record
 are not completed by this W1 decision.
+
+### Workstream 2 completion — 2026-10-25
+
+Starting revision: `8ba8ed27`; initial worktree contained only this untracked
+plan. W1 work proceeded in separate owned files and commits. Complete outer
+ClientHello framing now qualifies ECH-offer evidence; malformed, legacy and
+server-only observations remain unknown. Canonical runtime counters count after
+reassembly, before asynchronous delivery, and survive additive packet/event wire
+mappings and log coalescing. The SSL schema adds fields at its end without
+changing existing field meanings or exact JA3/JA3S/JA4 fingerprints.
+
+The CLI reports per-pass counts from the shared runtime, including capture with
+no log sink. Its two-pass segmented-PCAP test also retries the same TCP bytes.
+TUI packet/event details and a retained-event statistics card distinguish unknown
+evidence and explicitly label retention scope. The actual edge-runtime/spool to
+gRPC ingress integration test retries each batch and verifies equivalent log and
+subscriber counts without creating a second processor capture authority.
+
+One review finding was fixed: the first CLI provider used cumulative session
+counters alongside a per-pass summary. Per-summary deltas and the actual two-pass
+regression now keep those scopes consistent. Focused independent review and
+integrated verification found no remaining material issue: **CLOSED** for W2.
+
+Verification includes full focused package race suites, the edge transport test,
+protobuf adapter/golden-schema tests, `make build-matrix`, `make manual-check`,
+and `make manual`. English, Catalan and German editions built successfully, with
+5921/5921 current translations in each catalog. The existing mdBook helper/runtime
+minor-version warning did not prevent builds or structural parity checks.
+Protobuf generation used cached `protoc-gen-go` 1.36.12 and
+`protoc-gen-go-grpc` 1.6.2; the locally available compiler is `protoc` 7.36.1 rather
+than the previous headers' 7.36.2, accurately reflected in regenerated payload
+headers. Reproduction matched the delivered generated payloads; unrelated service
+outputs were preserved. Task-owned generator tools were removed.
+
+The [original TLS roadmap](tls-fingerprinting-roadmap.md) marks its Phase 1 and
+duplicate ECH-statistics task complete. Later fingerprinting/corpus phases stay
+separate. The shared task cache remains owned by the ongoing umbrella
+implementation and must be removed when that task finishes.

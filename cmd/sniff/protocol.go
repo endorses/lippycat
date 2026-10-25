@@ -9,6 +9,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
+	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,18 @@ func runProtocol(cmd *cobra.Command, args []string, protocol protocolcatalog.Spe
 	files := collectReadFiles(readFile, args)
 	var runErr error
 	analysisErr := withEventAnalysisMode(files, structuredLogAnalysisProfile(protocol.Name, effectiveFilter), effectiveFilter, false, func(session *sniffEventSession) {
+		if protocol.Analyzer == protocolcatalog.AnalyzerTLS && session != nil {
+			var previousClientHellos, previousECHOffers uint64
+			restore := tls.SetObservationCountsProvider(func() (uint64, uint64) {
+				session.analysis.EOF()
+				stats := session.analysis.Stats()
+				clientHellos := stats.TLSClientHelloCount - previousClientHellos
+				echOffers := stats.TLSECHOfferedCount - previousECHOffers
+				previousClientHellos, previousECHOffers = stats.TLSClientHelloCount, stats.TLSECHOfferedCount
+				return clientHellos, echOffers
+			})
+			defer restore()
+		}
 		if len(files) == 0 {
 			hooks.StartLive(interfaces, effectiveFilter)
 			return

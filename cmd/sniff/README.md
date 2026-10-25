@@ -826,3 +826,14 @@ messages, MAC and line mapping rules, mirrored BRAS/BNG deployment, counters and
 local tap and direct mutual-TLS hunt/process POI setup. Synthetic distributed
 release verification has passed with upgraded peers; external operator and MDF
 acceptance remain pending. Relays preserve ordinary outputs but cannot authorize X2.
+
+### ECH offer counts
+
+`lc sniff tls` reports `ECH offered / ClientHello` from the shared bounded TCP
+analysis runtime, including segmented handshakes and excluding TCP retransmissions.
+The unit is a completely framed ClientHello, not a unique connection. Counts cover
+captured traffic before display-content filters. Unknown/partial ClientHellos and
+older peer metadata do not contribute a false negative. Extension 65037 includes
+GREASE offers; presence does not prove server acceptance or reveal the inner
+ClientHello. See the [TLS manual](../../docs/manual/src/part5-advanced/tls.md#ech-offer-visibility)
+for packet/event metadata, structured-log fields, and TUI retention scope.

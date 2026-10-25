@@ -74,6 +74,7 @@ type Config struct {
 
 type Stats struct {
 	Observed, Emitted, Invalid, Dropped, ReassemblyEvicted uint64
+	TLSClientHelloCount, TLSECHOfferedCount                uint64
 	DHCP                                                   dhcp.Stats
 	NTP                                                    ntp.Stats
 	Inventory                                              inventory.Stats
@@ -589,7 +590,10 @@ func (r *Runtime) emitMetadata(env events.Envelope, meta *data.PacketMetadata) {
 		r.emitSMTPFiles(env, meta.Email)
 	}
 	if meta.Tls != nil {
-		r.emit(MapTLS(env, meta.Tls))
+		tls := MapTLS(env, meta.Tls)
+		r.stats.TLSClientHelloCount += tls.ClientHelloCount
+		r.stats.TLSECHOfferedCount += tls.ECHOfferedCount
+		r.emit(tls)
 	}
 	if meta.Http != nil {
 		r.emit(MapHTTP(env, meta.Http, r.cfg.IncludeHTTPHeaders))

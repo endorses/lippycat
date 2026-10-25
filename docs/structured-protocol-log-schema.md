@@ -8,19 +8,19 @@ schema version.
 
 ## Streams and compatibility
 
-| Stream  | File        | Compatibility                                                        |
-| ------- | ----------- | -------------------------------------------------------------------- |
-| `conn`  | `conn.log`  | Zeek `Conn::Info` fields followed by lippycat extensions             |
-| `dns`   | `dns.log`   | Zeek `DNS::Info` fields followed by lippycat extensions              |
-| `ssl`   | `ssl.log`   | Zeek `SSL::Info` fields, common JA3 fields, then lippycat extensions |
-| `http`  | `http.log`  | Zeek `HTTP::Info` fields followed by lippycat extensions             |
-| `smtp`  | `smtp.log`  | Zeek `SMTP::Info` fields followed by lippycat extensions             |
-| `files` | `files.log` | Zeek `Files::Info` fields followed by lippycat extensions            |
-| `radius` | `radius.log` | Lippycat message observations |
-| `dhcp` | `dhcp.log` | Opt-in DHCPv4 message observations; not transaction aggregates |
-| `ntp` | `ntp.log` | Opt-in NTP time-message observations |
-| `known_hosts` | `known_hosts.log` | Opt-in bounded, scoped host observations |
-| `known_services` | `known_services.log` | Opt-in bounded, scoped responder/service observations |
+| Stream           | File                 | Compatibility                                                        |
+| ---------------- | -------------------- | -------------------------------------------------------------------- |
+| `conn`           | `conn.log`           | Zeek `Conn::Info` fields followed by lippycat extensions             |
+| `dns`            | `dns.log`            | Zeek `DNS::Info` fields followed by lippycat extensions              |
+| `ssl`            | `ssl.log`            | Zeek `SSL::Info` fields, common JA3 fields, then lippycat extensions |
+| `http`           | `http.log`           | Zeek `HTTP::Info` fields followed by lippycat extensions             |
+| `smtp`           | `smtp.log`           | Zeek `SMTP::Info` fields followed by lippycat extensions             |
+| `files`          | `files.log`          | Zeek `Files::Info` fields followed by lippycat extensions            |
+| `radius`         | `radius.log`         | Lippycat message observations                                        |
+| `dhcp`           | `dhcp.log`           | Opt-in DHCPv4 message observations; not transaction aggregates       |
+| `ntp`            | `ntp.log`            | Opt-in NTP time-message observations                                 |
+| `known_hosts`    | `known_hosts.log`    | Opt-in bounded, scoped host observations                             |
+| `known_services` | `known_services.log` | Opt-in bounded, scoped responder/service observations                |
 
 “Zeek-compatible” means the field has the same name, Zeek TSV type, and
 meaning. It does not promise that lippycat observes every value Zeek would.
@@ -43,6 +43,13 @@ The extensions are:
   or accounting is otherwise a lower bound.
 - `ja3`, `ja3s`, and `ja4` are established fingerprint extensions carried by
   lippycat; they are not fields in Zeek's base `SSL::Info` record.
+- `client_hello_count` and `ech_offered_count` (`count`) append to `ssl.log`.
+  They count completely framed ClientHello observations, not connections or log
+  rows. `ech_offered` (`bool`) reports whether at least one counted observation
+  contained extension 65037. All three fields are unset without known complete
+  ClientHello evidence (including legacy peers and ServerHello-only input). A
+  known ClientHello without the extension has counts `1,0` and `false`; TLS
+  coalescing preserves the numerator and denominator across ClientHellos.
 - `hash_complete` (`bool`) is true only when file hashes cover the complete
   decoded entity. When false, MD5/SHA1/SHA256 cover only the recovered prefix.
 
@@ -169,15 +176,15 @@ or acknowledgement boundaries.
 
 The ordered common prefix for each new stream is:
 
-| Field | Type |
-| --- | --- |
-| `ts` | `time` |
-| `uid` | `string` |
-| `id.orig_h` | `addr` |
-| `id.orig_p` | `port` |
-| `id.resp_h` | `addr` |
-| `id.resp_p` | `port` |
-| `proto` | `enum` |
+| Field       | Type     |
+| ----------- | -------- |
+| `ts`        | `time`   |
+| `uid`       | `string` |
+| `id.orig_h` | `addr`   |
+| `id.orig_p` | `port`   |
+| `id.resp_h` | `addr`   |
+| `id.resp_p` | `port`   |
+| `proto`     | `enum`   |
 
 For DHCP/NTP the endpoints retain **observed packet direction**. Each inventory
 record instead retains its qualifying connection's envelope, including flow
@@ -190,29 +197,29 @@ zero, address or empty association. Partial decoding sets envelope `partial`;
 
 ### `dhcp.log`
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `op` | `count` | BOOTP operation 1 or 2 |
-| `message_type` | `count` | DHCP option 53, numeric 1–8 |
-| `transaction_id` | `count` | Unsigned 32-bit XID |
-| `hardware_type` | `count` | Hardware type byte |
-| `hardware_address` | `string` | Lowercase hex; at most 16 bytes |
-| `client_identifier` | `string` | Optional lowercase hex, arbitrary binary identifier |
-| `client_addr` | `addr` | Header ciaddr, including observed zero |
-| `offered_addr` | `addr` | Header yiaddr |
-| `next_server` | `addr` | Header siaddr; not DHCP server identifier |
-| `relay_addr` | `addr` | Header giaddr |
-| `server_identifier` | `addr` | Optional option 54 |
-| `requested_addr` | `addr` | Optional option 50 |
-| `hostname` | `string` | Optional bounded option 12 |
-| `domain` | `string` | Optional bounded option 15 |
-| `lease_seconds` | `count` | Optional unsigned seconds; present zero is distinct from absent |
-| `routers` | `vector[addr]` | Ordered option 3 addresses |
-| `dns_servers` | `vector[addr]` | Ordered option 6 addresses |
-| `parameter_request_list` | `vector[count]` | Ordered option 55 bytes |
-| `association` | `enum` | Observational association status |
-| `association_id` | `string` | Opaque scoped exchange/server ID when available |
-| `truncated` | `bool` | Incomplete input |
+| Field                    | Type            | Meaning                                                         |
+| ------------------------ | --------------- | --------------------------------------------------------------- |
+| `op`                     | `count`         | BOOTP operation 1 or 2                                          |
+| `message_type`           | `count`         | DHCP option 53, numeric 1–8                                     |
+| `transaction_id`         | `count`         | Unsigned 32-bit XID                                             |
+| `hardware_type`          | `count`         | Hardware type byte                                              |
+| `hardware_address`       | `string`        | Lowercase hex; at most 16 bytes                                 |
+| `client_identifier`      | `string`        | Optional lowercase hex, arbitrary binary identifier             |
+| `client_addr`            | `addr`          | Header ciaddr, including observed zero                          |
+| `offered_addr`           | `addr`          | Header yiaddr                                                   |
+| `next_server`            | `addr`          | Header siaddr; not DHCP server identifier                       |
+| `relay_addr`             | `addr`          | Header giaddr                                                   |
+| `server_identifier`      | `addr`          | Optional option 54                                              |
+| `requested_addr`         | `addr`          | Optional option 50                                              |
+| `hostname`               | `string`        | Optional bounded option 12                                      |
+| `domain`                 | `string`        | Optional bounded option 15                                      |
+| `lease_seconds`          | `count`         | Optional unsigned seconds; present zero is distinct from absent |
+| `routers`                | `vector[addr]`  | Ordered option 3 addresses                                      |
+| `dns_servers`            | `vector[addr]`  | Ordered option 6 addresses                                      |
+| `parameter_request_list` | `vector[count]` | Ordered option 55 bytes                                         |
+| `association`            | `enum`          | Observational association status                                |
+| `association_id`         | `string`        | Opaque scoped exchange/server ID when available                 |
+| `truncated`              | `bool`          | Incomplete input                                                |
 
 Only DHCPv4 is eligible; DHCPv6 and bare BOOTP produce no DHCP log. Unknown and
 vendor option contents never enter routine records. Repeated options concatenate
@@ -229,28 +236,28 @@ and `not_applicable`. Correlation never replaces the observed flow UID.
 
 ### `ntp.log`
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `version` | `count` | Header version |
-| `mode` | `count` | Time-message mode 1–5 |
-| `leap` | `count` | Leap indicator 0–3 |
-| `stratum` | `count` | Exact header byte |
-| `poll` | `int` | Signed exponent |
-| `precision` | `int` | Signed exponent |
-| `root_delay_raw` | `int` | Signed 16.16 wire value |
-| `root_dispersion_raw` | `count` | Unsigned 16.16 wire value |
-| `reference_id` | `string` | Exactly four bytes, lowercase hex |
-| `reference_raw` | `string` | Exact 64-bit 32.32 value as 16 hex digits |
-| `origin_raw` | `string` | Exact origin timestamp |
-| `receive_raw` | `string` | Exact receive timestamp |
-| `transmit_raw` | `string` | Exact transmit timestamp |
-| `reference_time` | `time` | Capture-relative era conversion or unset |
-| `origin_time` | `time` | Capture-relative era conversion or unset |
-| `receive_time` | `time` | Capture-relative era conversion or unset |
-| `transmit_time` | `time` | Capture-relative era conversion or unset |
-| `association` | `enum` | Same finite statuses as DHCP |
-| `association_id` | `string` | Opaque matched-request ID when available |
-| `truncated` | `bool` | Incomplete trailing input |
+| Field                 | Type     | Meaning                                   |
+| --------------------- | -------- | ----------------------------------------- |
+| `version`             | `count`  | Header version                            |
+| `mode`                | `count`  | Time-message mode 1–5                     |
+| `leap`                | `count`  | Leap indicator 0–3                        |
+| `stratum`             | `count`  | Exact header byte                         |
+| `poll`                | `int`    | Signed exponent                           |
+| `precision`           | `int`    | Signed exponent                           |
+| `root_delay_raw`      | `int`    | Signed 16.16 wire value                   |
+| `root_dispersion_raw` | `count`  | Unsigned 16.16 wire value                 |
+| `reference_id`        | `string` | Exactly four bytes, lowercase hex         |
+| `reference_raw`       | `string` | Exact 64-bit 32.32 value as 16 hex digits |
+| `origin_raw`          | `string` | Exact origin timestamp                    |
+| `receive_raw`         | `string` | Exact receive timestamp                   |
+| `transmit_raw`        | `string` | Exact transmit timestamp                  |
+| `reference_time`      | `time`   | Capture-relative era conversion or unset  |
+| `origin_time`         | `time`   | Capture-relative era conversion or unset  |
+| `receive_time`        | `time`   | Capture-relative era conversion or unset  |
+| `transmit_time`       | `time`   | Capture-relative era conversion or unset  |
+| `association`         | `enum`   | Same finite statuses as DHCP              |
+| `association_id`      | `string` | Opaque matched-request ID when available  |
+| `truncated`           | `bool`   | Incomplete trailing input                 |
 
 Raw timestamps preserve exact values even when log time formatting rounds.
 Wire zero means unavailable; choose the era nearest capture time for nonzero
@@ -296,21 +303,21 @@ not permanent asset identity.
 
 Shared keys and finite defaults (configuration choices, not performance gates):
 
-| Key | Default |
-| --- | --- |
-| `events.inventory.enabled` | `true`; set to `false` to disable inventory |
-| `events.inventory.local_cidrs` | empty; no inventory subject filter |
-| `events.inventory.max_entries` | `16384` |
-| `events.inventory.max_bytes` | `8388608` |
-| `events.inventory.max_entries_per_scope` | `4096` |
-| `events.inventory.max_bytes_per_scope` | `2097152` |
-| `events.inventory.retention` | `24h` |
-| `events.dhcp.max_entries` | `4096` |
-| `events.dhcp.max_bytes` | `4194304` |
-| `events.dhcp.timeout` | `2m` |
-| `events.ntp.max_entries` | `4096` |
-| `events.ntp.max_bytes` | `4194304` |
-| `events.ntp.timeout` | `30s` |
+| Key                                      | Default                                     |
+| ---------------------------------------- | ------------------------------------------- |
+| `events.inventory.enabled`               | `true`; set to `false` to disable inventory |
+| `events.inventory.local_cidrs`           | empty; no inventory subject filter          |
+| `events.inventory.max_entries`           | `16384`                                     |
+| `events.inventory.max_bytes`             | `8388608`                                   |
+| `events.inventory.max_entries_per_scope` | `4096`                                      |
+| `events.inventory.max_bytes_per_scope`   | `2097152`                                   |
+| `events.inventory.retention`             | `24h`                                       |
+| `events.dhcp.max_entries`                | `4096`                                      |
+| `events.dhcp.max_bytes`                  | `4194304`                                   |
+| `events.dhcp.timeout`                    | `2m`                                        |
+| `events.ntp.max_entries`                 | `4096`                                      |
+| `events.ntp.max_bytes`                   | `4194304`                                   |
+| `events.ntp.timeout`                     | `30s`                                       |
 
 Explicit zero/negative caps or timeouts are invalid. Disabled inventory allocates
 no retained state. Capture-time watermarks never move backward; late input does

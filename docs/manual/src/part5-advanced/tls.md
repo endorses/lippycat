@@ -71,6 +71,16 @@ For bulk filtering from a file:
 sudo lc sniff tls -i eth0 --sni-file domains.txt
 ```
 
+## ECH offer visibility {#ech-offer-visibility}
+
+lippycat reports the presence of the `encrypted_client_hello` extension (65037) in a completely framed outer ClientHello. This includes GREASE offers. It does not prove server acceptance, reveal the encrypted inner ClientHello, or identify an application. See [RFC 9849](https://www.rfc-editor.org/rfc/rfc9849.html).
+
+The TLS capture summary reports `ECH offered / ClientHello`. The counting unit is a complete ClientHello accepted by the shared analysis runtime, before display-content filters. TCP segmentation and TLS-record fragmentation are reassembled; TCP retransmissions are counted once. Distinct ClientHellos on the same connection, including retries after HelloRetryRequest, count separately. Capture beginning midstream can contribute when a complete ClientHello is recovered; missing or malformed framing contributes no denominator. These are observation counts, not unique connections.
+
+Packet metadata uses `ClientHelloObserved` to qualify `ECHOffered`: false observation availability means unknown, not an observed absence. ServerHello-only captures and older peers without these fields remain unknown. Typed TLS events and `ssl.log` carry `client_hello_count` and `ech_offered_count`; `ech_offered` is unset when no complete ClientHello evidence is available. Log coalescing preserves the counts. Packet-mode processors count at the processor; event-mode hunters count at the hunter. Relaying, transport retries, and subscriber fan-out do not create capture observations.
+
+In the TUI, the HTTPS/TLS Statistics card reports the fraction over retained canonical TLS events and labels rows without ClientHello evidence separately. This window can be incomplete after retention eviction or event delivery loss. Packet and event details preserve unknown values; Events filters such as `ech_offered:true`, `ech_offered:false`, and `client_hello_count:>=1` only match available evidence. Durable logs can also omit observations after queue overflow or I/O failure; do not interpret a missing row as an observed negative.
+
 ## JA3 and JA3S Fingerprinting {#ja3-and-ja3s-fingerprinting}
 
 JA3 creates a fingerprint of a TLS client by hashing the following fields from the ClientHello message:

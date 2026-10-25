@@ -144,7 +144,11 @@ func Summary(event events.Event) string {
 	case events.HTTPEvent:
 		return strings.TrimSpace(fmt.Sprintf("%s %s%s status=%d", e.Method, e.Host, e.URI, e.StatusCode))
 	case events.TLSEvent:
-		return strings.TrimSpace(fmt.Sprintf("%s %s %s", e.ServerName, e.Version, e.ValidationStatus))
+		summary := strings.TrimSpace(fmt.Sprintf("%s %s %s", e.ServerName, e.Version, e.ValidationStatus))
+		if e.ClientHelloCount > 0 {
+			return strings.TrimSpace(fmt.Sprintf("%s ECH offered=%d/%d", summary, e.ECHOfferedCount, e.ClientHelloCount))
+		}
+		return summary
 	case events.DHCPEvent:
 		return fmt.Sprintf("DHCP type=%d xid=%08x %s", e.MessageType, e.TransactionID, e.Association)
 	case events.NTPEvent:

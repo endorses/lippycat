@@ -897,6 +897,11 @@ func eventSpecificValues(event events.Event) map[string]string {
 		put("ja3", e.JA3)
 		put("ja3s", e.JA3S)
 		put("ja4", e.JA4)
+		if e.ClientHelloCount > 0 {
+			put("client_hello_count", e.ClientHelloCount)
+			put("ech_offered_count", e.ECHOfferedCount)
+			put("ech_offered", e.ECHOfferedCount > 0)
+		}
 	case events.HTTPEvent:
 		put("trans_depth", e.TransactionDepth)
 		put("method", e.Method)

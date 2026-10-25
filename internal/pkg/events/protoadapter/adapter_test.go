@@ -409,3 +409,31 @@ func TestRADIUSRoundTripAndPublicAttributeBoundary(t *testing.T) {
 	_, err = ToProto(nilEvent)
 	require.ErrorContains(t, err, "nil RADIUS pointer")
 }
+
+func TestTLSECHCountsRoundTripAndLegacyAvailability(t *testing.T) {
+	for _, count := range []uint64{0, 1, 3} {
+		event := events.NewTLSEvent(testEnvelope(1))
+		event.ClientHelloCount, event.ECHOfferedCount = count, count
+		wire, err := ToProto(event)
+		require.NoError(t, err)
+		encoded, err := proto.Marshal(wire)
+		require.NoError(t, err)
+		var received eventsv1.ProtocolEvent
+		require.NoError(t, proto.Unmarshal(encoded, &received))
+		decoded, omission, err := FromProto(&received)
+		require.NoError(t, err)
+		require.Nil(t, omission)
+		require.Equal(t, event, decoded)
+		// A peer predating these additive fields supplies no evidence. Do not
+		// infer a negative ECH observation from fingerprints or a TLS event row.
+		wire.GetTls().ClientHelloCount, wire.GetTls().EchOfferedCount = 0, 0
+		decoded, _, err = FromProto(wire)
+		require.NoError(t, err)
+		require.Zero(t, decoded.(events.TLSEvent).ClientHelloCount)
+	}
+	wire, err := ToProto(events.NewTLSEvent(testEnvelope(1)))
+	require.NoError(t, err)
+	wire.GetTls().EchOfferedCount = 1
+	_, _, err = FromProto(wire)
+	require.ErrorContains(t, err, "ECH count exceeds ClientHello count")
+}

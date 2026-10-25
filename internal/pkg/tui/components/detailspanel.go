@@ -459,6 +459,17 @@ func (d *DetailsPanel) renderContent() string {
 			content.WriteString("\n")
 		}
 
+		ech := "unknown (complete ClientHello not observed)"
+		if d.packet.TLSData.ClientHelloObserved {
+			ech = "not offered"
+			if d.packet.TLSData.ECHOffered {
+				ech = "offered"
+			}
+		}
+		content.WriteString(labelStyle.Render("ECH: "))
+		content.WriteString(valueStyle.Render(ech))
+		content.WriteString("\n")
+
 		// JA3 Fingerprint (ClientHello)
 		if d.packet.TLSData.JA3Fingerprint != "" {
 			content.WriteString(labelStyle.Render("JA3: "))

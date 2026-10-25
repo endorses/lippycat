@@ -200,3 +200,22 @@ func TestEventStoreInspectionRestoresFollowingAfterEviction(t *testing.T) {
 	require.True(t, store.SetInspecting(false, ""))
 	require.Equal(t, "three", store.SelectedID())
 }
+
+func TestRetainedTLSObservationCountsDoNotRecountDuplicateIDs(t *testing.T) {
+	store := NewEventStore(3)
+	first := events.NewTLSEvent(events.Envelope{EventID: "first"})
+	first.ClientHelloCount, first.ECHOfferedCount = 2, 1
+	unknown := events.NewTLSEvent(events.Envelope{EventID: "legacy"})
+	store.AddBatch([]events.Event{first, first, unknown})
+	stats := store.TLSObservations()
+	require.Equal(t, uint64(2), stats.Rows)
+	require.Equal(t, uint64(2), stats.ClientHellos)
+	require.Equal(t, uint64(1), stats.ECHOffered)
+	require.Equal(t, uint64(1), stats.Unavailable)
+	store.AddBatch([]events.Event{unknown, unknown})
+	stats = store.TLSObservations()
+	require.Zero(t, stats.ClientHellos, "retained scope loses evidence when the last copy is evicted")
+	require.Equal(t, uint64(1), stats.Unavailable)
+	store.Reset()
+	require.Zero(t, store.TLSObservations().Rows)
+}

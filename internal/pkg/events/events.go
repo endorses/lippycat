@@ -133,6 +133,9 @@ type TLSEvent struct {
 	CertificateFileIDs, ClientCertificateFileIDs                   []string
 	Subject, Issuer, ClientSubject, ClientIssuer, ValidationStatus string
 	JA3, JA3S, JA4                                                 string
+	// Counts preserve complete ClientHello evidence when handshakes coalesce.
+	// A zero denominator means no known ClientHello observation, never no ECH.
+	ClientHelloCount, ECHOfferedCount uint64
 }
 
 func NewTLSEvent(env Envelope) TLSEvent { return TLSEvent{eventBase: eventBase{env}} }

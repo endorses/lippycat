@@ -257,6 +257,9 @@ message TLSMetadata {
     int64 handshake_time_ms = 21;
     double risk_score = 22;
     int32 risk_flags = 23;
+    // False preserves unknown availability from partial input and older peers.
+    bool client_hello_observed = 24;
+    bool ech_offered = 25;
 }
 
 message HTTPMetadata {

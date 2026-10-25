@@ -30,6 +30,12 @@ func MapTLS(env events.Envelope, m *data.TLSMetadata) events.TLSEvent {
 	}
 	e.Established = m.CorrelatedPeer || strings.EqualFold(m.HandshakeType, "ServerHello")
 	e.JA3, e.JA3S, e.JA4 = m.Ja3, m.Ja3S, m.Ja4
+	if m.ClientHelloObserved && !m.IsServer {
+		e.ClientHelloCount = 1
+		if m.EchOffered {
+			e.ECHOfferedCount = 1
+		}
+	}
 	return e
 }
 func MapHTTP(env events.Envelope, m *data.HTTPMetadata, headers bool) events.HTTPEvent {

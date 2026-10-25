@@ -601,3 +601,32 @@ func (s *EventStore) ensureVisibleSelectionLocked() {
 	}
 	s.selectedID = ""
 }
+
+// TLSObservations summarizes known ClientHello evidence in the retained event
+// window. Event IDs are immutable; repeated delivery does not add an observation.
+// This deliberately does not claim capture-wide completeness after loss/eviction.
+func (s *EventStore) TLSObservations() components.TLSObservationStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result components.TLSObservationStats
+	seen := make(map[string]struct{})
+	for i := 0; i < s.count; i++ {
+		event, ok := s.itemLocked(i).Event.(events.TLSEvent)
+		if !ok {
+			continue
+		}
+		if id := event.Envelope().EventID; id != "" {
+			if _, duplicate := seen[id]; duplicate {
+				continue
+			}
+			seen[id] = struct{}{}
+		}
+		result.Rows++
+		result.ClientHellos += event.ClientHelloCount
+		result.ECHOffered += event.ECHOfferedCount
+		if event.ClientHelloCount == 0 {
+			result.Unavailable++
+		}
+	}
+	return result
+}

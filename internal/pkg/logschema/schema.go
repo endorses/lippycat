@@ -38,6 +38,7 @@ var Streams = []Stream{
 		{"next_protocol", "string"}, {"established", "bool"}, {"cert_chain_fuids", "vector[string]"}, {"client_cert_chain_fuids", "vector[string]"},
 		{"subject", "string"}, {"issuer", "string"}, {"client_subject", "string"}, {"client_issuer", "string"}, {"validation_status", "string"},
 		{"ja3", "string"}, {"ja3s", "string"}, {"ja4", "string"}, {"community_id", "string"}, {"node_id", "string"},
+		{"client_hello_count", "count"}, {"ech_offered_count", "count"}, {"ech_offered", "bool"},
 	}),
 	stream("http", []Field{
 		{"ts", "time"}, {"uid", "string"}, {"id.orig_h", "addr"}, {"id.orig_p", "port"}, {"id.resp_h", "addr"}, {"id.resp_p", "port"},

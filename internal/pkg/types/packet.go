@@ -216,6 +216,13 @@ type TLSMetadata struct {
 	// SNI (Server Name Indication)
 	SNI string // Server hostname from ClientHello extension
 
+	// ClientHelloObserved is true only for a completely framed ClientHello.
+	// False means ECH availability is unknown (including legacy metadata).
+	ClientHelloObserved bool
+	// ECHOffered records presence of extension 65037, including GREASE offers.
+	// It does not establish server acceptance or reveal an inner ClientHello.
+	ECHOffered bool
+
 	// ClientHello data (if ClientHello)
 	CipherSuites      []uint16 // Advertised cipher suites
 	Extensions        []uint16 // Extension types

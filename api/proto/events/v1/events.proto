@@ -127,6 +127,9 @@ message TLSEvent {
   string ja3 = 16;
   string ja3s = 17;
   string ja4 = 18;
+  // Zero preserves unknown ClientHello availability from older peers.
+  uint64 client_hello_count = 19;
+  uint64 ech_offered_count = 20;
 }
 
 message HeaderValues {

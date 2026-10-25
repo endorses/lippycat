@@ -34,18 +34,18 @@ HTTP/2, and SSH observations tell inconsistent stories about the same endpoint.
 
 ## Current State
 
-| Area | Current support | Gap |
-|------|-----------------|-----|
-| TLS JA3 | Implemented in `internal/pkg/tls/ja3.go` | Needs regression tests against known vectors |
-| TLS JA3S | Implemented in `internal/pkg/tls/ja3.go` | Needs regression tests against known vectors |
-| TLS JA4 | Function exists in `internal/pkg/tls/ja3.go` | Not currently called from the parser path |
-| TLS parsing | ClientHello / ServerHello and selected extensions | Missing richer extension body data |
-| ECH visibility | Extension IDs are collected | No explicit ECH counter or reporting |
-| Certificate parsing | Handshake type recognized | Certificate body not decoded |
-| QUIC | Signature detection only | No Initial parsing, decryption, or transport parameters |
-| SSH | Banner signature detection | No KEXINIT parsing or HASSH/HASSHServer |
-| HTTP/2 | Protocol may be labeled elsewhere | No SETTINGS/pseudo-header fingerprint parser |
-| Distributed metadata | Packet metadata has DNS/SIP/RTP/email fields | No structured TLS/QUIC/SSH fingerprint proto fields |
+| Area                 | Current support                                    | Gap                                                     |
+| -------------------- | -------------------------------------------------- | ------------------------------------------------------- |
+| TLS JA3              | Implemented in `internal/pkg/tls/ja3.go`           | Needs regression tests against known vectors            |
+| TLS JA3S             | Implemented in `internal/pkg/tls/ja3.go`           | Needs regression tests against known vectors            |
+| TLS JA4              | Function exists in `internal/pkg/tls/ja3.go`       | Not currently called from the parser path               |
+| TLS parsing          | ClientHello / ServerHello and selected extensions  | Missing richer extension body data                      |
+| ECH visibility       | Complete ClientHello evidence and canonical counts | Offer presence only; no server acceptance or inner CH   |
+| Certificate parsing  | Handshake type recognized                          | Certificate body not decoded                            |
+| QUIC                 | Signature detection only                           | No Initial parsing, decryption, or transport parameters |
+| SSH                  | Banner signature detection                         | No KEXINIT parsing or HASSH/HASSHServer                 |
+| HTTP/2               | Protocol may be labeled elsewhere                  | No SETTINGS/pseudo-header fingerprint parser            |
+| Distributed metadata | Packet metadata has DNS/SIP/RTP/email fields       | No structured TLS/QUIC/SSH fingerprint proto fields     |
 
 ## Design Principles
 
@@ -126,11 +126,11 @@ Make current TLS fingerprinting correct and testable before extending it.
 
 ### Files
 
-| File | Change |
-|------|--------|
-| `internal/pkg/tls/ja3.go` | Validate/fix JA4 implementation |
-| `internal/pkg/tls/parser.go` | Populate JA4 on ClientHello |
-| `internal/pkg/tls/*_test.go` | Add vector tests |
+| File                                | Change                          |
+| ----------------------------------- | ------------------------------- |
+| `internal/pkg/tls/ja3.go`           | Validate/fix JA4 implementation |
+| `internal/pkg/tls/parser.go`        | Populate JA4 on ClientHello     |
+| `internal/pkg/tls/*_test.go`        | Add vector tests                |
 | `internal/pkg/hunter/filter/tls.go` | Confirm JA4 matching path works |
 
 ### Acceptance Criteria
@@ -148,13 +148,13 @@ traffic lippycat users actually monitor.
 
 ### Tasks
 
-- [ ] Add `ExtensionEncryptedClientHello = 65037` constant.
-- [ ] Add `ECHOffered bool` to TLS metadata.
-- [ ] Set `ECHOffered` when the ClientHello contains the ECH extension.
-- [ ] Add counters for total ClientHellos and ECH-offered ClientHellos.
-- [ ] Expose ECH counts in local TLS summary output.
-- [ ] Expose ECH counts in TUI/statistics if TLS protocol views are active.
-- [ ] Add tests for ECH extension detection.
+- [x] Add `ExtensionEncryptedClientHello = 65037` constant.
+- [x] Add `ECHOffered bool` to TLS metadata.
+- [x] Set `ECHOffered` when the ClientHello contains the ECH extension.
+- [x] Add counters for total ClientHellos and ECH-offered ClientHellos.
+- [x] Expose ECH counts in local TLS summary output.
+- [x] Expose ECH counts in TUI/statistics if TLS protocol views are active.
+- [x] Add tests for ECH extension detection.
 
 ### Acceptance Criteria
 
@@ -162,6 +162,17 @@ traffic lippycat users actually monitor.
 - ECH detection does not require parsing encrypted inner ClientHello data.
 - The metric works in sniff, tap, and hunt/process paths where TLS metadata is
   available.
+
+**Implementation checkpoint — 2026-10-25:** ECH visibility is implemented with
+complete-ClientHello availability, canonical runtime observation counters,
+additive packet/event wire fields, count-preserving log coalescing, `ssl.log`
+fields, event queries, local summaries, and scope-qualified TUI details/statistics.
+Unknown legacy/server-only observations remain unset. Exact fingerprint vectors,
+segmented/coalesced messages, retransmission, replay-pass summaries, and actual
+edge-event gRPC ingress to logs/subscribers are covered by focused tests. The
+[operator definition](../manual/src/part5-advanced/tls.md#ech-offer-visibility)
+explains GREASE, midstream observations, counting scope, and retention/loss limits.
+Corpus and attribution work below remain separate.
 
 ## Phase 2: Corpus and Prior Art Evaluation
 
@@ -197,15 +208,15 @@ Add a similarity-preserving fingerprint alongside exact hashes.
 
 Compute a 64-bit SimHash over weighted ClientHello features:
 
-| Feature class | Initial weight |
-|---------------|----------------|
-| Supported groups | High |
-| Signature algorithms | High |
-| Cipher suites | Medium |
-| Extension IDs | Medium |
-| ALPN protocols | Low-medium |
-| Extension order | Low |
-| GREASE position | Low |
+| Feature class        | Initial weight |
+| -------------------- | -------------- |
+| Supported groups     | High           |
+| Signature algorithms | High           |
+| Cipher suites        | Medium         |
+| Extension IDs        | Medium         |
+| ALPN protocols       | Low-medium     |
+| Extension order      | Low            |
+| GREASE position      | Low            |
 
 Weights are provisional until Phase 2 corpus data calibrates them.
 
@@ -235,11 +246,11 @@ Split TLS ClientHello features by volatility so partial matches are explainable.
 
 ### Initial Tiers
 
-| Tier | Features | Expected meaning |
-|------|----------|------------------|
-| Tier 0 | supported groups, signature algorithms, EC point formats, record version | TLS stack family |
-| Tier 1 | cipher list, extension set, supported versions | application build family |
-| Tier 2 | ALPN, extension order, padding length, PSK mode, key share groups | session/config behavior |
+| Tier   | Features                                                                 | Expected meaning         |
+| ------ | ------------------------------------------------------------------------ | ------------------------ |
+| Tier 0 | supported groups, signature algorithms, EC point formats, record version | TLS stack family         |
+| Tier 1 | cipher list, extension set, supported versions                           | application build family |
+| Tier 2 | ALPN, extension order, padding length, PSK mode, key share groups        | session/config behavior  |
 
 ### Parser Additions
 
@@ -338,23 +349,23 @@ Detect inconsistent client stories across layers.
 
 ### Inputs
 
-| Layer | Features |
-|-------|----------|
+| Layer  | Features                                              |
+| ------ | ----------------------------------------------------- |
 | IP/TCP | TTL, MSS, window scale, window size, TCP option order |
-| TLS | JA3/JA4, SimHash, tier hashes, ALPN, ECH offered |
-| QUIC | version, transport parameters, Initial shape |
-| HTTP/2 | SETTINGS order/values, pseudo-header order |
-| SSH | banner, HASSH |
+| TLS    | JA3/JA4, SimHash, tier hashes, ALPN, ECH offered      |
+| QUIC   | version, transport parameters, Initial shape          |
+| HTTP/2 | SETTINGS order/values, pseudo-header order            |
+| SSH    | banner, HASSH                                         |
 
 ### Finding Examples
 
-| Code | Example |
-|------|---------|
-| `tcp_tls_os_mismatch` | TCP options look Linux-like, TLS looks Schannel-like |
-| `tls_http2_stack_mismatch` | TLS resembles Chrome, HTTP/2 SETTINGS resemble Go |
-| `alpn_protocol_mismatch` | TLS advertises h2 but observed app behavior is HTTP/1.x only |
-| `ech_outer_only` | ECH present, confidence reduced for TLS identity |
-| `rare_transport_shape` | QUIC/TCP behavior far from corpus neighbors |
+| Code                       | Example                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| `tcp_tls_os_mismatch`      | TCP options look Linux-like, TLS looks Schannel-like         |
+| `tls_http2_stack_mismatch` | TLS resembles Chrome, HTTP/2 SETTINGS resemble Go            |
+| `alpn_protocol_mismatch`   | TLS advertises h2 but observed app behavior is HTTP/1.x only |
+| `ech_outer_only`           | ECH present, confidence reduced for TLS identity             |
+| `rare_transport_shape`     | QUIC/TCP behavior far from corpus neighbors                  |
 
 ### Tasks
 
@@ -413,7 +424,7 @@ support.
 ### UI Tasks
 
 - [ ] Add TLS fingerprint rows to packet details.
-- [ ] Add ECH counters to statistics.
+- [x] Add ECH counters to statistics.
 - [ ] Add SSH fingerprint rows.
 - [ ] Add coherence findings as compact reason-code rows.
 - [ ] Avoid widening packet-list columns unless the field is useful for scanning.

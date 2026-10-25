@@ -47,6 +47,8 @@ const (
 	ExtensionSignatureAlgos  = 13
 	ExtensionALPN            = 16
 	ExtensionSupportedVer    = 43
+	// ExtensionEncryptedClientHello is registered by RFC 9849.
+	ExtensionEncryptedClientHello = 65037
 
 	// SNI types
 	SNITypeHostname = 0
@@ -157,6 +159,12 @@ func (p *Parser) ParseHandshake(recordVersion uint16, handshake []byte) *types.T
 	switch handshakeType {
 	case HandshakeTypeClientHello:
 		p.parseClientHello(handshake, metadata)
+		metadata.ClientHelloObserved = completeClientHello(handshake)
+		if metadata.ClientHelloObserved {
+			for _, extension := range metadata.Extensions {
+				metadata.ECHOffered = metadata.ECHOffered || extension == ExtensionEncryptedClientHello
+			}
+		}
 	case HandshakeTypeServerHello:
 		metadata.IsServer = true
 		p.parseServerHello(handshake, metadata)
@@ -167,6 +175,56 @@ func (p *Parser) ParseHandshake(recordVersion uint16, handshake []byte) *types.T
 	}
 
 	return metadata
+}
+
+// completeClientHello validates the enclosing vectors without interpreting opaque
+// extension bodies. A truncated extension cannot turn absence into a false "no".
+func completeClientHello(message []byte) bool {
+	if len(message) < 39 {
+		return false
+	}
+	pos := 38 // Handshake header, legacy_version, and random.
+	sessionLength := int(message[pos])
+	pos++
+	if sessionLength > 32 || pos+sessionLength+2 > len(message) {
+		return false
+	}
+	pos += sessionLength
+	cipherLength := int(binary.BigEndian.Uint16(message[pos : pos+2]))
+	pos += 2
+	if cipherLength == 0 || cipherLength%2 != 0 || pos+cipherLength+1 > len(message) {
+		return false
+	}
+	pos += cipherLength
+	compressionLength := int(message[pos])
+	pos++
+	if compressionLength == 0 || pos+compressionLength > len(message) {
+		return false
+	}
+	pos += compressionLength
+	if pos == len(message) { // Extensions are optional before TLS 1.3.
+		return true
+	}
+	if pos+2 > len(message) {
+		return false
+	}
+	extensionsLength := int(binary.BigEndian.Uint16(message[pos : pos+2]))
+	pos += 2
+	if pos+extensionsLength != len(message) {
+		return false
+	}
+	for pos < len(message) {
+		if pos+4 > len(message) {
+			return false
+		}
+		extensionLength := int(binary.BigEndian.Uint16(message[pos+2 : pos+4]))
+		pos += 4
+		if pos+extensionLength > len(message) {
+			return false
+		}
+		pos += extensionLength
+	}
+	return true
 }
 
 // parseClientHello parses a ClientHello message.

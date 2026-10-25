@@ -24,12 +24,21 @@ import (
 
 // Global state for TLS sniffer
 var (
-	tlsParser        *Parser
-	tlsTracker       *Tracker
-	tlsAggregator    *Aggregator
-	tlsContentFilter *ContentFilter
-	tlsPacketSink    pipeline.PacketSink
+	tlsParser            *Parser
+	tlsTracker           *Tracker
+	tlsAggregator        *Aggregator
+	tlsContentFilter     *ContentFilter
+	tlsPacketSink        pipeline.PacketSink
+	tlsObservationCounts func() (clientHellos, echOffered uint64)
 )
+
+// SetObservationCountsProvider supplies counters from the shared canonical
+// analysis runtime. CLI wiring owns the provider for one capture session.
+func SetObservationCountsProvider(provider func() (clientHellos, echOffered uint64)) func() {
+	previous := tlsObservationCounts
+	tlsObservationCounts = provider
+	return func() { tlsObservationCounts = previous }
+}
 
 // StartTLSSniffer starts the TLS sniffer on the specified interfaces.
 func StartTLSSniffer(devices []pcaptypes.PcapInterface, filter string) {
@@ -351,7 +360,12 @@ func printStatistics(aggregator *Aggregator, tracker *Tracker) {
 
 	stats := aggregator.Stats()
 	fmt.Printf("\nTotal handshakes: %d\n", stats.TotalHandshakes)
-	fmt.Printf("  ClientHello: %d\n", stats.ClientHelloCount)
+	clientHellos, echOffered := uint64(stats.ClientHelloCount), uint64(stats.ECHOfferedCount)
+	if tlsObservationCounts != nil {
+		clientHellos, echOffered = tlsObservationCounts()
+	}
+	fmt.Printf("  Completely framed ClientHello observations: %d\n", clientHellos)
+	fmt.Printf("  ECH offered / ClientHello: %d / %d\n", echOffered, clientHellos)
 	fmt.Printf("  ServerHello: %d\n", stats.ServerHelloCount)
 
 	// Version distribution
@@ -386,6 +400,7 @@ type Aggregator struct {
 	sniCounts        map[string]int
 	versionCounts    map[string]int
 	clientHelloCount int
+	echOfferedCount  int
 	serverHelloCount int
 	totalHandshakes  int
 }
@@ -405,8 +420,11 @@ func (a *Aggregator) RecordHandshake(metadata *types.TLSMetadata, srcIP, dstIP s
 
 	if metadata.IsServer {
 		a.serverHelloCount++
-	} else {
+	} else if metadata.ClientHelloObserved {
 		a.clientHelloCount++
+		if metadata.ECHOffered {
+			a.echOfferedCount++
+		}
 	}
 
 	// Count versions
@@ -424,6 +442,7 @@ func (a *Aggregator) RecordHandshake(metadata *types.TLSMetadata, srcIP, dstIP s
 type AggregatorStats struct {
 	TotalHandshakes  int
 	ClientHelloCount int
+	ECHOfferedCount  int
 	ServerHelloCount int
 	VersionCounts    map[string]int
 }
@@ -433,6 +452,7 @@ func (a *Aggregator) Stats() AggregatorStats {
 	return AggregatorStats{
 		TotalHandshakes:  a.totalHandshakes,
 		ClientHelloCount: a.clientHelloCount,
+		ECHOfferedCount:  a.echOfferedCount,
 		ServerHelloCount: a.serverHelloCount,
 		VersionCounts:    a.versionCounts,
 	}

@@ -217,6 +217,14 @@ func (s *Sink) tlsLocked(ctx context.Context, ev events.TLSEvent) error {
 	// ServerHello is identifiable by server-selected fields or establishment.
 	isServer := ev.Established || ev.Cipher != "" || ev.JA3S != ""
 	if !isServer {
+		// Another ClientHello (for example after HelloRetryRequest) is another
+		// observation. Flush the previous one before replacing pending state.
+		if previous, ok := s.tls[uid]; ok {
+			delete(s.tls, uid)
+			if err := s.next.HandleEvent(ctx, previous.event); err != nil {
+				return err
+			}
+		}
 		s.tls[uid] = pending{event: ev, seen: time.Now()}
 		return s.enforceLimitLocked(ctx)
 	}
@@ -235,10 +243,13 @@ func emptyTLS(ev events.TLSEvent) bool {
 		!ev.Resumed && ev.LastAlert == "" && ev.NextProtocol == "" && !ev.Established &&
 		len(ev.CertificateFileIDs) == 0 && len(ev.ClientCertificateFileIDs) == 0 &&
 		ev.Subject == "" && ev.Issuer == "" && ev.ClientSubject == "" && ev.ClientIssuer == "" &&
-		ev.ValidationStatus == "" && ev.JA3 == "" && ev.JA3S == "" && ev.JA4 == ""
+		ev.ValidationStatus == "" && ev.JA3 == "" && ev.JA3S == "" && ev.JA4 == "" &&
+		ev.ClientHelloCount == 0 && ev.ECHOfferedCount == 0
 }
 
 func mergeTLS(dst *events.TLSEvent, server events.TLSEvent) {
+	dst.ClientHelloCount += server.ClientHelloCount
+	dst.ECHOfferedCount += server.ECHOfferedCount
 	if server.Version != "" {
 		dst.Version = server.Version
 	}

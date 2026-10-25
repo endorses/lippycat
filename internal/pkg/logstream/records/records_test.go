@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/logstream"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,7 +43,7 @@ func TestSSLAndHTTPRecords(t *testing.T) {
 	sslRecord, emit, err := SSL(tlsEvent)
 	require.NoError(t, err)
 	require.True(t, emit)
-	require.Len(t, sslRecord.Values, 26)
+	require.Len(t, sslRecord.Values, 29)
 	require.Equal(t, "example.test", sslRecord.Values[9])
 
 	httpEvent := events.NewHTTPEvent(env)
@@ -82,4 +83,22 @@ func TestFilesRecordRejectsContent(t *testing.T) {
 	_, emit, err = Files(events.NewFileContentEvent(env))
 	require.Error(t, err)
 	require.False(t, emit)
+}
+
+func TestSSLECHAvailabilityIsNotAFalseNegative(t *testing.T) {
+	for _, counts := range [][2]uint64{{0, 0}, {1, 0}, {3, 2}} {
+		event := events.NewTLSEvent(events.Envelope{})
+		event.ClientHelloCount, event.ECHOfferedCount = counts[0], counts[1]
+		record, _, err := SSL(event)
+		require.NoError(t, err)
+		if counts[0] == 0 {
+			require.Equal(t, logstream.Unset, record.Values[26])
+			require.Equal(t, logstream.Unset, record.Values[27])
+			require.Equal(t, logstream.Unset, record.Values[28])
+		} else {
+			require.Equal(t, counts[0], record.Values[26])
+			require.Equal(t, counts[1], record.Values[27])
+			require.Equal(t, counts[1] > 0, record.Values[28])
+		}
+	}
 }

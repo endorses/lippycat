@@ -38,6 +38,7 @@ func TestHuntPersistentFlagContract(t *testing.T) {
 		"no-filter-policy": "deny", "pcap-buffer-size": "16777216", "processor": "", "promisc": "false", "sip-buffer-size": "0",
 		"processors": "[]", "processor-attempt-timeout": "10s", "processor-reconnect-attempts": "1",
 		"packet-delivery-profile": "best-effort", "packet-ack-scope": "",
+		"ssh-analysis": "true", "ssh-analysis-max-bytes": "33554432", "ssh-analysis-max-flows": "1024",
 		"tls-ca": "", "tls-cert": "", "tls-key": "", "tls-skip-verify": "false",
 	}
 	assert.Equal(t, want, flagDefaults(HuntCmd.PersistentFlags()))
@@ -134,12 +135,12 @@ func bindingFixture(flagType, original string) string {
 
 func TestHuntRenderedHelpSnapshots(t *testing.T) {
 	want := map[string]string{
-		"hunt":  "f6f74799e750c53aa15d92beb51312ad474a20d24966aacba0ff485c16a8216f",
-		"dns":   "cffac4f926159a998d6d9b62fde976e9e1cb88d9c4f01ad90df301a1d7561ec6",
-		"http":  "440973638c3e9700d0a418f425c54fe3dbe4e45015302086384aed4a4cb2756a",
-		"tls":   "e041e61307feead2b7ad162c17228c59d05d5632749b6c1b1b07f076f6499cda",
-		"email": "f9c26f99ac9a307fbee594b4bd0feae822c0ae6bcccfd47d9c59e5e494426577",
-		"voip":  "3a75ad035c33502984d3850940aaf1f0f6d989f7f9bfd03cb9d3f872b1812ee7",
+		"hunt":  "d9103df06fd2e3240b99b5f6b8746eb8a4e54eee2bafd363446212ac3653f218",
+		"dns":   "772b083fe774c6a2ee9fc3b9b2ee4d214c84ba0c2e610d83e6a3b7b2a53e9585",
+		"http":  "84312331ae003a4a20daf2868ab36662175c077fc53a2e132b2cfb8b5335d0a5",
+		"tls":   "f43eb3185efd557e8740872829edb5ed033abda671d9913712f63d092463c8a1",
+		"email": "eab4836ec892aaf93a25a59bcb417e48854d6c0940560da217a0b4f6392a1cf0",
+		"voip":  "5181a5eb3c4b800aebfc78dee3adc5fb70664974434fb9e951a7908ecf9219cc",
 	}
 	commands := map[string]*cobra.Command{"hunt": HuntCmd, "dns": dnsHuntCmd, "http": httpHuntCmd, "tls": tlsHuntCmd, "email": emailHuntCmd, "voip": voipHuntCmd}
 	for name, cmd := range commands {

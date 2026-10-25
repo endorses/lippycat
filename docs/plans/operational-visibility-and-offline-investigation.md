@@ -925,3 +925,21 @@ owner remains. Generated manual editions remain normal ignored build outputs.
 Only this final completion recording follows the independently reviewable feature
 commits. The complete selected umbrella objective is achieved; deferred scope
 above remains outside this implementation.
+
+### CI contract snapshot correction — 2026-10-25
+
+GitHub Actions [CI run 40219561310](https://github.com/endorses/lippycat/actions/runs/40219561310)
+failed its `all` and `all li` unit jobs on stale CLI expectations. The hunter
+persistent-flag contract and six help snapshots omitted the three intentional
+SSH analysis flags. The LI tap branch retained five help hashes from before both
+shared DNS-notice and SSH help additions. Non-LI tap help was already current.
+All other CI jobs and the separate integration, security and manual workflows
+passed on that revision.
+
+The expected defaults and full-help hashes now cover the delivered interface.
+Review reconstructs the previous help by removing only the introduced shared
+flag lines and restoring the prior log-streams description; the old hashes then
+match. Full snapshot equality and inherited-flag checks remain enforced.
+Verification covers both affected command packages under `all` and `all li` with
+the race detector and CI's atomic coverage instrumentation. This follow-up fixes
+the missed contract expectations without changing production behavior.

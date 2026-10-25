@@ -524,6 +524,9 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 // handleClearPackets clears all packets from the buffer
 func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	if m.uiState.ViewMode == "events" && m.eventStore != nil {
+		if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+			return m, m.uiState.Toast.Show("Offline dataset events cannot be cleared.", components.ToastInfo, components.ToastDurationShort)
+		}
 		stats := m.eventStore.Stats()
 		m.resetCaptureInspection()
 		m.pendingRemoteEvents.clear()

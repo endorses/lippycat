@@ -127,7 +127,11 @@ func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsToTop()
 			} else {
-				m.eventStore.SelectFirst()
+				if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+					m.uiState.EventsView.SetLogicalCursor(0)
+				} else {
+					m.eventStore.SelectFirst()
+				}
 				m.syncEventsView()
 			}
 		} else if m.uiState.ViewMode == "calls" {
@@ -162,7 +166,11 @@ func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsToBottom()
 			} else {
-				m.eventStore.SelectLast()
+				if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+					m.uiState.EventsView.SetLogicalCursor(^uint64(0))
+				} else {
+					m.eventStore.SelectLast()
+				}
 				m.syncEventsView()
 			}
 		} else if m.uiState.ViewMode == "calls" {

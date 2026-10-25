@@ -932,11 +932,14 @@ These are follow-up work, not release blockers for phases 0–6.
       sessions or broad temporary/cache roots.
 - [ ] Evaluate classic-PCAP source offsets behind the dataset API, retaining
       normalized records for PCAPNG/context-dependent or transformed packets.
-- [ ] Add complete disk-backed event history and asynchronous event filters via
+- [x] Add complete disk-backed event history and asynchronous event filters via
       an event-specific dataset projection. Reuse existing viewport formatting
       and selection invariants; do not append the whole history to EventsView
       or treat duplicate event IDs as unique row positions. Assess call-history
       persistence separately and update completeness labels only when delivered.
+      Delivered by [operational visibility workstream 4](operational-visibility-and-offline-investigation.md#workstream-4--complete-offline-events-history):
+      immutable arrival rows, bounded disk queries/pages, joined lifecycle, and
+      complete offline Events labels. Calls remain bounded; persistence is deferred.
 - [ ] Extend the supported source count beyond 64; research explicit clock
       offsets, reorder windows and optional deduplication as separate user-visible
       policies. Non-monotonic watch sources are handled by the ordering correction

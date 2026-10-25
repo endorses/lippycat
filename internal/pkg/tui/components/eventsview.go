@@ -46,6 +46,13 @@ type eventIDPositions struct{ first, last uint64 }
 
 // EventsView renders a protocol-neutral event timeline and detail panel.
 type EventsView struct {
+	virtual                 bool
+	virtualTotal            uint64
+	virtualCursor           uint64
+	virtualOffset           uint64
+	virtualWindowStart      uint64
+	virtualItems            []EventItem
+	virtualDetail           *EventItem
 	items                   []EventItem
 	itemStorage             []EventItem
 	itemBase                uint64
@@ -78,6 +85,10 @@ func (v *EventsView) SetSize(width, height int) {
 		return
 	}
 	v.width, v.height = width, height
+	if v.virtual {
+		v.virtualOffset = v.virtualTimelineOffset(height, true)
+		return
+	}
 	v.offset = v.timelineOffset(height, v.indexByID(v.selectedID))
 }
 
@@ -109,7 +120,7 @@ func (v *EventsView) PrepareDetails(detailsWidth, detailsHeight int) {
 	item, found := v.DetailSelection()
 	selectedID := ""
 	if found {
-		selectedID = item.Event.Envelope().EventID
+		selectedID = v.detailSelectionKey(item)
 	}
 	if v.detailsSelectedID == selectedID && found && !widthChanged {
 		v.detailsViewport.SetYOffset(v.detailsViewport.YOffset)
@@ -148,6 +159,12 @@ func (v *EventsView) timelineOffset(height, selected int) int {
 }
 
 func (v *EventsView) SetEvents(items []EventItem) {
+	if v.virtual {
+		v.virtual, v.virtualItems, v.virtualDetail = false, nil, nil
+		v.virtualTotal, v.virtualCursor, v.virtualOffset, v.virtualWindowStart = 0, 0, 0, 0
+		v.inspecting, v.inspectedEvent = false, nil
+		v.detailsSelectedID = ""
+	}
 	v.timelineGeneration++
 	oldSelected := v.indexByID(v.selectedID)
 	oldStorage := v.itemStorage
@@ -180,10 +197,185 @@ func (v *EventsView) SetEvents(items []EventItem) {
 	v.offset = v.timelineOffset(v.height, 0)
 }
 
+// EnableVirtualEvents releases live rows and starts an unloaded logical list.
+// Window and detail records are borrowed from their owner until replaced or
+// cleared. The owner remains responsible for their cache leases and lifetime.
+func (v *EventsView) EnableVirtualEvents(total uint64) {
+	clear(v.itemStorage)
+	v.items, v.itemStorage, v.positions, v.nextDuplicate = nil, nil, nil, nil
+	v.selectedID, v.itemBase, v.offset = "", 0, 0
+	v.virtual, v.virtualTotal = true, total
+	v.virtualCursor, v.virtualOffset, v.virtualWindowStart = 0, 0, 0
+	v.virtualItems, v.virtualDetail, v.inspectedEvent = nil, nil, nil
+	v.inspecting, v.detailsSelectedID = false, ""
+	v.timelineGeneration++
+	v.timelineCache = eventTimelineCache{}
+}
+
+// SetVirtualWindow borrows a contiguous page at a zero-based logical row. It
+// neither copies the page nor changes selection to a repeated event identity.
+func (v *EventsView) SetVirtualWindow(total, row uint64, items []EventItem) {
+	if !v.virtual {
+		v.EnableVirtualEvents(total)
+	}
+	v.virtualTotal = total
+	row = min(row, total)
+	if uint64(len(items)) > total-row {
+		items = items[:int(total-row)]
+	}
+	if len(items) == 0 {
+		items = nil
+	}
+	v.virtualWindowStart, v.virtualItems = row, items
+	if total == 0 || v.virtualCursor >= total {
+		cursor := uint64(0)
+		if total != 0 {
+			cursor = total - 1
+		}
+		if v.virtualCursor != cursor || total == 0 {
+			v.virtualDetail, v.detailsSelectedID = nil, ""
+		}
+		v.virtualCursor = cursor
+	}
+	if selected, ok := v.virtualItemAt(v.virtualCursor); ok && v.virtualDetail != nil && selected.ArrivalSequence != v.virtualDetail.ArrivalSequence {
+		v.virtualDetail, v.detailsSelectedID = nil, ""
+	}
+	v.virtualOffset = v.virtualTimelineOffset(v.height, false)
+	v.timelineGeneration++
+}
+
+// SetVirtualDetail borrows one separately leased record for detail inspection.
+// A nil record clears the previous lease immediately while a new row loads.
+func (v *EventsView) SetVirtualDetail(item *EventItem) {
+	if !v.virtual {
+		return
+	}
+	if item == nil || v.virtualDetail == nil || item.ArrivalSequence != v.virtualDetail.ArrivalSequence {
+		v.detailsSelectedID = ""
+	}
+	v.virtualDetail, v.inspectedEvent = item, nil
+}
+
+func (v *EventsView) IsVirtual() bool  { return v.virtual }
+func (v *EventsView) VisibleRows() int { return max(0, v.height-5) }
+func (v *EventsView) LogicalCursor() uint64 {
+	if v.virtual {
+		return v.virtualCursor
+	}
+	return uint64(max(0, v.indexByID(v.selectedID)))
+}
+func (v *EventsView) LogicalOffset() uint64 {
+	if v.virtual {
+		return v.virtualOffset
+	}
+	return uint64(max(0, v.offset))
+}
+
+func (v *EventsView) SetLogicalCursor(row uint64) {
+	if !v.virtual {
+		if row < uint64(len(v.items)) && v.items[int(row)].Event != nil {
+			v.SetSelectedID(v.items[int(row)].Event.Envelope().EventID)
+		}
+		return
+	}
+	if v.virtualTotal == 0 {
+		row = 0
+	} else {
+		row = min(row, v.virtualTotal-1)
+	}
+	if row != v.virtualCursor {
+		v.virtualDetail, v.detailsSelectedID = nil, ""
+	}
+	v.virtualCursor = row
+	v.virtualOffset = v.virtualTimelineOffset(v.height, true)
+}
+
+func (v *EventsView) SetLogicalOffset(row uint64) {
+	if !v.virtual {
+		v.SetTimelineScrollOffset(eventIndexInt(row), v.height)
+		return
+	}
+	v.virtualOffset = row
+	v.virtualOffset = v.virtualTimelineOffset(v.height, false)
+	v.prepareTimeline()
+}
+
+func (v *EventsView) virtualTimelineOffset(height int, followCursor bool) uint64 {
+	visible := uint64(max(0, height-5))
+	if visible == 0 || v.virtualTotal == 0 {
+		return 0
+	}
+	last := uint64(0)
+	if v.virtualTotal > visible {
+		last = v.virtualTotal - visible
+	}
+	offset := min(v.virtualOffset, last)
+	if followCursor {
+		if v.virtualCursor < offset {
+			offset = v.virtualCursor
+		} else if v.virtualCursor-offset >= visible {
+			offset = v.virtualCursor - visible + 1
+		}
+	}
+	return offset
+}
+
+func (v *EventsView) virtualItemAt(row uint64) (*EventItem, bool) {
+	if row < v.virtualWindowStart || row >= v.virtualTotal || row-v.virtualWindowStart >= uint64(len(v.virtualItems)) {
+		return nil, false
+	}
+	item := &v.virtualItems[int(row-v.virtualWindowStart)]
+	return item, item.Event != nil
+}
+
+func (v *EventsView) detailSelectionKey(item EventItem) string {
+	if v.virtual {
+		return fmt.Sprintf("arrival:%d", item.ArrivalSequence)
+	}
+	return item.Event.Envelope().EventID
+}
+
+// PCAP packet views use the local display clock. Persisted events retain UTC
+// instants, and only the offline presentation adopts that same local clock.
+func (v *EventsView) displayEventTimestamp(timestamp time.Time) time.Time {
+	if v.virtual {
+		return timestamp.Local()
+	}
+	return timestamp
+}
+
+// eventIndexInt is only for legacy UI adapters. Logical APIs retain uint64.
+func eventIndexInt(value uint64) int {
+	return int(min(value, uint64(^uint(0)>>1)))
+}
+
+func (v *EventsView) LogicalTimelineScrollState(height int) (total, visible, offset uint64) {
+	if v.virtual {
+		return v.virtualTotal, uint64(max(0, height-5)), v.virtualRenderOffset(height)
+	}
+	return uint64(len(v.items)), uint64(max(0, height-5)), uint64(max(0, v.offset))
+}
+
+// LogicalIndexAtVisibleRow targets logical rows even before their page loads.
+func (v *EventsView) LogicalIndexAtVisibleRow(row int) (uint64, bool) {
+	if row < 0 || row >= v.VisibleRows() {
+		return 0, false
+	}
+	offset := v.LogicalOffset()
+	total := uint64(len(v.items))
+	if v.virtual {
+		total = v.virtualTotal
+	}
+	if offset >= total || uint64(row) >= total-offset {
+		return 0, false
+	}
+	return offset + uint64(row), true
+}
+
 // AppendEvents copies new rows without rebuilding the retained projection.
 // Selection remains pinned until the owner applies its selected stable ID.
 func (v *EventsView) AppendEvents(items []EventItem) {
-	if len(items) == 0 {
+	if v.virtual || len(items) == 0 {
 		return
 	}
 	oldCount := len(v.items)
@@ -216,6 +408,9 @@ func (v *EventsView) AppendEvents(items []EventItem) {
 // For a combined delta, append before trimming to retain the original selection
 // as the viewport anchor if the same stable ID is evicted and reintroduced.
 func (v *EventsView) TrimOldEvents(count int) {
+	if v.virtual {
+		return
+	}
 	count = min(max(count, 0), len(v.items))
 	if count == 0 {
 		return
@@ -283,6 +478,12 @@ func (v *EventsView) indexAppended(start int) {
 
 // Selected returns the first retained row with the selected stable ID.
 func (v *EventsView) Selected() (EventItem, bool) {
+	if v.virtual {
+		if item, ok := v.virtualItemAt(v.virtualCursor); ok {
+			return *item, true
+		}
+		return EventItem{}, false
+	}
 	if i := v.indexByID(v.selectedID); i >= 0 {
 		return v.items[i], true
 	}
@@ -290,15 +491,30 @@ func (v *EventsView) Selected() (EventItem, bool) {
 }
 
 func (v *EventsView) SetSelectedID(id string) {
+	if v.virtual {
+		return // Virtual selection belongs to an arrival row, never an event ID.
+	}
 	if selected := v.indexByID(id); selected >= 0 {
 		v.selectedID = id
 		v.offset = v.timelineOffset(v.height, selected)
 	}
 }
 
-func (v *EventsView) SelectedID() string { return v.selectedID }
+func (v *EventsView) SelectedID() string {
+	if v.virtual {
+		if item, ok := v.Selected(); ok {
+			return item.Event.Envelope().EventID
+		}
+		return ""
+	}
+	return v.selectedID
+}
 
 func (v *EventsView) TimelineScrollState(height int) (total, visible, offset int) {
+	if v.virtual {
+		t, h, o := v.LogicalTimelineScrollState(height)
+		return eventIndexInt(t), eventIndexInt(h), eventIndexInt(o)
+	}
 	return len(v.items), max(0, height-5), v.offset
 }
 
@@ -317,6 +533,14 @@ func (v *EventsView) SetDetailsScrollOffset(offset int) {
 
 // EventIDAtIndex returns a stable selection target for scrollbar navigation.
 func (v *EventsView) EventIDAtIndex(index int) (string, bool) {
+	if v.virtual {
+		if index >= 0 {
+			if item, ok := v.virtualItemAt(uint64(index)); ok {
+				return item.Event.Envelope().EventID, true
+			}
+		}
+		return "", false
+	}
 	if index < 0 || index >= len(v.items) || v.items[index].Event == nil {
 		return "", false
 	}
@@ -324,6 +548,12 @@ func (v *EventsView) EventIDAtIndex(index int) (string, bool) {
 }
 
 func (v *EventsView) SetTimelineScrollOffset(offset, height int) {
+	if v.virtual {
+		v.virtualOffset = uint64(max(0, offset))
+		v.virtualOffset = v.virtualTimelineOffset(height, false)
+		v.prepareTimeline()
+		return
+	}
 	visible := max(0, height-5)
 	v.offset = min(max(0, offset), max(0, len(v.items)-visible))
 	v.prepareTimeline()
@@ -332,6 +562,14 @@ func (v *EventsView) SetTimelineScrollOffset(offset, height int) {
 // EventIDAtVisibleRow returns the event at a zero-based data row in the
 // currently rendered viewport.
 func (v *EventsView) EventIDAtVisibleRow(row int) (string, bool) {
+	if v.virtual {
+		if index, ok := v.LogicalIndexAtVisibleRow(row); ok {
+			if item, ok := v.virtualItemAt(index); ok {
+				return item.Event.Envelope().EventID, true
+			}
+		}
+		return "", false
+	}
 	index := v.offset + row
 	if row < 0 || index < 0 || index >= len(v.items) || v.items[index].Event == nil {
 		return "", false
@@ -340,6 +578,12 @@ func (v *EventsView) EventIDAtVisibleRow(row int) (string, bool) {
 }
 
 func (v *EventsView) SelectNext() {
+	if v.virtual {
+		if v.virtualTotal != 0 && v.virtualCursor < v.virtualTotal-1 {
+			v.SetLogicalCursor(v.virtualCursor + 1)
+		}
+		return
+	}
 	i := v.indexByID(v.selectedID)
 	if i >= 0 && i+1 < len(v.items) {
 		v.selectedID = v.items[i+1].Event.Envelope().EventID
@@ -348,6 +592,12 @@ func (v *EventsView) SelectNext() {
 }
 
 func (v *EventsView) SelectPrevious() {
+	if v.virtual {
+		if v.virtualCursor != 0 {
+			v.SetLogicalCursor(v.virtualCursor - 1)
+		}
+		return
+	}
 	i := v.indexByID(v.selectedID)
 	if i > 0 {
 		v.selectedID = v.items[i-1].Event.Envelope().EventID
@@ -385,6 +635,16 @@ func (v *EventsView) SetRelatedPacketsAvailable(available bool) {
 // An asynchronous availability update belongs to the same selected event;
 // preserve the user's reading position while replacing only its notice.
 func (v *EventsView) invalidateRelatedDetails() {
+	if v.virtual {
+		if item, ok := v.DetailSelection(); ok && v.detailsViewportReady {
+			offset := v.detailsViewport.YOffset
+			v.detailsViewport.SetContent(v.renderEventDetailsContent(item, v.detailsViewport.Width))
+			v.detailsViewport.SetYOffset(offset)
+			return
+		}
+		v.detailsSelectedID = ""
+		return
+	}
 	if v.inspecting && v.inspectedEvent != nil && v.detailsViewportReady {
 		offset := v.detailsViewport.YOffset
 		v.detailsViewport.SetContent(v.renderEventDetailsContent(*v.inspectedEvent, v.detailsViewport.Width))
@@ -422,35 +682,25 @@ func (v *EventsView) RenderTimeline(width, height int, focused bool) string {
 	if visibleRows > 0 {
 		content.WriteByte('\n')
 	}
-	if len(v.items) == 0 {
+	if (!v.virtual && len(v.items) == 0) || (v.virtual && v.virtualTotal == 0) {
 		content.WriteString("No protocol events")
 		for i := 1; i < visibleRows; i++ {
 			content.WriteByte('\n')
 		}
 		return borderStyle.Render(content.String())
 	}
-	selected := v.indexByID(v.selectedID)
-	if selected < 0 {
-		selected = 0
-	}
-	offset := v.offset
-	if height != v.height {
-		offset = v.timelineOffset(height, selected)
-	}
-	end := min(offset+visibleRows, len(v.items))
-	for i := offset; i < end; i++ {
-		row := cache.rows[i-offset]
-		if i == selected {
+	for i, row := range cache.rows {
+		if cache.start+uint64(i) == cache.selectedPosition {
 			content.WriteString(row.selected)
 		} else {
 			content.WriteString(row.normal)
 		}
 
-		if i < end-1 {
+		if i < len(cache.rows)-1 {
 			content.WriteByte('\n')
 		}
 	}
-	for i := end - offset; i < visibleRows; i++ {
+	for i := len(cache.rows); i < visibleRows; i++ {
 		content.WriteByte('\n')
 	}
 	return borderStyle.Render(content.String())
@@ -542,7 +792,7 @@ func (v *EventsView) renderEventDetailsContent(item EventItem, width int) string
 	}
 
 	writeSection("Overview", []eventDetailRow{
-		{"Time", env.Timestamp.Format("2006-01-02 15:04:05.000000")},
+		{"Time", v.displayEventTimestamp(env.Timestamp).Format("2006-01-02 15:04:05.000000")},
 		{"Origin", env.NodeID},
 		{"Summary", eventSummary(item.Event)},
 	})
@@ -1042,6 +1292,11 @@ func compactNode(node string) string {
 
 // SetInspecting retains one immutable event even when capture evicts its row.
 func (v *EventsView) SetInspecting(inspecting bool) {
+	if v.virtual {
+		v.inspecting = inspecting
+		v.inspectedEvent = nil // The owner leases virtual detail; never copy it.
+		return
+	}
 	if inspecting && !v.inspecting {
 		if item, ok := v.Selected(); ok {
 			v.inspectedEvent = &item
@@ -1055,6 +1310,12 @@ func (v *EventsView) SetInspecting(inspecting bool) {
 
 // DetailSelection returns the inspected event, including after its row is evicted.
 func (v *EventsView) DetailSelection() (EventItem, bool) {
+	if v.virtual {
+		if v.virtualDetail != nil && v.virtualDetail.Event != nil {
+			return *v.virtualDetail, true
+		}
+		return EventItem{}, false
+	}
 	if v.inspecting && v.inspectedEvent != nil {
 		return *v.inspectedEvent, true
 	}

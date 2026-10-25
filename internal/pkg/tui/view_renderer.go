@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -183,7 +184,13 @@ func (m Model) renderResponsiveCapture() string {
 			total, visible, offset = int(m.uiState.PacketList.LogicalCount()), m.uiState.PacketList.VisibleRows(), int(m.uiState.PacketList.LogicalOffset())
 		}
 		list = fitCapturePane(list, l.List.Width, l.List.Height)
-		list = m.captureScrollbar(list, total, visible, offset, l.List.Height)
+		if m.uiState.ViewMode == "events" && m.uiState.EventsView.IsVirtual() {
+			total, visible, offset := m.uiState.EventsView.LogicalTimelineScrollState(l.List.Height)
+			bar := components.RenderScrollbar64(total, visible, offset, max(0, l.List.Height-4), m.uiState.Theme)
+			list = components.OverlayScrollbar(list, lipgloss.Width(list)-2, 2, bar)
+		} else {
+			list = m.captureScrollbar(list, total, visible, offset, l.List.Height)
+		}
 	}
 	if l.Details.Width > 0 && l.Details.Height > 0 {
 		total, visible, offset := 0, 0, 0
@@ -283,6 +290,19 @@ func (m *Model) prepareViewChrome() {
 		m.uiState.FilterInput.SetPrompt("/ complete dataset:")
 	}
 	m.uiState.Header.SetInterface(m.interfaceName)
+	m.uiState.Header.SetDatasetEventSummary("")
+	m.uiState.EventFilterInput.SetPrompt("/")
+	if m.offlineSession != nil && m.offlineSession.EventDataset != nil && m.uiState.ViewMode == "events" {
+		cached, scope := 0, "All"
+		if s := m.offlineEventBrowse; s != nil {
+			scope = s.protocol
+			if s.current != nil {
+				cached = len(s.current.items)
+			}
+		}
+		m.uiState.Header.SetDatasetEventSummary(fmt.Sprintf("Events: %d total | %d matching | %d cached | %s", m.offlineSession.EventDataset.Count(), m.offlineEventCount(), cached, scope))
+		m.uiState.EventFilterInput.SetPrompt("/ complete events:")
+	}
 	m.uiState.Header.SetCaptureMode(m.captureMode)
 	m.uiState.Header.SetPCAPFileCount(len(m.pcapFiles))
 	// Use hunter count (not remote client count) for accurate node display
@@ -310,7 +330,8 @@ func (m *Model) prepareViewChrome() {
 	m.uiState.Footer.SetHasCallFilter(m.callStore.HasFilter())
 	m.uiState.Footer.SetCallFilterCount(m.callStore.FilterChain.Count())
 	m.uiState.Footer.SetEventFilterMode(m.uiState.EventFilterMode)
-	m.uiState.Footer.SetHasEventFilter(m.eventStore.HasUserFilters())
-	m.uiState.Footer.SetEventFilterCount(m.eventStore.UserFilterCount())
+	eventDescriptions := m.eventFilterDescriptions()
+	m.uiState.Footer.SetHasEventFilter(len(eventDescriptions) > 0)
+	m.uiState.Footer.SetEventFilterCount(len(eventDescriptions))
 	m.uiState.Footer.SetStatsSubView(m.uiState.StatisticsView.GetSubView())
 }

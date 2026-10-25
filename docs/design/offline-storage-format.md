@@ -1,5 +1,41 @@
 # Offline temporary storage formats
 
+## Complete metadata event history: schema 1
+
+Events use their own versioned stream alongside the packet dataset. The owning
+session publishes both only after completed analysis and successful finalization.
+This format is private temporary storage, without cross-process reuse. Its schema
+version is independent of packet schemas and of the typed protocol event version.
+
+The private event directory contains `events.data`, `events.offsets`, and a
+completion manifest. Data and offsets begin with 32-byte little-endian headers:
+8-byte magic (`LCEVDAT` or `LCEVOFF`, followed by byte 1), schema u16 at byte 8,
+zero reserved bytes through byte 15, dataset generation u64 at byte 16, and row
+count u64 at byte 24. Offset entries contain a u64 data offset and u64 frame size.
+The 64-byte completion manifest binds the generation, count, and stream lengths;
+readers validate it before serving records.
+
+Each event frame has a 32-byte header: `LCEVROW` followed by byte 1, schema u16,
+zero reserved u16, payload length u32, one-based arrival row ID u64, IEEE CRC32
+u32 over the first 24 header bytes and payload, then zero reserved u32. The payload
+is a deterministic serialization of the existing `ProtocolEvent` protobuf.
+Reads validate offsets, lengths, schema, row identity, reserved fields, checksum,
+typed event kind/version, and allocation bounds before exposing a row. Checksums
+detect accidental corruption; they do not authenticate private session files.
+
+Arrival row IDs are independent of envelope event IDs. Every admitted snapshot
+is immutable and ordered by admission, including repeated IDs and amendments.
+The metadata projection excludes file-content events. Any append failure poisons
+the builder; no completion manifest can turn a truncated prefix into success.
+
+Event files and query vectors share packet storage's disk budget. Serialization,
+decode working space, pages, selected details, query owners, and a bounded
+presentation allowance share its cache budget. Offset tables and matching row
+vectors stay on disk; all-event queries use implicit row IDs. Borrowed pages and
+details carry idempotent leases, and pinned queries retain their dataset until
+readers release them. Cleanup releases disk accounting only after removal and
+preserves ownership when removal fails so it can be retried.
+
 ## Schema 3: legacy differential oracle
 
 Version 3 includes the RADIUS presentation metadata in `PacketDisplay`. Readers

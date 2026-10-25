@@ -78,6 +78,8 @@ func (m *Model) activeModal() components.Modal {
 	switch {
 	case m.offlineOpening:
 		return actionModalAdapter{modalAdapter: modalAdapter{view: m.offlineModal, dismiss: func() tea.Cmd { return m.offlineModalAction("cancel") }}, options: m.offlineModalOptions, action: m.offlineModalAction}
+	case m.offlineEventFilter != nil:
+		return actionModalAdapter{modalAdapter: modalAdapter{view: m.offlineEventFilterModal, dismiss: func() tea.Cmd { return m.offlineEventFilterModalAction("cancel") }}, options: m.offlineEventFilterModalOptions, action: m.offlineEventFilterModalAction}
 	case m.offlineFilter != nil:
 		return actionModalAdapter{modalAdapter: modalAdapter{view: m.offlineFilterModal, dismiss: func() tea.Cmd { return m.offlineFilterModalAction("cancel") }}, options: m.offlineFilterModalOptions, action: m.offlineFilterModalAction}
 	case m.uiState.ProtocolSelector.IsActive():

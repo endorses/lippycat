@@ -168,6 +168,8 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 	c.progress = offline.Progress{Token: offline.Token{Dataset: g}, State: offline.Opening, Sources: uint32(len(msg.Config.Inputs))}
 	c.mu.Unlock()
 	m.cancelOfflineBrowserReads()
+	m.cancelOfflineEventReads()
+	m.offlineEventFilter = nil
 	m.offlineOpening = true
 	m.offlineStarted = time.Now()
 	m.uiState.SetCapturing(false)
@@ -307,6 +309,7 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 		return m, tea.Batch(toast, func() tea.Msg { return offlineCleanupMsg{err: c.dispose(msg.session)} })
 	}
 	m.cancelOfflineRelated()
+	m.detachOfflineEvents()
 	old := m.offlineSession
 	m.offlineSession = msg.session
 	m.publishOfflineStatistics(nil)
@@ -446,6 +449,7 @@ func (m *Model) offlineModalOptions() components.ModalRenderOptions {
 // Update responsive throughout cleanup. The restart re-enters only after join.
 func (m Model) leaveOffline(restart *components.RestartCaptureMsg, quit bool) (Model, tea.Cmd) {
 	m.cancelOfflineRelated()
+	m.detachOfflineEvents()
 	if quit {
 		m.offlineQuitRequested = true
 	}

@@ -17,20 +17,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Exercise the same interaction sequence across local delivery, remote delivery,
-// and an installed offline session. Offline events here are controlled retained
-// history inputs; production indexing/EOF delivery is covered by indexer tests.
+// Exercise the same interactions across bounded local and remote history.
+// Complete offline history is covered
+// by offline_event_browser_test.go and production indexing/EOF tests.
 func TestEventPhase6MixedModeAcceptance(t *testing.T) {
-	for _, mode := range []string{"live", "remote", "offline-ready"} {
+	for _, mode := range []string{"live", "remote"} {
 		t.Run(mode, func(t *testing.T) {
-			var m Model
-			if mode == "offline-ready" {
-				m = readyOfflineBrowser(t)
-				m.eventStore.Reset()
-			} else {
-				m = NewModel(8, 8, "test0", "", nil, false, mode == "remote", "", true)
-				t.Cleanup(func() { m.Shutdown() })
-			}
+			m := NewModel(8, 8, "test0", "", nil, false, mode == "remote", "", true)
+			t.Cleanup(func() { m.Shutdown() })
 			m.uiState.Tabs.SetActive(0)
 			m.uiState.ViewMode = "events"
 			m.uiState.Width, m.uiState.Height = 160, 32

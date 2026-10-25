@@ -64,3 +64,18 @@ record, and 64 sources. The watch command exposes `--offline-session-dir`, `--of
 `--offline-max-sources`, also configurable through `watch.offline` in Viper. The precise framing,
 metadata projection, and ownership contract is documented in
 [offline contracts](../../../docs/design/watch-file-offline-contracts.md).
+
+`NewEventBuilder` adds complete metadata event history under the same storage
+budgets. Append immutable arrivals in analysis order; `EventRowID` starts at one
+and is independent of the envelope's delivery ID. Repeated IDs and amendments
+remain separate snapshots. File-content events are excluded. `Finish` writes a
+checksummed completion manifest; any append failure poisons the builder, so a
+prefix cannot be published. Retain failed cleanup owners and retry `Abort`.
+
+Event queries write match row IDs to disk; all-events queries use implicit IDs.
+Close each borrowed `EventPage` and `EventDetail` lease after presentation releases
+it. They account for decoded data and a bounded presentation record. Do not retain
+deep clones without a separate reservation. `PinEventQuery` keeps a fixed query
+and dataset alive for asynchronous consumers. Join readers and close pins/queries
+before closing the event dataset. Packet and event datasets are separate storage
+objects, published together by the offline session adapter after both finalize.

@@ -44,24 +44,65 @@ type OfflineAnalysisConfig struct {
 }
 
 type offlineIndexedSession struct {
+	closeMu      sync.Mutex
+	eventMu      sync.Mutex
+	eventClosed  bool
+	eventClosers []io.Closer
 	markRange    *offlineMarkRangeState
 	export       *offlineExportState
 	browser      *offlineBrowser
 	filter       *offlineFilterOwner
 	related      *offlineRelatedOwner
 	Dataset      offline.Dataset
+	EventDataset offline.EventDataset
 	sortCleanup  io.Closer        // Per-open scratch cleanup retained only after removal failure.
 	builder      *offline.Builder // Retained only until publication or successful cleanup.
+	eventBuilder *offline.EventBuilder
 	EventStore   *store.EventStore
 	Calls        []types.CallInfo
 	Tracker      *CallTracker
 	TLSDecryptor *TLSDecryptor
 }
 
+// registerEventCloser transfers reader/query ownership to this session. A
+// rejected registration leaves ownership with the caller, who must close it.
+// Closers are joined outside Update before either dataset can be removed.
+func (s *offlineIndexedSession) registerEventCloser(closer io.Closer) error {
+	if closer == nil {
+		return errors.New("offline event closer is nil")
+	}
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if s.eventClosed {
+		return errors.New("offline event session is closing")
+	}
+	s.eventClosers = append(s.eventClosers, closer)
+	return nil
+}
+
 func (s *offlineIndexedSession) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	s.eventMu.Lock()
+	s.eventClosed = true
+	closers := s.eventClosers
+	s.eventClosers = nil
+	s.eventMu.Unlock()
+	var eventCloseErr error
+	failedClosers := closers[:0]
+	for _, closer := range closers {
+		if err := closer.Close(); err != nil {
+			eventCloseErr = errors.Join(eventCloseErr, err)
+			failedClosers = append(failedClosers, closer)
+		}
+	}
+	clear(closers[len(failedClosers):])
+	s.eventMu.Lock()
+	s.eventClosers = failedClosers
+	s.eventMu.Unlock()
 	var closeErr error
 	if s.markRange != nil {
 		s.markRange.cancel()
@@ -80,6 +121,11 @@ func (s *offlineIndexedSession) Close() error {
 	if s.browser != nil {
 		closeErr = errors.Join(closeErr, s.browser.close())
 	}
+	if eventCloseErr != nil {
+		// A failed owner may still hold a pin. Retain storage until its close
+		// succeeds rather than blocking cleanup behind an unjoined reader.
+		return errors.Join(closeErr, eventCloseErr)
+	}
 	if s.TLSDecryptor != nil {
 		s.TLSDecryptor.Stop()
 	}
@@ -96,6 +142,16 @@ func (s *offlineIndexedSession) Close() error {
 		} else {
 			s.builder = nil
 		}
+	}
+	if s.eventBuilder != nil {
+		if err := s.eventBuilder.Abort(); err != nil {
+			closeErr = errors.Join(closeErr, err)
+		} else {
+			s.eventBuilder = nil
+		}
+	}
+	if s.EventDataset != nil {
+		closeErr = errors.Join(closeErr, s.EventDataset.Close())
 	}
 	if s.Dataset != nil {
 		return errors.Join(closeErr, s.Dataset.Close())
@@ -180,6 +236,8 @@ func indexOfflineDatasetBackendWithAsync(ctx context.Context, storage *offline.S
 }
 
 func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration), locatorOrdering, compactStorage, asynchronous, asynchronousAnalysis bool) (result *offlineIndexedSession, err error) {
+	ctx, cancelIndex := context.WithCancelCause(ctx)
+	defer cancelIndex(nil)
 	phase, phaseStart := "setup", time.Now()
 	mark := func(next string) {
 		if next == phase {
@@ -227,6 +285,12 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 			}
 		}
 	}()
+	// Retain even a constructor result accompanied by failed cleanup, so the
+	// controller can retry event-file removal after returning an open error.
+	session.eventBuilder, err = storage.NewEventBuilder(generation)
+	if err != nil {
+		return nil, err
+	}
 	started := time.Now()
 	last := time.Time{}
 	progress := offline.Progress{Token: offline.Token{Dataset: generation}, State: offline.Reading, Sources: uint32(len(cfg.Inputs))}
@@ -329,15 +393,7 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	if err != nil {
 		return nil, err
 	}
-	sink := newLocalEventSink(256, true, func(batch types.EventBatch) {
-		session.EventStore.AddBatch(batch.Events)
-		for _, loss := range batch.Losses {
-			session.EventStore.RecordTransportLoss(loss.Kind.String(), eventLossCount(loss))
-		}
-		if batch.CompatibilityOmissions > 0 {
-			session.EventStore.RecordTransportLoss("compatibility_omission", batch.CompatibilityOmissions)
-		}
-	})
+	sink := newOfflineEventSink(session.eventBuilder, session.EventStore, cancelIndex)
 	if err = dispatcher.Register(sink); err != nil {
 		return nil, errors.Join(err, sink.Close(context.Background()))
 	}
@@ -349,7 +405,10 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 		runtime.Close()
 		return nil, errors.Join(err, dispatcher.Close(context.Background()))
 	}
-	defer func() { runtime.Close(); err = errors.Join(err, dispatcher.Close(context.Background())) }()
+	defer func() {
+		runtime.Close()
+		err = errors.Join(err, dispatcher.Close(context.Background()), sink.Err())
+	}()
 	var analysisWorker *offlineAnalysisWorker
 	workerContext := ctx
 	if compactStorage && asynchronousAnalysis {
@@ -562,7 +621,10 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	}
 	runtime.EOF()
 	runtime.Close()
-	if err = dispatcher.Close(ctx); err != nil {
+	// Always join accepted sink work, including after an append failure cancels
+	// admission. A canceled Close could otherwise leave file writers running
+	// while the unpublished session is being removed.
+	if err = errors.Join(dispatcher.Close(context.Background()), sink.Err()); err != nil {
 		return nil, err
 	}
 	calls := agg.GetCalls()
@@ -576,6 +638,11 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	if session.TLSDecryptor != nil {
 		session.TLSDecryptor.Stop()
 	}
+	session.EventDataset, err = session.eventBuilder.Finish(ctx)
+	if err != nil {
+		return nil, err
+	}
+	session.eventBuilder = nil
 	session.Dataset, err = builder.Finish(ctx)
 	if err != nil {
 		return nil, err

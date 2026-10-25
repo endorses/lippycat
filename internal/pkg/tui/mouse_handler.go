@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -227,6 +228,28 @@ func (m *Model) captureClickRow(msg tea.MouseMsg) (int, bool) {
 func (m Model) handleEventsViewClick(msg tea.MouseMsg, _ int) (Model, tea.Cmd) {
 	row, ok := m.captureClickRow(msg)
 	if !ok {
+		return m, nil
+	}
+	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+		index, ok := m.uiState.EventsView.LogicalIndexAtVisibleRow(row)
+		if !ok {
+			return m, nil
+		}
+		now := time.Now()
+		query := uint64(0)
+		if m.offlineEventBrowse != nil {
+			query = uint64(m.offlineEventBrowse.queryGeneration)
+		}
+		identity := fmt.Sprintf("offline-%d-query-%d-row-%d", m.offlineSession.EventDataset.Generation(), query, index)
+		double := m.offlineEventBrowse != nil && m.offlineEventBrowse.current != nil && m.uiState.LastEventClickID == identity && now.Sub(m.uiState.LastEventClickTime) < 500*time.Millisecond
+		m.uiState.LastEventClickID = identity
+		m.uiState.LastEventClickTime = now
+		m.uiState.EventsView.SetLogicalCursor(index)
+		m.prepareEventsViewLayout()
+		if double {
+			m.uiState.LastEventClickID = ""
+			return m.toggleCaptureDetails()
+		}
 		return m, nil
 	}
 	id, ok := m.uiState.EventsView.EventIDAtVisibleRow(row)

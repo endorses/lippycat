@@ -61,7 +61,7 @@ lc watch file call1.pcap call2.pcap -f "udp"
 
 - `-f, --filter` - BPF filter expression
 - `--tls-keylog` - Path to SSLKEYLOGFILE for TLS decryption
-- `--buffer-size` - Live/remote packet ring and retained event capacity (default: 10000); does not limit offline packets
+- `--buffer-size` - Live/remote packet ring and retained event capacity (default: 10000); does not limit offline packet or event completeness
 
 **Complete offline packets:** Every logical packet accepted by the source-level
 `-f` BPF filter is indexed in private temporary storage before browsing starts.
@@ -89,10 +89,12 @@ flows and 16 MiB, with a 30-second capture-time expiry.
 
 Packet filtering runs as a cancellable complete summary scan. The previous query
 remains installed until the new rows, description, and matching statistics are
-ready together. Escape cancels without changing that query. Events and Calls
-retain separate bounded histories; their filters only cover retained history.
-Stateful analysis consumes the full stream and finalizes before publication,
-but neither view promises complete file history.
+ready together. Escape cancels without changing that query. Offline Events also
+stores and filters every metadata event admitted by the completed analysis.
+Its total, matching, and cached row counts are separate; cache eviction does not
+remove events. Each arrival has a separate row, including repeated event IDs and
+amended snapshots. Calls retains bounded history. Stateful analysis consumes the
+full stream and finalizes before packet and event datasets are published together.
 
 Press `w` to save all packets matching the completed packet query, or all dataset
 packets when no packet filter is active. Export streams a fixed snapshot to
@@ -395,8 +397,11 @@ until cleanup finishes. A failed or cancelled replacement preserves the previous
 ready dataset and its state.
 
 Browsing loads bounded pages and selected details asynchronously. Cache eviction
-does not discard logical packets or change packet/event loss counters. Events and
-calls retain bounded histories independently of the complete packet dataset.
+does not discard logical packets or events or change packet/event loss counters.
+Offline Events filters scan the complete event dataset asynchronously; Escape or
+a failed scan preserves the last successful filter and query. Flow navigation
+uses complete bounded queries, while packet export still uses the packet query.
+Live/remote Events and all Calls views retain bounded histories.
 
 Offline resource flags (also available when switching from live/remote mode):
 
@@ -440,7 +445,7 @@ watch:
 
 The ready dataset and replacement share disk/cache budgets. Disk accounting
 includes summaries, details, offsets, manifests, and completed/in-progress query
-files, source snapshots, decompressed inputs, and derived packet bytes. Allow
+files, event records and event query vectors, source snapshots, decompressed inputs, and derived packet bytes. Allow
 room for both datasets during replacement and for filtered query vectors.
 All-match queries use implicit packet IDs without a per-packet query file. Normalized storage can be larger than the source capture. A configured
 budget limit, physical disk exhaustion, or permission error is surfaced explicitly;
@@ -451,7 +456,11 @@ remain visible and failed-open cleanup can be retried. Never delete an active
 session directory manually. Resource exhaustion
 fails the replacement without publishing a partial dataset. Leave offline mode
 before changing budgets. These limits do not constitute a process RSS limit:
-readers, analysis, retained history, and the Go runtime have separate overhead.
+readers, analysis, compatibility event/call histories, and the Go runtime have separate overhead.
+Event pages and selected details share the display cache budget; maximum record
+bytes applies to event records as well as packets. Generic event history excludes
+file bodies. Event storage or finalization failure fails the open explicitly;
+an incomplete event prefix is never presented as a complete file.
 Offline SIP framing additionally caps active TCP streams at 4,096, total frame
 buffers at 16 MiB, and SIP messages at 64 KiB; tighter configured SIP stream,
 message, and content limits also apply. A framing resource limit fails indexing

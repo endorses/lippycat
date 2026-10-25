@@ -186,16 +186,24 @@ decapsulation can change logical packets relative to source records.
 
 Every indexed packet remains navigable, filterable, and exportable after cache
 eviction. `watch.buffer_size` / `--buffer-size` limits live/remote packet rings and
-retained event history, not offline packet completeness. The header shows total
+retained event history, not offline packet or event completeness. The header shows total
 packets; Statistics separates total and matching packets from cached rows/bytes
 and index bytes. The bottom area remains reserved for notifications. Global and
 matching statistics cover their complete dataset/query; bounded endpoint estimates
-are labelled separately. Events and Calls still have bounded retained histories;
-their filters do not provide complete-file event or call history.
+are labelled separately. Offline Events stores every metadata event admitted by
+the completed analysis, with separate total, matching, and cached counts. Each
+arrival is a separate row, including repeated event IDs and amended snapshots.
+Live/remote Events and all Calls views retain bounded histories.
 
 Interactive packet filters scan the whole dataset asynchronously. Escape cancels
 the scan. Failed/cancelled scans preserve the last completed query, filter labels,
 and statistics. Removing/clearing filters also queries the complete dataset.
+Offline Events filters likewise scan its complete history asynchronously and
+preserve the last successful query on cancellation or error. Flow navigation
+uses bounded complete queries; packet export continues to use the packet query.
+Generic event history excludes file bodies. Packet and event storage finalize
+together; an event storage failure rejects the open instead of publishing a
+partial history.
 
 Backward timestamps are supported: normalized logical packets are ordered on disk
 before stateful analysis, preserving timestamps and using argument order, then
@@ -208,16 +216,16 @@ be mixed. Split multi-section/interface PCAPNG captures before opening them.
 
 **File mode flags:**
 
-| Flag                         | Short | Default                | Description                                                       |
-| ---------------------------- | ----- | ---------------------- | ----------------------------------------------------------------- |
-| `--filter`                   | `-f`  | none                   | Source-level BPF filter                                           |
-| `--tls-keylog`               | —     | none                   | SSLKEYLOGFILE for TLS decryption                                  |
-| `--offline-backing-policy`   | —     | `source`               | Original source handles, or validated private `snapshot` copies   |
-| `--offline-session-dir`      | —     | OS temporary directory | Existing writable parent of private session directories           |
-| `--offline-max-disk-bytes`   | —     | `4294967296` (4 GiB)   | Combined sorting/dataset/query disk budget                        |
-| `--offline-cache-bytes`      | —     | `67108864` (64 MiB)    | Display cache, pinned details, prefetch and in-flight read budget |
-| `--offline-max-record-bytes` | —     | `8388608` (8 MiB)      | Maximum encoded packet record; must fit cache/disk budgets        |
-| `--offline-max-sources`      | —     | `64`                   | Simultaneous sources, from 1 to 64                                |
+| Flag                         | Short | Default                | Description                                                         |
+| ---------------------------- | ----- | ---------------------- | ------------------------------------------------------------------- |
+| `--filter`                   | `-f`  | none                   | Source-level BPF filter                                             |
+| `--tls-keylog`               | —     | none                   | SSLKEYLOGFILE for TLS decryption                                    |
+| `--offline-backing-policy`   | —     | `source`               | Original source handles, or validated private `snapshot` copies     |
+| `--offline-session-dir`      | —     | OS temporary directory | Existing writable parent of private session directories             |
+| `--offline-max-disk-bytes`   | —     | `4294967296` (4 GiB)   | Combined sorting/dataset/query disk budget                          |
+| `--offline-cache-bytes`      | —     | `67108864` (64 MiB)    | Display cache, pinned details, prefetch and in-flight read budget   |
+| `--offline-max-record-bytes` | —     | `8388608` (8 MiB)      | Maximum encoded packet or event record; must fit cache/disk budgets |
+| `--offline-max-sources`      | —     | `64`                   | Simultaneous sources, from 1 to 64                                  |
 
 These flags override `watch.offline.*` [configuration keys](../appendices/config-reference.md#watch--watch-tui-settings).
 They also apply when switching into offline mode using Settings or a file dialog.
@@ -225,14 +233,14 @@ Leave offline mode before changing resource budgets. Settings' buffer field is f
 live/remote packet rings and retained event history; configure offline storage
 through the flags or YAML keys above.
 
-Disk accounting includes summaries, details, offsets, manifests, and query files;
+Disk accounting includes summaries, details, offsets, manifests, event records, and query files;
 the ready and replacement datasets share the budget. Allow space for both during
 replacement and for filtered query vectors; all-match queries use implicit IDs. Normalized storage can exceed source
 size. Physical disk exhaustion, configured budget limits, and permission errors
 fail explicitly, preserving the last completed dataset/query. Free space or
 change the directory/budget and retry. Owned temporary files are removed on
 cancellation/shutdown; cleanup failures remain visible for retry. The cache budget
-is not a process RSS limit: reader/reassembly, analyzer, retained event/call, and
+is not a process RSS limit: reader/reassembly, analyzer, compatibility event/call histories, and
 Go runtime memory are additional. Offline TLS plaintext has a separate 16 MiB cap;
 exceeding it fails indexing.
 

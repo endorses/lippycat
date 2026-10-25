@@ -13,21 +13,22 @@ import (
 
 // Header displays the top header bar
 type Header struct {
-	width          int
-	theme          themes.Theme
-	capturing      bool
-	paused         bool
-	iface          string
-	datasetPackets uint64
-	datasetReady   bool
-	packets        int
-	bufferSize     int // Maximum buffer capacity
-	captureMode    CaptureMode
-	nodeCount      int  // Number of connected remote nodes (hunters)
-	processorCount int  // Number of connected processors
-	tlsDecryption  bool // True when TLS decryption is active
-	pcapFileCount  int  // Number of PCAP files (for offline mode header display)
-	streamingSave  bool // True when streaming save to PCAP is active
+	width               int
+	theme               themes.Theme
+	capturing           bool
+	paused              bool
+	iface               string
+	datasetPackets      uint64
+	datasetReady        bool
+	datasetEventSummary string
+	packets             int
+	bufferSize          int // Maximum buffer capacity
+	captureMode         CaptureMode
+	nodeCount           int  // Number of connected remote nodes (hunters)
+	processorCount      int  // Number of connected processors
+	tlsDecryption       bool // True when TLS decryption is active
+	pcapFileCount       int  // Number of PCAP files (for offline mode header display)
+	streamingSave       bool // True when streaming save to PCAP is active
 }
 
 // NewHeader creates a new header component
@@ -63,6 +64,9 @@ func (h *Header) SetState(capturing, paused bool) {
 func (h *Header) SetInterface(ifaceName string) {
 	h.iface = ifaceName
 }
+
+// SetDatasetEventSummary distinguishes complete history from the leased viewport.
+func (h *Header) SetDatasetEventSummary(summary string) { h.datasetEventSummary = summary }
 
 // SetPacketCount sets the packet count and buffer size
 func (h *Header) SetPacketCount(count, bufferSize int) {
@@ -303,6 +307,9 @@ func (h *Header) View() string {
 	}
 
 	// Truncate middle text if it exceeds available width
+	if h.datasetEventSummary != "" {
+		middleText = h.datasetEventSummary
+	}
 	middleText = truncateWithEllipsis(middleText, middleWidth)
 	middlePart := middleStyle.Width(middleWidth).Align(lipgloss.Center).Render(middleText)
 

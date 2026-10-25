@@ -150,6 +150,18 @@ func (m *Model) setCaptureView(view string) {
 // refreshes. If the displayed event has been evicted, keep the store's repaired
 // selection as the navigation anchor.
 func (m *Model) moveEventSelection(delta int) {
+	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+		v := m.uiState.EventsView
+		cursor := v.LogicalCursor()
+		if delta < 0 {
+			cursor -= min(cursor, uint64(-delta))
+		} else {
+			cursor += min(^uint64(0)-cursor, uint64(delta))
+		}
+		v.SetLogicalCursor(cursor)
+		m.prepareEventsViewLayout()
+		return
+	}
 	if id := m.uiState.EventsView.SelectedID(); id != "" && id != m.eventStore.SelectedID() {
 		// A missing ID leaves the current valid store selection unchanged.
 		m.eventStore.SelectByID(id)
@@ -168,6 +180,15 @@ func (m *Model) syncEventsViewAt(now time.Time) {
 	}
 	m.uiState.EventsView.SetOfflinePacketNavigation(m.offlineSession != nil)
 	m.uiState.StatisticsView.SetTLSObservations(m.eventStore.TLSObservations())
+	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+		m.eventViewDirty = false
+		m.lastEventViewUpdate = now
+		if !m.uiState.EventsView.IsVirtual() {
+			m.uiState.EventsView.EnableVirtualEvents(m.offlineEventCount())
+		}
+		m.prepareEventsViewLayout()
+		return
+	}
 	m.eventViewDirty = false
 	m.lastEventViewUpdate = now
 	m.eventViewSyncCount++

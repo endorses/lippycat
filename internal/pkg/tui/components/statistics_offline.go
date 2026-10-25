@@ -67,7 +67,7 @@ func (s *StatisticsView) renderOfflineStatistics() string {
 			fmt.Fprintf(&out, "  Bounded cardinality estimates: %s\n", strings.Join(stats.TruncatedCardinality, ", "))
 		}
 	}
-	out.WriteString("\nOverview: global dataset; events/calls: bounded retained history.")
+	out.WriteString("\nOverview: global dataset; Events: complete offline history; Calls: bounded retained history.")
 	card := dashboard.NewCard("OFFLINE DATASET", out.String(), s.theme,
 		dashboard.WithIcon("📄"), dashboard.WithWidth(max(1, s.width-2)))
 	return card.Render()

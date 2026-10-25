@@ -118,6 +118,22 @@ func (m Model) handleEventFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		value := input.Value()
+		if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+			descriptions := m.eventFilterDescriptions()
+			if value == "" {
+				descriptions = nil
+			} else {
+				descriptions = append(descriptions, value)
+			}
+			m.uiState.EventFilterMode = false
+			input.Deactivate()
+			cmd := m.startOfflineEventFilter(descriptions, m.uiState.SelectedProtocol.Name)
+			if value != "" && m.offlineEventFilter != nil {
+				input.AddToHistory(value)
+				saveEventFilterHistory(input)
+			}
+			return m, cmd
+		}
 		var cmd tea.Cmd
 		if value == "" {
 			m.resetCaptureInspection()
@@ -170,11 +186,19 @@ func (m Model) handleEnterEventFilterMode() (Model, tea.Cmd) {
 	m.uiState.EventFilterMode = true
 	m.uiState.EventFilterInput.Activate()
 	m.uiState.EventFilterInput.Clear()
-	m.uiState.EventFilterInput.SetActiveFilters(m.eventStore.UserFilterCount(), m.eventStore.UserFilterDescriptions())
+	descriptions := m.eventFilterDescriptions()
+	m.uiState.EventFilterInput.SetActiveFilters(len(descriptions), descriptions)
 	return m, nil
 }
 
 func (m Model) handleRemoveLastEventFilter() (Model, tea.Cmd) {
+	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+		descriptions := m.eventFilterDescriptions()
+		if len(descriptions) == 0 {
+			return m, nil
+		}
+		return m, m.startOfflineEventFilter(descriptions[:len(descriptions)-1], m.uiState.SelectedProtocol.Name)
+	}
 	if !m.eventStore.RemoveLastUserFilter() {
 		return m, nil
 	}
@@ -184,6 +208,12 @@ func (m Model) handleRemoveLastEventFilter() (Model, tea.Cmd) {
 }
 
 func (m Model) handleClearAllEventFilters() (Model, tea.Cmd) {
+	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+		if len(m.eventFilterDescriptions()) == 0 {
+			return m, nil
+		}
+		return m, m.startOfflineEventFilter(nil, m.uiState.SelectedProtocol.Name)
+	}
 	count := m.eventStore.UserFilterCount()
 	if count == 0 {
 		return m, nil

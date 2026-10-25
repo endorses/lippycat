@@ -208,7 +208,7 @@ func (m *Model) prepareCaptureLayout() {
 		m.updateDetailsPanel()
 	}
 	eventSelectionChanged := false
-	if m.eventStore != nil && m.uiState.EventsView != nil {
+	if m.eventStore != nil && m.uiState.EventsView != nil && m.offlineSession == nil {
 		eventSelectionChanged = m.eventStore.SetInspecting(inspecting && m.uiState.ViewMode == "events", m.uiState.EventsView.SelectedID())
 	}
 	m.uiState.PacketList.SetInspecting(inspecting && m.uiState.ViewMode == "packets")

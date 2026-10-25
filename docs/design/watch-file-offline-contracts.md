@@ -369,6 +369,30 @@ For benchmarks report completed index+metadata+sidecars+manifests, live query di
 sort/copy/spool temporary peak and combined peak, avoiding double-counting an
 artifact when it moves from temporary to completed ownership.
 
+### Complete offline metadata events
+
+Offline Events has a complete disk-backed projection in addition to the bounded
+compatibility event store. Every metadata event admitted by analysis is persisted
+before it reaches that retained store. File bodies remain excluded. Arrival row
+IDs start at one and are independent of delivery event IDs: repeated IDs and
+amended snapshots remain separate immutable rows in admission order. Preserve
+the original typed identity, provenance, and sensitive-field policy.
+
+Packet and event datasets publish together after analysis finalizes. Any event
+write, allocation, quota, or finalization error fails the open; cancellation and
+cleanup failure retain explicit ownership rather than publishing an incomplete
+history. Events use the shared disk and cache ledgers, versioned checksummed
+frames, disk offsets and query vectors, and bounded borrowed page/detail leases.
+
+The offline Events view loads only a bounded viewport and selected detail. Its
+filters scan the complete event dataset asynchronously; successful row sets and
+descriptions install together. Cancelled, failed, and stale results preserve the
+last installed query. Total, matching, and cached counts are distinct. Flow
+navigation uses complete bounded queries, while packet export retains its packet
+query semantics. Join query/read owners before event storage closes, and retry
+failed cleanup without discarding the owner. Live/remote Events and Calls retain
+their separate bounded-history semantics.
+
 ### Completed block queries (phase 4)
 
 The TUI compiles constructed, immutable packet filters into validated expressions

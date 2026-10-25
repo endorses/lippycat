@@ -105,40 +105,44 @@ type CaptureTelemetryMsg capture.Telemetry
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
 type Model struct {
-	packetMarks             packetMarks
-	markedExports           *markedExportOwner
-	textSelection           *mouseTextSelection
-	modalDismissMouseDown   bool
-	offlineModalState       components.ModalState
-	scrollDrag              string
-	scrollDragRow           int
-	scrollDragOffset        int
-	captureResizeDrag       *capturePaneDrag
-	captureSideRatio        float64
-	captureStackRatio       float64
-	offlineController       *offlineController
-	offlineSession          *offlineIndexedSession
-	offlineBrowse           *offlineBrowserState
-	offlineFilter           *offlineFilterState
-	offlineFilterGeneration offline.QueryGeneration
-	offlineExport           *offlineExportState
-	offlineLastClick        uint64
-	offlineLastClickValid   bool
-	offlineRelated          *offlineRelatedState
-	offlineOpening          bool
-	offlineStarted          time.Time
-	offlineLeaving          bool
-	offlineQuitRequested    bool
-	offlineQueued           *OpenOfflineDatasetMsg
-	offlineCleanupFailed    bool
-	offlineCleanupError     string
-	offlineCancelledSession *offlineIndexedSession
-	offlineRestart          *components.RestartCaptureMsg
-	offlineGeneration       offline.DatasetGeneration
-	offlineProgress         offline.Progress
-	offlinePending          OpenOfflineDatasetMsg
-	offlineInstalled        OpenOfflineDatasetMsg
-	maxOfflineCalls         int
+	packetMarks                  packetMarks
+	markedExports                *markedExportOwner
+	textSelection                *mouseTextSelection
+	modalDismissMouseDown        bool
+	offlineModalState            components.ModalState
+	scrollDrag                   string
+	scrollDragRow                int
+	scrollDragOffset             int
+	captureResizeDrag            *capturePaneDrag
+	captureSideRatio             float64
+	captureStackRatio            float64
+	offlineController            *offlineController
+	offlineSession               *offlineIndexedSession
+	offlineBrowse                *offlineBrowserState
+	offlineFilter                *offlineFilterState
+	offlineFilterGeneration      offline.QueryGeneration
+	offlineEventBrowse           *offlineEventBrowserState
+	offlineEventFilter           *offlineEventFilterState
+	offlineEventFilterGeneration offline.QueryGeneration
+	scrollDragLogicalOffset      uint64
+	offlineExport                *offlineExportState
+	offlineLastClick             uint64
+	offlineLastClickValid        bool
+	offlineRelated               *offlineRelatedState
+	offlineOpening               bool
+	offlineStarted               time.Time
+	offlineLeaving               bool
+	offlineQuitRequested         bool
+	offlineQueued                *OpenOfflineDatasetMsg
+	offlineCleanupFailed         bool
+	offlineCleanupError          string
+	offlineCancelledSession      *offlineIndexedSession
+	offlineRestart               *components.RestartCaptureMsg
+	offlineGeneration            offline.DatasetGeneration
+	offlineProgress              offline.Progress
+	offlinePending               OpenOfflineDatasetMsg
+	offlineInstalled             OpenOfflineDatasetMsg
+	maxOfflineCalls              int
 
 	// Data stores (thread-safe)
 	packetStore   *store.PacketStore
@@ -479,7 +483,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next.textSelection = nil
 		}
 		next.prepareCaptureLayout()
-		cmd = tea.Batch(cmd, next.syncOfflineBrowser(), next.requestOfflineRelated())
+		cmd = tea.Batch(cmd, next.syncOfflineBrowser(), next.syncOfflineEventBrowser(), next.requestOfflineRelated())
 		next.prepareViewChrome()
 		return next, cmd
 	}
@@ -496,6 +500,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Lifecycle messages bypass modal/settings routing so cleanup cannot stall.
 	switch value := msg.(type) {
+	case offlineEventBrowseMsg:
+		return m.handleOfflineEventBrowse(value)
+	case offlineEventFilterMsg:
+		return m.handleOfflineEventFilter(value)
+	case offlineEventFilterProgressMsg:
+		if m.offlineEventFilter == value.state {
+			return m, offlineEventFilterTick(value.state)
+		}
+		return m, nil
 	case offlineMarkRangeMsg:
 		return m.handleOfflineMarkRange(value)
 	case components.ClearPacketMarksMsg:
@@ -563,6 +576,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.offlineRestart = nil
 			m.offlineSession = nil
 			m.offlineBrowse = nil
+			m.detachOfflineEvents()
 			m.offlineLastClickValid = false
 			m.offlineCancelledSession = nil
 			c := m.offlineController
@@ -636,6 +650,20 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.offlineEventFilter != nil {
+		switch key := msg.(type) {
+		case tea.KeyMsg:
+			switch key.String() {
+			case "esc":
+				m.cancelOfflineEventFilter()
+			case "q", "ctrl+c":
+				return m.leaveOffline(nil, true)
+			}
+			return m, nil
+		case tea.MouseMsg:
+			return m, nil
+		}
+	}
 	if m.offlineFilter != nil {
 		switch key := msg.(type) {
 		case tea.KeyMsg:

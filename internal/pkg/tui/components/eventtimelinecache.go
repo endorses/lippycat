@@ -15,18 +15,20 @@ type eventTimelineRowCache struct{ plain, normal, selected string }
 // Only the visible viewport is retained, with no event or projection references.
 // Absolute positions distinguish duplicate stable IDs and survive front trims.
 type eventTimelineCache struct {
-	ready         bool
-	width, height int
-	theme         themes.Theme
-	generation    uint64
-	start         uint64
-	selectedID    string
-	rows          []eventTimelineRowCache
-	columns       eventTimelineWidths
-	header        string
-	styles        map[events.Kind]lipgloss.Style
-	selectedStyle lipgloss.Style
-	pane          paneStyleCache
+	ready            bool
+	width, height    int
+	theme            themes.Theme
+	generation       uint64
+	start            uint64
+	selectedID       string
+	selectedPosition uint64
+	virtual          bool
+	rows             []eventTimelineRowCache
+	columns          eventTimelineWidths
+	header           string
+	styles           map[events.Kind]lipgloss.Style
+	selectedStyle    lipgloss.Style
+	pane             paneStyleCache
 }
 
 func (v *EventsView) timelineRenderOffset(height int) int {
@@ -36,12 +38,31 @@ func (v *EventsView) timelineRenderOffset(height int) int {
 	return v.timelineOffset(height, v.indexByID(v.selectedID))
 }
 
-func (c *eventTimelineCache) matches(v *EventsView, width, height int) bool {
+func (v *EventsView) virtualRenderOffset(height int) uint64 {
+	if height == v.height {
+		return v.virtualOffset
+	}
+	return v.virtualTimelineOffset(height, true)
+}
+
+func (v *EventsView) timelineRange(height int) (start uint64, count int, selected uint64) {
+	visible := max(0, height-5)
+	if v.virtual {
+		start = v.virtualRenderOffset(height)
+		if start < v.virtualTotal {
+			count = int(min(uint64(visible), v.virtualTotal-start))
+		}
+		return start, count, v.virtualCursor
+	}
 	offset := v.timelineRenderOffset(height)
-	count := min(max(0, max(1, height-4)-1), len(v.items)-offset)
+	return v.itemBase + uint64(offset), min(visible, max(0, len(v.items)-offset)), v.itemBase + uint64(max(0, v.indexByID(v.selectedID)))
+}
+
+func (c *eventTimelineCache) matches(v *EventsView, width, height int) bool {
+	start, count, selected := v.timelineRange(height)
 	return c.ready && c.width == width && c.height == height && c.theme == v.theme &&
-		c.generation == v.timelineGeneration && c.start == v.itemBase+uint64(offset) &&
-		len(c.rows) == count && c.selectedID == v.selectedID
+		c.generation == v.timelineGeneration && c.start == start && c.virtual == v.virtual &&
+		len(c.rows) == count && c.selectedID == v.selectedID && c.selectedPosition == selected
 }
 
 // Called only from Update's PrepareLayout. A render cache miss uses a local
@@ -55,11 +76,10 @@ func (v *EventsView) prepareTimeline() {
 
 func (v *EventsView) buildTimelineCache(width, height int, previous *eventTimelineCache) eventTimelineCache {
 	contentWidth := max(1, width-6)
-	offset := v.timelineRenderOffset(height)
-	count := min(max(0, max(1, height-4)-1), len(v.items)-offset)
+	start, count, selected := v.timelineRange(height)
 	c := eventTimelineCache{ready: true, width: width, height: height, theme: v.theme, generation: v.timelineGeneration,
-		start: v.itemBase + uint64(offset), selectedID: v.selectedID}
-	reusable := previous != nil && previous.ready && previous.width == width && previous.theme == v.theme
+		start: start, selectedID: v.selectedID, selectedPosition: selected, virtual: v.virtual}
+	reusable := previous != nil && previous.ready && previous.width == width && previous.theme == v.theme && previous.virtual == v.virtual
 	if reusable {
 		c.columns, c.header, c.styles, c.selectedStyle = previous.columns, previous.header, previous.styles, previous.selectedStyle
 		c.pane = previous.pane
@@ -75,17 +95,24 @@ func (v *EventsView) buildTimelineCache(width, height int, previous *eventTimeli
 	}
 	c.pane.prepare(v.theme, width-2, height-2)
 	c.rows = make([]eventTimelineRowCache, count)
-	selected := max(0, v.indexByID(v.selectedID))
 	for j := range c.rows {
 		pos := c.start + uint64(j)
 		if reusable && previous.generation == c.generation && pos >= previous.start && pos-previous.start < uint64(len(previous.rows)) {
 			c.rows[j] = previous.rows[pos-previous.start]
 		} else {
-			item := v.items[offset+j]
-			env := item.Event.Envelope()
-			kind := item.Event.Kind()
-			endpoints := fmt.Sprintf("%s:%d -> %s:%d", env.Flow.SourceAddress, env.Flow.SourcePort, env.Flow.DestinationAddress, env.Flow.DestinationPort)
-			plain := eventTimelineRowWithColumns(env.Timestamp.Format("15:04:05.000"), string(kind), compactNode(env.NodeID), endpoints, eventSummary(item.Event), contentWidth, c.columns)
+			var item *EventItem
+			if v.virtual {
+				item, _ = v.virtualItemAt(pos)
+			} else {
+				item = &v.items[int(pos-v.itemBase)]
+			}
+			kind, plain := events.Kind(""), "Loading…"
+			if item != nil && item.Event != nil {
+				env := item.Event.Envelope()
+				kind = item.Event.Kind()
+				endpoints := fmt.Sprintf("%s:%d -> %s:%d", env.Flow.SourceAddress, env.Flow.SourcePort, env.Flow.DestinationAddress, env.Flow.DestinationPort)
+				plain = eventTimelineRowWithColumns(v.displayEventTimestamp(env.Timestamp).Format("15:04:05.000"), string(kind), compactNode(env.NodeID), endpoints, eventSummary(item.Event), contentWidth, c.columns)
+			}
 			plain = fitEventCells(sanitizeEventText(plain), contentWidth)
 			style, ok := c.styles[kind]
 			if !ok {
@@ -93,7 +120,7 @@ func (v *EventsView) buildTimelineCache(width, height int, previous *eventTimeli
 			}
 			c.rows[j] = eventTimelineRowCache{plain: plain, normal: style.Render(plain)}
 		}
-		if offset+j == selected && c.rows[j].selected == "" {
+		if pos == selected && c.rows[j].selected == "" {
 			c.rows[j].selected = c.selectedStyle.Render(c.rows[j].plain)
 		}
 	}

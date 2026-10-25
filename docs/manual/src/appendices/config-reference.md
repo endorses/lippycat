@@ -851,7 +851,7 @@ Settings for `lc watch`. See [Interactive Capture with `lc watch`](../part2-loca
 
 | Key                              | Type    | Default                | Description                                                                                                                       |
 | -------------------------------- | ------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `watch.buffer_size`              | integer | `10000`                | Live/remote packet ring and retained event capacity; does not limit offline packet completeness.                                  |
+| `watch.buffer_size`              | integer | `10000`                | Live/remote packet ring and retained event capacity; does not limit offline packet or event completeness.                         |
 | `watch.offline.backing_policy`   | string  | `source`               | Frozen per open: owned original handles (`source`) or validated private copies (`snapshot`); flag `--offline-backing-policy`.     |
 | `watch.offline.session_dir`      | string  | OS temporary directory | Existing writable parent for private temporary offline sessions; flag `--offline-session-dir`.                                    |
 | `watch.offline.max_disk_bytes`   | integer | `4294967296` (4 GiB)   | Positive combined sorting/dataset/query disk budget, including current and replacement sessions; flag `--offline-max-disk-bytes`. |

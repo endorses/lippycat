@@ -54,6 +54,32 @@ func (m Model) handleCaptureScrollbar(msg tea.MouseMsg, contentTop, contentHeigh
 		return m, nil, false
 	}
 	contentHeight = layout.List.Height
+	if m.uiState.ViewMode == "events" && m.uiState.EventsView.IsVirtual() && target == "list" {
+		total, visible, offset := m.uiState.EventsView.LogicalTimelineScrollState(contentHeight)
+		start, size := components.ScrollbarThumb64(total, visible, offset, trackHeight)
+		if size == 0 {
+			m.scrollDrag = ""
+			return m, nil, false
+		}
+		var next uint64
+		if msg.Action == tea.MouseActionPress {
+			m.focusCapturePane("left")
+			row := msg.Y - trackTop
+			m.scrollDrag, m.scrollDragRow = target, row
+			m.scrollDragLogicalOffset = offset
+			if row >= start && row < start+size {
+				return m, nil, true
+			}
+			next = components.ScrollbarOffsetForRow64(total, visible, trackHeight, row, size/2)
+			m.scrollDragLogicalOffset = next
+		} else {
+			next = components.ScrollbarOffsetForDrag64(total, visible, trackHeight, m.scrollDragLogicalOffset, m.scrollDragRow, msg.Y-trackTop)
+		}
+		m.uiState.EventsView.SetLogicalCursor(next)
+		m.uiState.EventsView.SetLogicalOffset(next)
+		m.prepareEventsViewLayout()
+		return m, nil, true
+	}
 
 	var total, visible, offset int
 	switch m.uiState.ViewMode {
@@ -126,6 +152,12 @@ func (m Model) setCaptureScrollOffset(target string, newOffset, contentHeight in
 	m.focusCapturePane("left")
 	switch m.uiState.ViewMode {
 	case "events":
+		if m.uiState.EventsView.IsVirtual() {
+			m.uiState.EventsView.SetLogicalCursor(uint64(max(0, newOffset)))
+			m.uiState.EventsView.SetLogicalOffset(uint64(max(0, newOffset)))
+			m.prepareEventsViewLayout()
+			return m, nil, true
+		}
 		if id, ok := m.uiState.EventsView.EventIDAtIndex(newOffset); ok {
 			m.eventStore.SelectByIDFollowingLatest(id)
 			m.syncEventsView()

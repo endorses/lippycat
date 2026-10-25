@@ -70,7 +70,7 @@ func init() {
 	WatchCmd.AddCommand(remoteCmd)
 
 	// Shared flags (inherited by subcommands)
-	WatchCmd.PersistentFlags().IntVar(&bufferSize, "buffer-size", 10000, "live/remote packet ring and retained event capacity; does not limit offline packets")
+	WatchCmd.PersistentFlags().IntVar(&bufferSize, "buffer-size", 10000, "live/remote packet ring and retained event capacity; does not limit offline packets or events")
 	WatchCmd.PersistentFlags().IntVar(&maxCalls, "max-calls", 5000, "maximum number of VoIP calls to keep in memory")
 
 	// Offline limits are shared by the ready dataset and its replacement.
@@ -78,7 +78,7 @@ func init() {
 	WatchCmd.PersistentFlags().String("offline-backing-policy", "source", "offline packet backing: source (keep inputs unchanged) or snapshot (validated private copies)")
 	WatchCmd.PersistentFlags().Uint64("offline-max-disk-bytes", 4<<30, "maximum combined offline sorting, dataset and query disk bytes")
 	WatchCmd.PersistentFlags().Uint64("offline-cache-bytes", 64<<20, "maximum offline display cache and read allocation bytes")
-	WatchCmd.PersistentFlags().Uint64("offline-max-record-bytes", 8<<20, "maximum encoded offline packet record bytes")
+	WatchCmd.PersistentFlags().Uint64("offline-max-record-bytes", 8<<20, "maximum encoded offline packet or event record bytes")
 	WatchCmd.PersistentFlags().Uint32("offline-max-sources", 64, "maximum simultaneous offline input files (up to 64)")
 	for key, flag := range map[string]string{
 		"session_dir":      "offline-session-dir",

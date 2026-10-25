@@ -1,7 +1,7 @@
 # Operational visibility and offline investigation implementation plan
 
 **Date:** 2026-10-25
-**Status:** In progress; workstreams 1–3 implemented and verified; workstream 4 in progress; workstreams 5–6 pending
+**Status:** In progress; workstreams 1–4 implemented and verified; workstreams 5–6 pending
 **Assessment baseline:** `8ba8ed27`
 **Scope:** Six ordered workstreams selected from the existing plans and research
 
@@ -244,35 +244,35 @@ offline session ownership, `internal/pkg/tui/store/event_store.go`,
 
 ### Implementation
 
-- [ ] Define an offline event dataset/projection with stable row identity,
+- [x] Define an offline event dataset/projection with stable row identity,
       ordering, typed schema/version, paging, asynchronous queries, and detail
       lookup. Specify update/amendment and duplicate-ID behavior explicitly;
       event identity is not automatically a unique row position.
-- [ ] Persist every event admitted by the configured offline analysis and
+- [x] Persist every event admitted by the configured offline analysis and
       projection policy using bounded queues/buffers and storage accounting.
       Preserve event identities and sensitive-field rules; generic event history
       must not acquire file bodies or other excluded content.
-- [ ] Publish complete event storage atomically with the completed offline
+- [x] Publish complete event storage atomically with the completed offline
       session. Define explicit behavior for disk exhaustion, malformed records,
       cancellation, and failed cleanup. A truncated event stream must never be
       labeled complete.
-- [ ] Adapt EventsView to page from the offline event dataset while preserving
+- [x] Adapt EventsView to page from the offline event dataset while preserving
       viewport formatting, navigation, details, and selection. Keep the existing
       bounded store behavior for live/remote sessions.
-- [ ] Evaluate event filters across the complete event dataset asynchronously,
+- [x] Evaluate event filters across the complete event dataset asynchronously,
       with cancellable work, stale-result rejection, and preservation of the last
       successful query after cancellation or error. Report total and matching
       events separately from cached/visible rows.
-- [ ] Keep event and packet flow-navigation semantics consistent. Use bounded
+- [x] Keep event and packet flow-navigation semantics consistent. Use bounded
       lookups/queries rather than loading all records to find a related flow.
-- [ ] Join event readers and queries before session storage closes. Cover rapid
+- [x] Join event readers and queries before session storage closes. Cover rapid
       reopen, file replacement, stale completion, mode switches, quit, and cleanup
       retries without blocking the Bubble Tea update loop.
-- [ ] Test inputs producing more events than the current retained ring capacity,
+- [x] Test inputs producing more events than the current retained ring capacity,
       matches outside the old retained window, repeated/amended IDs, all supported
       event kinds, corruption, quota failure, and cancellation. Compare event
       content/identity and packet behavior with the completed-analysis baseline.
-- [ ] Update completeness labels and manual text for Events only after these
+- [x] Update completeness labels and manual text for Events only after these
       guarantees are delivered. Continue to describe Calls history accurately.
 
 **Completion:** All events admitted by a successful offline analysis are browsable
@@ -428,8 +428,8 @@ decryption, application attribution, and coherence scoring require separate scop
 | ---------------------------- | ---------------------- | ------------------------------------------------------------------------------ | ----------- |
 | 1. Failover integration      | `9bd9b347`, `0e1c05d4` | Runtime, custody, topology, expiry, race and build checks below                | Complete    |
 | 2. ECH visibility            | `07945e59`             | Parser/runtime/wire/log/CLI/TUI race checks; manual and build matrix           | Complete    |
-| 3. DNS notices               | This increment         | Canonical runtime/transport/log/action/UI race suites, manual and build matrix | Complete    |
-| 4. Offline event history     | Pending                | Event storage implemented and under integration                                | In progress |
+| 3. DNS notices               | `2767d2bf`             | Canonical runtime/transport/log/action/UI race suites, manual and build matrix | Complete    |
+| 4. Offline event history     | This increment         | Complete storage/UI lifecycle race suites, build matrix and translated manual  | Complete    |
 | 5. Compact-index Milestone B | Pending                | Pending                                                                        | Not started |
 | 6A. SSH/HASSH                | Pending                | Pending                                                                        | Not started |
 | 6B. QUIC study               | Pending                | Pending                                                                        | Not started |
@@ -621,3 +621,75 @@ English, Catalan and German manual editions built with structural parity; all 47
 manual helper tests passed and both translation catalogs contained 5933/5933
 current translations. Task-owned private generator/review artifacts were removed;
 the umbrella task's shared cache remains owned until final task cleanup.
+
+### Workstream 4 checkpoint — 2026-10-25
+
+Event-storage work began in separately owned files during W3's final verification;
+UI/session integration uses the committed `2767d2bf` baseline. At that boundary,
+all remaining working-tree changes belong to W4. The packet-codec ECH correction
+is separately committed as `7bdee794`.
+
+A dedicated metadata dataset now preserves one-based event arrival ordinals,
+including repeated/amended delivery IDs, with versioned checksummed frames,
+disk-backed offsets and filtered row vectors, bounded page/detail leases, shared
+storage accounting and retryable cleanup. Its focused race tests cover 4097 rows,
+all current metadata kinds, far-history queries, identity/snapshot ownership,
+corruption, quota/write failure, cancellation, query pins and cleanup retry.
+Session persistence and virtual Events browsing/filtering subsequently completed.
+The implementation is frozen for the single bounded closure campaign described
+below; no W4 completion checklist is checked before its terminal decision.
+
+### Workstream 4 completion — 2026-10-25
+
+The session persists metadata through the existing bounded lossless dispatcher,
+before the compatibility ring. An event write failure cancels indexing and remains
+observable through sink flush/close; packet and event datasets publish together
+only after both finalize. File-content events remain excluded. Reader/query owners
+are registered with the session and joined before backing cleanup; failed cleanup
+remains owned for retry.
+
+Offline Events now borrows bounded pages and selected details from complete event
+storage. Arrival ordinals identify rows independently of delivery IDs. Filters scan
+the full dataset asynchronously, reject stale successes/errors, and preserve the
+last successful query and description on cancellation or failure. Counts distinguish
+total, matching, and cached rows. Virtual navigation, mouse selection, scrolling and
+details do not retain a full-history map or slice. Canonical timestamps remain UTC
+on disk; virtual event formatting preserves the prior local-clock presentation.
+Live/remote Events and all Calls views retain their existing bounded behavior.
+Related-packet queries and packet export keep their separate packet semantics.
+
+Verification passed with the shared task cache and authorized host execution:
+
+```sh
+go test -race -tags all ./internal/pkg/offline
+go test -race -tags all ./internal/pkg/tui -run 'TestOffline(EventSink|Indexer(PublishesCompleteEventHistory|PersistsCanonicalECH|EventQuota|EventCancellation)|Session)' -count=1
+go test -race -tags all ./internal/pkg/tui -run 'TestOffline(Indexer|CompactIndexer|CompactOracle|ReleaseAnalyzerFinalizationFailure|ReleaseLateSourceTruncation)' -count=1
+go test -race -tags all ./internal/pkg/tui ./internal/pkg/tui/components ./internal/pkg/tui/store -count=1
+go test -race -tags all ./internal/pkg/tui -run '^TestCompleteOfflineEvent' -count=1
+make build-matrix
+make manual-check
+make manual
+```
+
+Persistence parity uses 2,049 events beyond a retained ring; UI tests use 4,099
+rows over an eight-row ring and select/filter matches outside its old window.
+Coverage includes typed ECH/notices and every current metadata kind, repeated and
+amended IDs, corruption/write/quota failure, cancelled scans, borrowed ownership,
+abandoned results, reopen, quit, cleanup retries, related-packet navigation,
+keyboard/resize/mouse behavior, and uint64 arithmetic. Unchanged indexer oracle,
+source-truncation and analyzer-EOF failure regressions pass. The build matrix
+compiled supported non-CUDA and LI partitions and vetted them. All 47 manual
+helper tests passed, both catalogs have 5933/5933 current translations, and all
+three editions built with structural parity.
+
+The one primary review found one UI regression: hiding and returning to Events
+lost the selected row's detail-scroll position. The hidden branch now saves its
+arrival identity and scroll before releasing the lease; the permanent reproducer
+and related browser/event/publication/detail-scroll race suite passed. The backend
+finding list was empty. One integrated check confirmed the fix and the existing
+cross-boundary persistence/ownership evidence. **CLOSED**, discovery 1/1, primary
+1/1, integrated 1/1, supplemental 0, with no remaining material finding.
+
+The event-history extension in the original scalable-offline plan is fulfilled
+and checked. Call-history persistence remains separate and deferred, as selected
+by this umbrella plan. No packet completeness or retention milestone is reopened.

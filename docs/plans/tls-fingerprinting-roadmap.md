@@ -303,13 +303,13 @@ Prove feasibility before committing to full QUIC parser work.
 
 ### Spike Scope
 
-- [ ] Parse QUIC v1 and v2 long headers.
-- [ ] Extract version, packet type, DCID length, SCID length, token length, packet
+- [x] Parse QUIC v1 and v2 long headers.
+- [x] Extract version, packet type, DCID length, SCID length, token length, packet
       number length, and Initial size.
-- [ ] Remove Initial packet protection for v1 using published initial secrets.
-- [ ] Decrypt enough CRYPTO data to recover TLS ClientHello bytes where possible.
-- [ ] Parse QUIC transport parameters from the recovered handshake.
-- [ ] Record failure reasons: unsupported version, fragmented CRYPTO, decryption
+- [x] Remove Initial packet protection for v1 using published initial secrets.
+- [x] Decrypt enough CRYPTO data to recover TLS ClientHello bytes where possible.
+- [x] Parse QUIC transport parameters from the recovered handshake.
+- [x] Record failure reasons: unsupported version, fragmented CRYPTO, decryption
       failure, malformed packet, ECH present.
 
 ### Output
@@ -325,6 +325,12 @@ Produce a short spike report in `docs/research/` with:
 
 - Spike code is either production-quality and tested or kept out of main packages.
 - The team can decide whether full QUIC parsing is worth the implementation cost.
+
+Delivered as the isolated [QUIC Initial experiment](../../experiments/quicinitial/README.md)
+and [decision report](../research/quic-initial-feasibility.md). V2 recognition
+covers header shapes only; packet-number length is available after v1
+unprotection. Production integration is deferred pending a separate lifecycle/
+correlation scope and representative capture evidence, without a performance gate.
 
 ## Phase 7: HTTP/2 Fingerprinting
 

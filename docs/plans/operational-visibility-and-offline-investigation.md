@@ -1,7 +1,7 @@
 # Operational visibility and offline investigation implementation plan
 
 **Date:** 2026-10-25
-**Status:** In progress; workstreams 1–5 and production SSH implemented and verified; QUIC study awaiting separate commit
+**Status:** All six workstreams implemented and verified; final release recording and cleanup in progress
 **Assessment baseline:** `8ba8ed27`
 **Scope:** Six ordered workstreams selected from the existing plans and research
 
@@ -380,24 +380,24 @@ does not produce a fabricated fingerprint.
 
 ### B. Bounded QUIC Initial feasibility study
 
-- [ ] Recheck the existing QUIC detector and authoritative v1/v2 packet-format
+- [x] Recheck the existing QUIC detector and authoritative v1/v2 packet-format
       references; define a reusable result type and bounds for the spike without
       committing to a new production protocol package or public schema.
-- [ ] Parse v1/v2 long-header shapes and packet types, versions, connection-ID
+- [x] Parse v1/v2 long-header shapes and packet types, versions, connection-ID
       lengths, tokens, and packet lengths. Handle supported coalesced input and
       report version-negotiation/Retry/unsupported cases explicitly.
-- [ ] Implement v1 Initial header-protection removal and decryption for controlled
+- [x] Implement v1 Initial header-protection removal and decryption for controlled
       fixtures, with bounded CRYPTO reassembly sufficient to recover a visible TLS
       ClientHello and transport parameters. v2 decryption is outside this spike's
       required scope; do not imply it follows from v2 header recognition.
-- [ ] Record structured reasons for incomplete/fragmented CRYPTO data, unsupported
+- [x] Record structured reasons for incomplete/fragmented CRYPTO data, unsupported
       versions, malformed input, decryption failure, and ECH-limited visibility.
       Reuse TLS parsing where appropriate without claiming access to an encrypted
       inner ClientHello or application traffic.
-- [ ] Test valid reference packets and malformed/truncated/bounded-state cases.
+- [x] Test valid reference packets and malformed/truncated/bounded-state cases.
       Keep experimental code outside production analysis paths unless it meets the
       project's normal correctness and integration requirements.
-- [ ] Write a reproducible report in `docs/research/` recording supported cases,
+- [x] Write a reproducible report in `docs/research/` recording supported cases,
       coverage on available captures, implementation/dependency costs, resource
       observations, and a proceed/defer recommendation for production QUIC work.
       Identify unavailable real-world evidence explicitly.
@@ -431,8 +431,8 @@ decryption, application attribution, and coherence scoring require separate scop
 | 3. DNS notices               | `2767d2bf`             | Canonical runtime/transport/log/action/UI race suites, manual and build matrix                 | Complete    |
 | 4. Offline event history     | `e966aefb`             | Complete storage/UI lifecycle race suites, build matrix and translated manual                  | Complete    |
 | 5. Compact-index Milestone B | `0856f6b6`             | Revision/pipeline/UI race checks, generated readiness report, build and manual                 | Complete    |
-| 6A. SSH/HASSH                | This increment         | Parser/runtime, negotiated transport/log, local/remote/offline Events, manual and build checks | Complete    |
-| 6B. QUIC study               | Pending                | Isolated v1 decrypt/reassembly spike and reproducible report under verification                | In progress |
+| 6A. SSH/HASSH                | `f8139502`             | Parser/runtime, negotiated transport/log, local/remote/offline Events, manual and build checks | Complete    |
+| 6B. QUIC study               | This increment         | Independent reference/controlled packets, malformed/bounds/race/vet tests, reproducible report | Complete    |
 
 ## Deferred scope
 
@@ -847,3 +847,54 @@ replaced by the current event wire path, as required by this umbrella's scope;
 full QUIC production, later corpus/coherence work and unrelated historical tasks
 remain separate. Experimental QUIC files and its report are excluded from this
 SSH release increment and will be committed afterward.
+
+### Workstream 6B completion — 2026-10-25
+
+The isolated experiment started from `0856f6b6` alongside SSH integration and is
+released after the independent production SSH commit `f8139502`. The existing
+heuristic QUIC detector and RFC 9000/9001/9369 were checked before implementing a
+bounded result contract in `experiments/quicinitial`. No dependency was added and
+no production package imports the experiment.
+
+V1/v2 long-header/type recognition, bounded coalescing, explicit Retry/version
+negotiation/unsupported outcomes, and v1 Initial key derivation, header
+unprotection, packet-number reconstruction and authenticated decryption are
+implemented. Bounded offset CRYPTO reassembly recovers the visible ClientHello
+and exact transport-parameter TLVs. Structured reasons distinguish holes,
+conflicts, malformed input, authentication failure, limits and ECH outer-only
+visibility. V2 decryption, Retry following, application traffic and production
+flow admission/correlation remain outside the study.
+
+The [decision report](../research/quic-initial-feasibility.md) recommends deferring
+production integration while preserving the experiment. It records implementation
+and dependency cost, explicit resource bounds, one exploratory allocation/time
+observation, available-packet coverage and missing representative/private QUIC
+traffic. It makes no deployment-performance promise. Published redistributable
+RFC client/server ciphertext and a fresh Go QUIC TLS client provide independent
+and controlled correctness evidence; the available demo PCAP contains no
+supported-version Initial candidate.
+
+```sh
+go test -race -tags all ./experiments/quicinitial/... -count=1
+go vet -tags all ./experiments/quicinitial/...
+go run -tags all ./experiments/quicinitial/cmd/inspect -dcid 8394c8f03e515708 -hex-file experiments/quicinitial/testdata/rfc9001-client.hex
+go run -tags all ./experiments/quicinitial/cmd/survey testdata/pcaps/demo-mixed.pcap
+```
+
+All commands passed. Final race runs completed in 1.107 s (core) and 1.022 s
+(survey); the reference client yielded packet number 2, a 241-byte ClientHello,
+`example.com`, `alpn` and parameter evidence. The demo survey reported 1,800
+packets, 315 UDP datagrams and zero supported-version candidates. Earlier bounded
+fuzzing completed 6,648 executions. Tests cover every truncated reference prefix,
+malformed lengths, authentication failure, conflicting overlap, state bounds,
+packet-number wrap, ECH, parameter duplication and owned snapshots.
+
+The existing bounded closure campaign corrected two P2 findings: survey PCAP
+lengths could exceed its intended allocation bound, and authenticated Frame Type
+varints accepted non-shortest encodings. An effective 128 KiB pre-allocation
+record cap and frame-type-width validation now reject these inputs; ordinary
+records in max-snaplen captures and legal longer offset/length encodings remain
+supported. Permanent regressions, the integrated fixed-list check and final
+race/vet checks passed. **CLOSED**, discovery 1/1, primary 1/1, integrated 1/1,
+supplemental 0, with no remaining material finding. The original TLS roadmap's
+Phase 6 spike tasks are fulfilled; its production QUIC wire task stays unchecked.

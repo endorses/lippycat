@@ -64,7 +64,8 @@ lc watch file call1.pcap call2.pcap -f "udp"
 - `--buffer-size` - Live/remote packet ring and retained event capacity (default: 10000); does not limit offline packet or event completeness
 
 **Complete offline packets:** Every logical packet accepted by the source-level
-`-f` BPF filter is indexed in private temporary storage before browsing starts.
+`-f` BPF filter is normalized, ordered and indexed as a complete immutable base
+before browsing starts. Ordered application analysis then continues in the background.
 Reassembly and decapsulation can change the logical packet count and effective
 link type relative to the original capture. Navigation, packet details,
 interactive filters (including removal and clearing), and saves cover the complete
@@ -94,7 +95,10 @@ stores and filters every metadata event admitted by the completed analysis.
 Its total, matching, and cached row counts are separate; cache eviction does not
 remove events. Each arrival has a separate row, including repeated event IDs and
 amended snapshots. Calls retains bounded history. Stateful analysis consumes the
-full stream and finalizes before packet and event datasets are published together.
+full stream and finalizes before completed metadata and Events publish together.
+Base network fields, raw details and export are usable first; Protocol/Info, app
+metadata, protocol statistics, Events, Calls and decryption remain explicitly
+pending until analysis completes.
 
 Press `w` to save all packets matching the completed packet query, or all dataset
 packets when no packet filter is active. Export streams a fixed snapshot to
@@ -388,13 +392,27 @@ lc watch file signaling.pcap media.pcap
 
 ### Offline indexing lifecycle
 
-`watch file` indexes the complete accepted packet stream into private temporary
-storage before installing the dataset. Startup, file dialogs, settings, and
-restarts use the same indexing workflow. The progress modal reports phase,
-source count, logical packets, scanned logical bytes, elapsed time, and disk
-usage, and the frozen backing policy. Escape cancels and keeps the modal open
-until cleanup finishes. A failed or cancelled replacement preserves the previous
-ready dataset and its state.
+`watch file` completes normalization, ordering and base indexing before installing
+an immutable base revision 0. Startup, file dialogs, settings and restarts share
+this workflow. The opening modal reports phase, source count, logical packets,
+scanned bytes, elapsed time, disk usage and backing policy. Escape cancels the
+open and waits for cleanup. Failure/cancellation before a base succeeds preserves
+the previous ready dataset.
+
+The modal closes at base readiness. A nonmodal header reports ordered analysis;
+Ctrl+X cancels analysis while preserving base browsing, base-field filtering,
+raw details and export. Escape continues to cancel active filters/exports. Protocol,
+Info and application metadata/statistics, Events, Calls and decrypted results
+remain explicitly pending. Analysis failure/cancellation retains the base; reopen
+to retry. No provisional scan-time IDs are exposed.
+
+Completed analysis publishes immutable revision 1 packet metadata, statistics,
+complete Events and bounded Calls together. Dependent packet filters requested
+while pending are queued without replacing the installed query or descriptions.
+Publication refreshes that chain (or the installed filter) and preserves selection
+by PacketID. Refresh failure/cancellation keeps the old base query explicitly
+labeled revision 0. Pins and exports retain their own revision across publication;
+only whole-session replacement/quit cancels them.
 
 Browsing loads bounded pages and selected details asynchronously. Cache eviction
 does not discard logical packets or events or change packet/event loss counters.
@@ -446,7 +464,8 @@ watch:
 The ready dataset and replacement share disk/cache budgets. Disk accounting
 includes summaries, details, offsets, manifests, and completed/in-progress query
 files, event records and event query vectors, source snapshots, decompressed inputs, and derived packet bytes. Allow
-room for both datasets during replacement and for filtered query vectors.
+room for both datasets during replacement, both metadata revisions, and filtered
+query vectors. Revisions share the same originally validated source handles.
 All-match queries use implicit packet IDs without a per-packet query file. Normalized storage can be larger than the source capture. A configured
 budget limit, physical disk exhaustion, or permission error is surfaced explicitly;
 failed opens/queries preserve the previous completed dataset/query. Free space,
@@ -459,16 +478,17 @@ before changing budgets. These limits do not constitute a process RSS limit:
 readers, analysis, compatibility event/call histories, and the Go runtime have separate overhead.
 Event pages and selected details share the display cache budget; maximum record
 bytes applies to event records as well as packets. Generic event history excludes
-file bodies. Event storage or finalization failure fails the open explicitly;
-an incomplete event prefix is never presented as a complete file.
+file bodies. Event storage or finalization failure fails analysis explicitly;
+an incomplete event prefix is never presented as complete. Failure after base
+publication preserves the base with an explicit analysis error.
 Offline SIP framing additionally caps active TCP streams at 4,096, total frame
 buffers at 16 MiB, and SIP messages at 64 KiB; tighter configured SIP stream,
-message, and content limits also apply. A framing resource limit fails indexing
-explicitly. TLS key logs are read into a bounded session snapshot and are not
+message, and content limits also apply. A framing resource limit fails analysis
+explicitly; an already published base remains usable. TLS key logs are read into a bounded session snapshot and are not
 watched for changes during replay. Retained TLS plaintext is capped at 16 MiB
 across all connections and both directions in each offline session. Exceeding
-this analyzer budget fails indexing explicitly and preserves the previous ready
-dataset. The plaintext budget is separate from the display cache; allocation
+this analyzer budget fails analysis explicitly; an already published base
+remains usable. The plaintext budget is separate from the display cache; allocation
 overhead is additional.
 
 ## DHCP/NTP and inventory observations

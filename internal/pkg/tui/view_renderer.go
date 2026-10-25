@@ -85,6 +85,9 @@ func (m Model) View() string {
 
 // renderCaptureTab renders the Capture tab content (packets or calls)
 func (m Model) renderCaptureTab(contentHeight int) string {
+	if m.offlineAnalysisPending() && m.uiState.ViewMode != "packets" {
+		return "Ordered analysis pending. Complete base packets, raw details, base-field filters and packet export are available."
+	}
 	if m.responsiveCaptureView() {
 		return m.renderResponsiveCapture()
 	}
@@ -284,15 +287,15 @@ func (m *Model) prepareViewChrome() {
 	m.uiState.Header.SetPacketCount(m.packetStore.PacketsCount, m.packetStore.MaxPackets)
 	m.uiState.FilterInput.SetPrompt("/")
 	if m.captureMode == components.CaptureModeOffline && m.offlineSession != nil {
-		usage := m.offlineSession.Dataset.Resources()
+		usage := m.offlineDataset().Resources()
 		m.uiState.StatisticsView.SetOfflineResources(len(m.uiState.PacketList.GetPackets()), usage)
-		m.uiState.Header.SetDatasetPacketCount(m.offlineSession.Dataset.Count())
+		m.uiState.Header.SetDatasetPacketCount(m.offlineDataset().Count())
 		m.uiState.FilterInput.SetPrompt("/ complete dataset:")
 	}
 	m.uiState.Header.SetInterface(m.interfaceName)
-	m.uiState.Header.SetDatasetEventSummary("")
+	m.uiState.Header.SetDatasetEventSummary(m.offlineAnalysisSummary())
 	m.uiState.EventFilterInput.SetPrompt("/")
-	if m.offlineSession != nil && m.offlineSession.EventDataset != nil && m.uiState.ViewMode == "events" {
+	if m.offlineSession != nil && m.offlineEvents() != nil && m.uiState.ViewMode == "events" {
 		cached, scope := 0, "All"
 		if s := m.offlineEventBrowse; s != nil {
 			scope = s.protocol
@@ -300,7 +303,7 @@ func (m *Model) prepareViewChrome() {
 				cached = len(s.current.items)
 			}
 		}
-		m.uiState.Header.SetDatasetEventSummary(fmt.Sprintf("Events: %d total | %d matching | %d cached | %s", m.offlineSession.EventDataset.Count(), m.offlineEventCount(), cached, scope))
+		m.uiState.Header.SetDatasetEventSummary(fmt.Sprintf("Events: %d total | %d matching | %d cached | %s", m.offlineEvents().Count(), m.offlineEventCount(), cached, scope))
 		m.uiState.EventFilterInput.SetPrompt("/ complete events:")
 	}
 	m.uiState.Header.SetCaptureMode(m.captureMode)
@@ -309,7 +312,7 @@ func (m *Model) prepareViewChrome() {
 	m.uiState.Header.SetNodeCount(m.uiState.NodesView.GetHunterCount())
 	m.uiState.Header.SetProcessorCount(m.uiState.NodesView.GetProcessorCount())
 	if m.offlineSession != nil {
-		m.uiState.Header.SetTLSDecryption(m.offlineSession.TLSDecryptor != nil)
+		m.uiState.Header.SetTLSDecryption(!m.offlineAnalysisPending() && ((m.offlineView != nil && m.offlineView.TLSDecryptor != nil) || m.offlineSession.TLSDecryptor != nil))
 	} else {
 		m.uiState.Header.SetTLSDecryption(viper.GetBool("watch.tls_decryption_enabled"))
 	}

@@ -234,7 +234,7 @@ func (b *Builder) writeCompactBlockWithEnds(f *os.File, kind uint16, first Packe
 	binary.LittleEndian.PutUint16(h[20:], uint16(len(wires)))
 	binary.LittleEndian.PutUint16(h[22:], flags)
 	binary.LittleEndian.PutUint64(h[24:], n)
-	binary.LittleEndian.PutUint64(h[32:], 1)
+	binary.LittleEndian.PutUint64(h[32:], uint64(b.d.revision))
 	digest := sha256.Sum256(payload)
 	copy(h[40:], digest[:])
 	off, err := f.Seek(0, io.SeekCurrent)
@@ -272,7 +272,7 @@ func (d *diskDataset) compactWholeBlock(ctx context.Context, f *os.File, off, si
 		return nil, 0, err
 	}
 	fail := func(e error) ([]byte, uint64, error) { d.storage.releaseMemory(held); return nil, 0, e }
-	key := cacheKey{dataset: d, id: PacketID(off), kind: kind + 16}
+	key := cacheKey{dataset: d, id: PacketID(off), kind: kind + 16, revision: d.revision}
 	p := d.storage.cached(key)
 	cacheHit := p != nil
 	if p == nil {
@@ -295,7 +295,7 @@ func (d *diskDataset) compactWholeBlock(ctx context.Context, f *os.File, off, si
 	if err != nil {
 		return fail(err)
 	}
-	if string(h[:4]) != "LCB2" || binary.LittleEndian.Uint16(h[4:]) != kind || binary.LittleEndian.Uint16(h[6:]) != 72 || binary.LittleEndian.Uint16(h[22:]) > 1 || binary.LittleEndian.Uint64(h[32:]) != 1 || count == 0 || count > 4096 || first > math.MaxUint64-count || uint64(id) < first || uint64(id)-first >= count || n > max || (binary.LittleEndian.Uint16(h[22:]) == 0 && n != size-72) || columns != len(wires) || uint64(columns)*24 > n {
+	if string(h[:4]) != "LCB2" || binary.LittleEndian.Uint16(h[4:]) != kind || binary.LittleEndian.Uint16(h[6:]) != 72 || binary.LittleEndian.Uint16(h[22:]) > 1 || binary.LittleEndian.Uint64(h[32:]) != uint64(d.revision) || count == 0 || count > 4096 || first > math.MaxUint64-count || uint64(id) < first || uint64(id)-first >= count || n > max || (binary.LittleEndian.Uint16(h[22:]) == 0 && n != size-72) || columns != len(wires) || uint64(columns)*24 > n {
 		return fail(errors.New("compact invalid block header"))
 	}
 	if !cacheHit && binary.LittleEndian.Uint16(h[22:]) == 1 {

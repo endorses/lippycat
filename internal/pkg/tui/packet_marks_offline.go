@@ -10,7 +10,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/offline"
-	"github.com/endorses/lippycat/internal/pkg/tui/components"
 )
 
 // The worker starts immediately and is owned by its session, even when Bubble
@@ -35,9 +34,11 @@ func (m *Model) pinOfflineMarkQuery() (*offline.QueryPin, offline.Token, error) 
 		return nil, offline.Token{}, fmt.Errorf("offline capture is unavailable")
 	}
 	if m.offlineBrowse == nil {
-		b := &offlineBrowser{dataset: m.offlineSession.Dataset, results: make(map[*offlineBrowseResult]struct{})}
-		m.offlineSession.browser = b
-		m.offlineBrowse = &offlineBrowserState{owner: b}
+		state, err := m.packetBrowserFor(m.offlineDataset())
+		if err != nil {
+			return nil, offline.Token{}, err
+		}
+		m.offlineBrowse = state
 	}
 	b := m.offlineBrowse.owner
 	b.mu.Lock()
@@ -46,7 +47,7 @@ func (m *Model) pinOfflineMarkQuery() (*offline.QueryPin, offline.Token, error) 
 		return nil, offline.Token{}, fmt.Errorf("offline capture is closing")
 	}
 	if b.query == nil {
-		q, err := offline.AllPackets(context.Background(), b.dataset, offline.Token{Dataset: b.dataset.Generation(), Query: 1})
+		q, err := offline.AllPackets(context.Background(), b.dataset, offline.Token{Dataset: b.dataset.Generation(), Revision: b.dataset.Revision(), Query: 1})
 		if err != nil {
 			return nil, offline.Token{}, err
 		}
@@ -65,13 +66,24 @@ func (m *Model) startOfflineMarkRange(anchorID uint64, cursor uint64, replace bo
 	if err != nil {
 		return m.markError(err)
 	}
+	owner, err := m.offlineTaskOwner()
+	if err != nil {
+		return m.markError(errors.Join(err, pin.Close()))
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	state := &offlineMarkRangeState{cancel: cancel, done: make(chan struct{})}
-	prior := m.offlineSession.markRange
+	owner.mu.Lock()
+	if owner.closed {
+		owner.mu.Unlock()
+		cancel()
+		return m.markError(errors.Join(errors.New("offline capture is closing"), pin.Close()))
+	}
+	prior := owner.markRange
 	if prior != nil {
 		prior.cancel()
 	}
-	m.offlineSession.markRange = state
+	owner.markRange = state
+	owner.mu.Unlock()
 	msg := offlineMarkRangeMsg{session: m.offlineSession, state: state, token: token, revision: m.packetMarks.revision, replace: replace}
 	limit := uint64(m.packetMarks.maxPackets)
 	go func() {
@@ -87,8 +99,8 @@ func (m *Model) startOfflineMarkRange(anchorID uint64, cursor uint64, replace bo
 }
 
 func (m Model) handleOfflineMarkRange(msg offlineMarkRangeMsg) (Model, tea.Cmd) {
-	if m.offlineSession != msg.session || m.offlineLeaving || msg.session.markRange != msg.state ||
-		msg.token.Dataset != m.offlineSession.Dataset.Generation() || msg.token.Query != m.offlineQueryGeneration() ||
+	if m.offlineSession != msg.session || m.offlineLeaving || m.offlineTasks == nil || m.offlineTasks.markRange != msg.state ||
+		msg.token.Dataset != m.offlineDataset().Generation() || msg.token.Revision != m.offlineDisplayedRevision() || msg.token.Query != m.offlineQueryGeneration() ||
 		msg.revision != m.packetMarks.revision {
 		return m, nil
 	}
@@ -132,19 +144,7 @@ func (m *Model) startMarkedOfflineExport(path string, ids []uint64) tea.Cmd {
 		selected = append(selected, offline.PacketID(id-1))
 	}
 	sort.Slice(selected, func(i, j int) bool { return selected[i] < selected[j] })
-	ctx, cancel := context.WithCancel(context.Background())
-	state := &offlineExportState{cancel: cancel, done: make(chan struct{})}
-	m.offlineExport = state
-	m.offlineSession.export = state
-	m.uiState.SaveInProgress = true
-	go func() {
-		defer close(state.done)
-		defer cancel()
-		count, err := exportOfflinePCAP(ctx, path, func(ctx context.Context, visit func(offline.RawRecord) error) error {
-			return pin.IterateSelectedRaw(ctx, selected, visit)
-		})
-		err = errors.Join(err, pin.Close())
-		state.result = SaveCompleteMsg{Success: err == nil, Path: path, PacketsSaved: count, Error: err}
-	}()
-	return tea.Batch(m.uiState.Toast.ShowWithKey("Saving marked packets… Esc cancels export", components.ToastInfo, 0, components.ToastKeyFileSave), func() tea.Msg { <-state.done; return state.result })
+	return m.startOfflinePinnedExport(path, pin, func(ctx context.Context, visit func(offline.RawRecord) error) error {
+		return pin.IterateSelectedRaw(ctx, selected, visit)
+	}, "Saving marked packets… Esc cancels export")
 }

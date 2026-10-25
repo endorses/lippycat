@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	eventQueryHeaderBytes = 40
+	eventQueryHeaderBytes = 48
 	eventQueryEntryBytes  = 16
 	eventQueryMemory      = 512
 	eventLeaseMemory      = 96
 )
 
-var eventQueryMagic = [8]byte{'L', 'C', 'E', 'V', 'Q', 'R', 'Y', 1}
+var eventQueryMagic = [8]byte{'L', 'C', 'E', 'V', 'Q', 'R', 'Y', 2}
 
 type diskEventQuery struct {
 	mu                 sync.RWMutex
@@ -52,8 +52,8 @@ func (d *diskEventDataset) Query(ctx context.Context, spec EventQuerySpec) (resu
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
-	if spec.Token.Dataset != d.generation {
-		return nil, errors.New("offline event query dataset generation mismatch")
+	if spec.Token.Dataset != d.generation || spec.Token.Revision != d.Revision() {
+		return nil, errors.New("offline event query dataset generation/revision mismatch")
 	}
 	if err = d.validate(); err != nil {
 		return nil, err
@@ -172,7 +172,8 @@ func (q *diskEventQuery) header() [eventQueryHeaderBytes]byte {
 	binary.LittleEndian.PutUint64(h[8:16], uint64(q.token.Dataset))
 	binary.LittleEndian.PutUint64(h[16:24], uint64(q.token.Query))
 	binary.LittleEndian.PutUint64(h[24:32], q.count)
-	binary.LittleEndian.PutUint32(h[32:36], eventChecksum(h[:32], nil))
+	binary.LittleEndian.PutUint64(h[40:48], uint64(q.token.Revision))
+	binary.LittleEndian.PutUint32(h[32:36], eventChecksum(h[:32], h[40:48]))
 	return h
 }
 
@@ -205,7 +206,7 @@ func (q *diskEventQuery) Token() Token  { return q.token }
 func (q *diskEventQuery) Count() uint64 { return q.count }
 
 func (q *diskEventQuery) validate() error {
-	if q.closed {
+	if q.closed || q.token.Dataset != q.dataset.generation || q.token.Revision != q.dataset.Revision() {
 		return errors.New("offline event query closed")
 	}
 	if err := q.dataset.validate(); err != nil {
@@ -282,7 +283,7 @@ func (q *diskEventQuery) pageLocked(ctx context.Context, req PageRequest) (page 
 	if err = ctx.Err(); err != nil {
 		return page, err
 	}
-	if req.Token.Dataset != q.token.Dataset || req.Token.Query != q.token.Query {
+	if req.Token.Dataset != q.token.Dataset || req.Token.Revision != q.token.Revision || req.Token.Query != q.token.Query {
 		return page, errors.New("offline event page generation mismatch")
 	}
 	if err = q.validate(); err != nil {
@@ -461,7 +462,7 @@ func (p *EventQueryPin) Page(ctx context.Context, req PageRequest) (EventPage, e
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if p.closed {
-		return EventPage{}, errors.New("offline event query pin closed")
+		return EventPage{Token: req.Token, Row: req.Row}, errors.New("offline event query pin closed")
 	}
 	return p.query.pageLocked(ctx, req)
 }

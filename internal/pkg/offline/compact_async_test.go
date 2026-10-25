@@ -37,7 +37,7 @@ func TestAsyncCompactWriterSnapshotBarrierAndAmendment(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, dataset.Close()) }()
 	for _, id := range []PacketID{0, 1, 139} {
-		got, err := dataset.Detail(context.Background(), Token{Dataset: 17}, id)
+		got, err := dataset.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, id)
 		require.NoError(t, err)
 		require.EqualValues(t, id, got.Source.Sequence)
 		require.Equal(t, originalRaw, got.Packet.RawData)
@@ -114,9 +114,9 @@ func TestAsyncCompactWriterLargeRecordMatchesSynchronous(t *testing.T) {
 	dataset, err := b.Finish(context.Background())
 	require.NoError(t, err)
 	defer func() { require.NoError(t, dataset.Close()) }()
-	first, err := dataset.Detail(context.Background(), Token{Dataset: 17}, 0)
+	first, err := dataset.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 0)
 	require.NoError(t, err)
-	second, err := dataset.Detail(context.Background(), Token{Dataset: 17}, 1)
+	second, err := dataset.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 1)
 	require.NoError(t, err)
 	require.Equal(t, first.Packet, second.Packet)
 }

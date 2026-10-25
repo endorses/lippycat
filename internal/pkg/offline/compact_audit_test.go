@@ -85,7 +85,7 @@ func TestCompactAuditAmendmentReservesCallbackScratch(t *testing.T) {
 	dataset, err := b.Finish(context.Background())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, dataset.Close()) })
-	got, err := dataset.Detail(context.Background(), Token{Dataset: 17}, 0)
+	got, err := dataset.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 0)
 	require.NoError(t, err)
 	require.Equal(t, "amended", got.Packet.Info)
 }

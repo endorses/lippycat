@@ -41,7 +41,7 @@ func TestCompactDirectoryBatchAuthenticatesAllRows(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want[:], entry[32:])
 		require.GreaterOrEqual(t, binary.LittleEndian.Uint64(entry[:8]), uint64(compactHeaderBytes))
-		got, err := d.Detail(ctx, Token{Dataset: 17}, id)
+		got, err := d.Detail(ctx, Token{Revision: CompletedRevision, Dataset: 17}, id)
 		require.NoError(t, err)
 		require.EqualValues(t, id, got.Source.Sequence)
 		if id%3 == 0 {

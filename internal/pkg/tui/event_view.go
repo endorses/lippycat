@@ -37,7 +37,7 @@ func (m Model) handleEventBatchMsg(msg EventBatchMsg) (Model, tea.Cmd) {
 		}
 		hasLoss = hasLoss || len(batch.Losses) > 0 || batch.CompatibilityOmissions > 0
 	}
-	m.uiState.StatisticsView.SetTLSObservations(m.eventStore.TLSObservations())
+	m.syncTLSObservationStatistics()
 	if hasLoss {
 		stats := m.eventStore.Stats()
 		return m, m.uiState.Toast.Show(
@@ -150,7 +150,7 @@ func (m *Model) setCaptureView(view string) {
 // refreshes. If the displayed event has been evicted, keep the store's repaired
 // selection as the navigation anchor.
 func (m *Model) moveEventSelection(delta int) {
-	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+	if m.offlineSession != nil && m.offlineEvents() != nil {
 		v := m.uiState.EventsView
 		cursor := v.LogicalCursor()
 		if delta < 0 {
@@ -179,8 +179,8 @@ func (m *Model) syncEventsViewAt(now time.Time) {
 		return
 	}
 	m.uiState.EventsView.SetOfflinePacketNavigation(m.offlineSession != nil)
-	m.uiState.StatisticsView.SetTLSObservations(m.eventStore.TLSObservations())
-	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+	m.syncTLSObservationStatistics()
+	if m.offlineSession != nil && m.offlineEvents() != nil {
 		m.eventViewDirty = false
 		m.lastEventViewUpdate = now
 		if !m.uiState.EventsView.IsVirtual() {
@@ -225,7 +225,7 @@ func (m Model) hasRelatedPacket(event events.Event) bool {
 	env := m.relatedPacketEnvelope(event)
 	if m.offlineSession != nil {
 		flow := offlineEventFlow(env)
-		return m.offlineRelated != nil && m.offlineRelated.generation == m.offlineSession.Dataset.Generation() && m.offlineRelated.flow == flow && m.offlineRelated.known && m.offlineRelated.available
+		return m.offlineRelated != nil && m.offlineRelated.generation == m.offlineDataset().Generation() && m.offlineRelated.flow == flow && m.offlineRelated.known && m.offlineRelated.available
 	}
 	return m.packetStore.HasRelatedPacket(env)
 }
@@ -277,4 +277,16 @@ func (m *Model) prepareEventsViewLayout() {
 	} else {
 		m.uiState.EventsView.PrepareLayout(l.List.Width, l.List.Height, l.Details.Width, l.Details.Height)
 	}
+}
+
+func (m *Model) syncTLSObservationStatistics() {
+	if m.offlineSession != nil && !m.offlineAnalysisPending() {
+		stats := m.offlineSession.AnalysisStats
+		if m.offlineView != nil {
+			stats = m.offlineView.AnalysisStats
+		}
+		m.uiState.StatisticsView.SetOfflineTLSObservations(stats.TLSClientHelloCount, stats.TLSECHOfferedCount)
+		return
+	}
+	m.uiState.StatisticsView.SetTLSObservations(m.eventStore.TLSObservations())
 }

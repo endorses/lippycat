@@ -64,7 +64,7 @@ func (b *Builder) startCompactCompression(payload []byte, first PacketID, count,
 	binary.LittleEndian.PutUint32(w.header[16:], uint32(count))
 	binary.LittleEndian.PutUint16(w.header[20:], uint16(columns))
 	binary.LittleEndian.PutUint64(w.header[24:], uint64(len(payload)))
-	binary.LittleEndian.PutUint64(w.header[32:], 1)
+	binary.LittleEndian.PutUint64(w.header[32:], uint64(b.d.revision))
 	n := len(payload)
 	go func() {
 		defer close(w.done)

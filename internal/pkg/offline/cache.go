@@ -14,9 +14,10 @@ import (
 // an owned result, including cache hits. Both frames and their bookkeeping count
 // against the shared budget; transient decoding and selected pins count too.
 type cacheKey struct {
-	dataset *diskDataset
-	id      PacketID
-	kind    uint16
+	dataset  *diskDataset
+	id       PacketID
+	kind     uint16
+	revision AnalysisRevision
 }
 type cachedFrame struct {
 	key  cacheKey
@@ -92,7 +93,7 @@ func (d *diskDataset) readCachedRecord(ctx context.Context, f *os.File, off, siz
 		return 0, err
 	}
 	fail := func(err error) (uint64, error) { d.storage.releaseMemory(reservation); return 0, err }
-	key := cacheKey{d, id, kind}
+	key := cacheKey{dataset: d, id: id, kind: kind, revision: d.revision}
 	data := d.storage.cached(key)
 	if data == nil {
 		data = make([]byte, int(size))
@@ -144,9 +145,9 @@ func (p *DetailPin) Close() error {
 }
 func (d *diskDataset) PinDetail(ctx context.Context, token Token, id PacketID) (*DetailPin, error) {
 	d.mu.RLock()
-	if d.closed || token.Dataset != d.generation {
+	if d.closed || token.Dataset != d.generation || token.Revision != d.revision {
 		d.mu.RUnlock()
-		return nil, errors.New("offline dataset closed or generation mismatch")
+		return nil, errors.New("offline dataset closed or generation/revision mismatch")
 	}
 	detail, n, err := d.readDetail(ctx, id)
 	if err != nil {

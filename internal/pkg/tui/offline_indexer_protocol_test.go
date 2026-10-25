@@ -62,7 +62,7 @@ func TestOfflineIndexerPreservesPacketsWithoutFlowAnalysis(t *testing.T) {
 			require.Equal(t, uint64(len(records)), session.Dataset.Count())
 			require.Equal(t, uint64(len(records)), session.Dataset.Statistics().Packets)
 			for i, record := range records {
-				detail, err := session.Dataset.Detail(context.Background(), offline.Token{Dataset: 1}, offline.PacketID(i))
+				detail, err := session.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 1}, offline.PacketID(i))
 				require.NoError(t, err)
 				require.Equal(t, record, detail.Packet.RawData)
 				require.Equal(t, layers.LinkTypeEthernet, detail.Packet.LinkType)

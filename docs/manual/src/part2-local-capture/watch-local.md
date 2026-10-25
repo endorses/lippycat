@@ -177,12 +177,22 @@ lc watch file sip.pcap rtp.pcap signaling.pcap
 
 When opening multiple files, packets are merged and displayed in timestamp order.
 
-Opening indexes all accepted logical packets into private temporary storage.
-The progress modal shows reading, sorting and indexing phases, source count,
-logical packets/bytes, elapsed time, and temporary disk usage. Escape cancels and waits for cleanup; failed or cancelled
-replacement keeps the previous ready dataset. Browsing begins only after analysis
-finalizes successfully. Input BPF (`-f`) applies before indexing; reassembly and
-decapsulation can change logical packets relative to source records.
+Opening first normalizes and orders all accepted logical packets in private
+temporary storage. The progress modal shows reading, sorting and base-indexing
+phases, source count, logical packets/bytes, elapsed time, and temporary disk
+usage. Escape cancels opening and waits for cleanup; failure or cancellation
+before a complete base is ready preserves the previous dataset. Input BPF (`-f`)
+applies before indexing; reassembly and decapsulation can change logical packets
+relative to source records.
+
+Once the complete ordered base is ready, the modal closes and browsing starts
+while ordered analysis continues. Network addresses/ports, timestamps, lengths,
+raw details and export are available. Protocol, Info, application metadata,
+protocol statistics, Events, Calls and decrypted results show pending rather
+than absence. The header identifies analysis status and the packet view revision.
+Ctrl+X cancels analysis while retaining the base; Escape still cancels a filter
+or export. If analysis fails or is cancelled, the valid base remains usable;
+reopen the file to retry analysis.
 
 Every indexed packet remains navigable, filterable, and exportable after cache
 eviction. `watch.buffer_size` / `--buffer-size` limits live/remote packet rings and
@@ -201,15 +211,26 @@ and statistics. Removing/clearing filters also queries the complete dataset.
 Offline Events filters likewise scan its complete history asynchronously and
 preserve the last successful query on cancellation or error. Flow navigation
 uses bounded complete queries; packet export continues to use the packet query.
-Generic event history excludes file bodies. Packet and event storage finalize
-together; an event storage failure rejects the open instead of publishing a
-partial history.
+Generic event history excludes file bodies. Finalized packet metadata and event
+storage publish together as one completed analysis revision. An event storage
+failure retains the valid base and reports analysis failure; a partial event
+history is never published.
+
+While analysis is pending, filters proved to use base fields can run normally.
+Analysis-dependent filters are queued without changing the installed query or its
+labels. Completed analysis publishes finalized metadata, global protocol
+statistics, complete Events and bounded Calls together, then refreshes the
+requested or installed packet filter while preserving selection by PacketID.
+If that refresh fails or is cancelled, the previous query remains explicitly at
+base revision 0. Each query, detail and export keeps its own immutable revision;
+an export already in progress can finish across analysis publication.
 
 Backward timestamps are supported: normalized logical packets are ordered on disk
 before stateful analysis, preserving timestamps and using argument order, then
 original source sequence to break ties. Sorting uses bounded memory and shares
 the configured disk budget with datasets and queries. Malformed input, disk
-exhaustion and invalid BPF fail the open without publishing partial results.
+exhaustion and invalid BPF fail base construction without publishing partial
+packets. Later analysis failures preserve that complete base.
 Up to 64 regular-file
 sources are supported; PCAP and single-section, single-interface PCAPNG files may
 be mixed. Split multi-section/interface PCAPNG captures before opening them.
@@ -234,15 +255,16 @@ live/remote packet rings and retained event history; configure offline storage
 through the flags or YAML keys above.
 
 Disk accounting includes summaries, details, offsets, manifests, event records, and query files;
-the ready and replacement datasets share the budget. Allow space for both during
-replacement and for filtered query vectors; all-match queries use implicit IDs. Normalized storage can exceed source
+the ready and replacement datasets share the budget. Base and completed-analysis
+metadata also coexist under that budget, sharing validated source backings. Allow
+space for both revisions, replacements and filtered query vectors; all-match queries use implicit IDs. Normalized storage can exceed source
 size. Physical disk exhaustion, configured budget limits, and permission errors
 fail explicitly, preserving the last completed dataset/query. Free space or
 change the directory/budget and retry. Owned temporary files are removed on
 cancellation/shutdown; cleanup failures remain visible for retry. The cache budget
 is not a process RSS limit: reader/reassembly, analyzer, compatibility event/call histories, and
 Go runtime memory are additional. Offline TLS plaintext has a separate 16 MiB cap;
-exceeding it fails indexing.
+exceeding it fails analysis while preserving an already published base.
 
 Offline file storage keeps compact searchable metadata and reads unchanged packet
 bytes from the originally opened files. Keep inputs unchanged until the session
@@ -254,8 +276,8 @@ Choose `--offline-backing-policy snapshot` to create validated private input cop
 before indexing. Their full size counts against the disk budget. Gzip classic PCAP
 also needs a decompressed backing; transformed packets retain their effective
 bytes separately. There is no automatic snapshot fallback after a source error.
-The policy is frozen per open. Browsing and application filters become available
-only after the complete ordered analysis and its final metadata are ready.
+The policy is frozen per open. Base browsing does not weaken source-integrity
+checks; keep inputs unchanged through background analysis and any pinned exports.
 
 Press `w` to export the last completed matching query (or all packets with no
 packet filter). Export streams a fixed snapshot to nanosecond PCAP, preserving

@@ -26,7 +26,10 @@ type offlineOpenCompleteMsg struct {
 	session    *offlineIndexedSession
 	err        error
 }
-type offlineProgressMsg struct{ generation offline.DatasetGeneration }
+type offlineProgressMsg struct {
+	generation offline.DatasetGeneration
+	revision   offline.AnalysisRevision
+}
 type offlineCleanupMsg struct {
 	generation offline.DatasetGeneration
 	restart    *components.RestartCaptureMsg
@@ -39,18 +42,19 @@ type offlineCleanupMsg struct {
 // Shared by Bubble Tea's model copies and the program owner, including when
 // Run returns without a final Update. Workers remain owned until joined.
 type offlineController struct {
-	mu         sync.Mutex
-	cleanupMu  sync.Mutex
-	generation offline.DatasetGeneration
-	cancel     context.CancelFunc
-	done       chan struct{}
-	storage    *offline.Storage
-	limits     offline.ResourceLimits
-	sessions   map[*offlineIndexedSession]struct{}
-	installed  *offlineIndexedSession
-	progress   offline.Progress
-	closed     bool
-	index      func(context.Context, *offline.Storage, offline.DatasetGeneration, OfflineAnalysisConfig, func(offline.Progress)) (*offlineIndexedSession, error)
+	mu          sync.Mutex
+	cleanupMu   sync.Mutex
+	generation  offline.DatasetGeneration
+	cancel      context.CancelFunc
+	done        chan struct{}
+	storage     *offline.Storage
+	limits      offline.ResourceLimits
+	sessions    map[*offlineIndexedSession]struct{}
+	installed   *offlineIndexedSession
+	progress    offline.Progress
+	closed      bool
+	progressive func(context.Context, *offline.Storage, offline.DatasetGeneration, OfflineAnalysisConfig, func(offline.Progress), func(*offlineIndexedSession) error) (*offlineIndexedSession, *offlineRevisionSnapshot, error)
+	index       func(context.Context, *offline.Storage, offline.DatasetGeneration, OfflineAnalysisConfig, func(offline.Progress)) (*offlineIndexedSession, error)
 }
 
 func newOfflineController() *offlineController {
@@ -120,8 +124,8 @@ func (m Model) CloseOffline() error {
 	}
 	return m.offlineController.close()
 }
-func offlineProgressCmd(g offline.DatasetGeneration) tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return offlineProgressMsg{g} })
+func offlineProgressCmd(g offline.DatasetGeneration, revision offline.AnalysisRevision) tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return offlineProgressMsg{g, revision} })
 }
 func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 	if !m.offlineLeaving && (m.offlineCleanupFailed || m.offlineCancelledSession != nil) {
@@ -148,6 +152,11 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 		m.offlineController = newOfflineController()
 	}
 	c := m.offlineController
+	if m.offlineAnalysisState == "Analysis running" && m.offlineAnalysisPending() {
+		// Replacement cancels the prior ordered worker. If opening the new
+		// input fails, its retained base must not claim analysis is still running.
+		m.offlineAnalysisState = "Analysis cancelled; complete base retained"
+	}
 	msg.Config.Inputs = append([]string(nil), msg.Config.Inputs...)
 	msg.Config.Analysis.SourceOrdering = append([]string(nil), msg.Config.Analysis.SourceOrdering...)
 	c.mu.Lock()
@@ -165,7 +174,7 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 	c.cancel = cancel
 	done := make(chan struct{})
 	c.done = done
-	c.progress = offline.Progress{Token: offline.Token{Dataset: g}, State: offline.Opening, Sources: uint32(len(msg.Config.Inputs))}
+	c.progress = offline.Progress{Token: offline.Token{Dataset: g, Revision: offline.BaseRevision}, State: offline.Opening, Sources: uint32(len(msg.Config.Inputs))}
 	c.mu.Unlock()
 	m.cancelOfflineBrowserReads()
 	m.cancelOfflineEventReads()
@@ -174,7 +183,7 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 	m.offlineStarted = time.Now()
 	m.uiState.SetCapturing(false)
 	m.offlineGeneration = g
-	m.offlineProgress = offline.Progress{State: offline.Opening, Sources: uint32(len(msg.Config.Inputs))}
+	m.offlineProgress = offline.Progress{Token: offline.Token{Dataset: g, Revision: offline.BaseRevision}, State: offline.Opening, Sources: uint32(len(msg.Config.Inputs))}
 	m.offlinePending = msg
 	if m.offlineSession != nil {
 		m.installOfflineSettings(m.offlineInstalled)
@@ -188,6 +197,8 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 	m.uiState.StreamingSave = false
 	m.uiState.Footer.SetStreamingSave(false)
 	m.uiState.Header.SetStreamingSave(false)
+	result := make(chan tea.Msg, 1)
+	analysis := make(chan offlineAnalysisCompleteMsg, 1)
 	worker := func() tea.Msg {
 		defer close(done)
 		if prior != nil {
@@ -242,27 +253,52 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 		if limits != msg.Limits {
 			return offlineOpenCompleteMsg{generation: g, err: errors.New("offline resource limits cannot change while a session is installed")}
 		}
-		index := c.index
-		if index == nil {
-			index = indexOfflineDataset
-		}
-		s, err := index(ctx, storage, g, msg.Config, func(p offline.Progress) {
+		report := func(p offline.Progress) {
 			c.mu.Lock()
 			if c.generation == g {
 				c.progress = p
 			}
 			c.mu.Unlock()
+		}
+		own := func(s *offlineIndexedSession) {
+			if s != nil {
+				c.mu.Lock()
+				c.sessions[s] = struct{}{}
+				c.mu.Unlock()
+			}
+		}
+		if c.index != nil {
+			s, err := c.index(ctx, storage, g, msg.Config, report)
+			own(s)
+			return offlineOpenCompleteMsg{g, s, err}
+		}
+		index := c.progressive
+		if index == nil {
+			index = indexOfflineProgressiveDataset
+		}
+		published := false
+		s, snapshot, err := index(ctx, storage, g, msg.Config, report, func(s *offlineIndexedSession) error {
+			own(s)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			published = true
+			result <- offlineBaseReadyMsg{offlineOpenCompleteMsg: offlineOpenCompleteMsg{g, s, nil}, analysis: analysis}
+			return nil
 		})
-		if s != nil {
-			c.mu.Lock()
-			c.sessions[s] = struct{}{}
-			c.mu.Unlock()
+		own(s)
+		if published {
+			analysis <- offlineAnalysisCompleteMsg{generation: g, revision: offline.CompletedRevision, session: s, snapshot: snapshot, err: err}
+			return nil
 		}
 		return offlineOpenCompleteMsg{g, s, err}
 	}
-	result := make(chan tea.Msg, 1)
-	go func() { result <- worker() }()
-	return m, tea.Batch(func() tea.Msg { return <-result }, offlineProgressCmd(g))
+	go func() {
+		if message := worker(); message != nil {
+			result <- message
+		}
+	}()
+	return m, tea.Batch(func() tea.Msg { return <-result }, offlineProgressCmd(g, offline.BaseRevision))
 }
 func (m Model) cancelOffline() (Model, tea.Cmd) {
 	c := m.offlineController
@@ -312,6 +348,17 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.detachOfflineEvents()
 	old := m.offlineSession
 	m.offlineSession = msg.session
+	m.offlineView = nil
+	m.offlinePacketViews = nil
+	m.offlineFilterOwners = nil
+	m.offlineRelatedOwner = nil
+	m.offlineTasks = nil
+	previousExport := m.offlineExport
+	m.offlineExport = nil
+	m.uiState.SaveInProgress = markedExportActive(m.markedExports.current())
+	m.offlinePendingPacketFilter = nil
+	m.offlineAnalysisState, m.offlineAnalysisError = "Analysis complete", ""
+	m.offlineAnalysisCancelled = false
 	m.publishOfflineStatistics(nil)
 	m.offlineBrowse = nil
 	m.offlineFilter = nil
@@ -340,6 +387,9 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.lastSyncedFilteredCount = 0
 	m.lastFilterState = false
 	m.eventStore = msg.session.EventStore
+	if m.eventStore == nil {
+		m.eventStore = store.NewEventStore(m.offlinePending.Config.EventCapacity)
+	}
 	m.eventStore.SetKindFilter(eventKindsForProtocol(m.uiState.SelectedProtocol.Name))
 	m.callTracker = msg.session.Tracker
 	m.callStore = store.NewCallStore(m.maxOfflineCalls)
@@ -353,27 +403,9 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.pendingRemoteEvents.clear()
 	m.eventViewStore = nil
 	m.syncEventsView()
-	stats := msg.session.Dataset.Statistics()
-	m.uiState.PacketList.SetCaptureStartTime(stats.First)
-	convert := func(in map[string]uint64) map[string]int64 {
-		out := make(map[string]int64, len(in))
-		for k, v := range in {
-			out[k] = int64(v)
-		}
-		return out
-	}
-	m.statistics.ProtocolCounts.Replace(convert(stats.Protocols))
-	m.statistics.SourceCounts.Replace(convert(stats.SourceCounts))
-	m.statistics.DestCounts.Replace(convert(stats.DestinationCounts))
-	m.statistics.TotalPackets = int64(stats.Packets)
-	m.statistics.TotalBytes = int64(stats.Bytes)
-	m.statistics.MinPacketSize = int(stats.MinPacketSize)
-	m.statistics.MaxPacketSize = int(stats.MaxPacketSize)
-	m.uiState.StatisticsView.SetStatistics(m.statistics)
-	// The dataset bypasses the live bridge. Publish its statistics without
-	// carrying capture loss or bridge health from the previous session.
-	m.uiState.StatisticsView.GetDropStats().Reset()
-	m.uiState.StatisticsView.SetBridgeStats(nil)
+	m.installOfflineGlobalStatistics()
+	m.uiState.PacketList.SetAnalysisPending(msg.session.Dataset.Revision() == offline.BaseRevision)
+	m.uiState.DetailsPanel.SetAnalysisPending(msg.session.Dataset.Revision() == offline.BaseRevision)
 	decryptor := msg.session.TLSDecryptor
 	m.uiState.DetailsPanel.SetDecryptedDataGetter(func(a, b, c, d string) ([]byte, []byte) {
 		if decryptor == nil {
@@ -382,7 +414,11 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 		return decryptor.GetDecryptedData(a, b, c, d)
 	})
 	m.updateDetailsPanel()
-	return m, func() tea.Msg { return offlineCleanupMsg{err: c.dispose(old)} }
+	cleanup := func() tea.Msg { return offlineCleanupMsg{err: c.dispose(old)} }
+	if previousExport != nil {
+		return m, tea.Batch(cleanup, m.uiState.Toast.ShowWithKey("Offline dataset ready", components.ToastInfo, components.ToastDurationShort, components.ToastKeyFileSave))
+	}
+	return m, cleanup
 }
 
 // Cancellation is expected, but joined analyzer/cleanup failures still need to

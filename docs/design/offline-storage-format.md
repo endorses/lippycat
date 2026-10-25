@@ -1,19 +1,22 @@
 # Offline temporary storage formats
 
-## Complete metadata event history: schema 1
+## Complete metadata event history: schema 2
 
 Events use their own versioned stream alongside the packet dataset. The owning
-session publishes both only after completed analysis and successful finalization.
+session publishes the event dataset with completed analysis revision 1 after
+successful finalization. Base revision 0 has no event dataset.
 This format is private temporary storage, without cross-process reuse. Its schema
 version is independent of packet schemas and of the typed protocol event version.
 
 The private event directory contains `events.data`, `events.offsets`, and a
-completion manifest. Data and offsets begin with 32-byte little-endian headers:
+completion manifest. Data and offsets begin with 40-byte little-endian headers:
 8-byte magic (`LCEVDAT` or `LCEVOFF`, followed by byte 1), schema u16 at byte 8,
 zero reserved bytes through byte 15, dataset generation u64 at byte 16, and row
-count u64 at byte 24. Offset entries contain a u64 data offset and u64 frame size.
-The 64-byte completion manifest binds the generation, count, and stream lengths;
-readers validate it before serving records.
+count u64 at byte 24, and completed analysis revision u64 at byte 32. Offset
+entries contain a u64 data offset and u64 frame size. The 64-byte completion
+manifest binds the generation, count, stream lengths and revision (u64 at byte
+56). Its CRC32 at byte 48 covers bytes 0–47 and 56–63. Readers validate it before
+serving records. Schema 1 is rejected; temporary session migration is not supported.
 
 Each event frame has a 32-byte header: `LCEVROW` followed by byte 1, schema u16,
 zero reserved u16, payload length u32, one-based arrival row ID u64, IEEE CRC32
@@ -35,13 +38,17 @@ vectors stay on disk; all-event queries use implicit row IDs. Borrowed pages and
 details carry idempotent leases, and pinned queries retain their dataset until
 readers release them. Cleanup releases disk accounting only after removal and
 preserves ownership when removal fails so it can be retried.
+The 48-byte event query header includes revision at byte 40 in its checksum.
+Pages, details and pins preserve the exact generation/revision/query token.
 
-## Schema 3: legacy differential oracle
+## Schema 7: legacy differential oracle
 
-Version 3 includes the RADIUS presentation metadata in `PacketDisplay`. Readers
-reject the previous version 1 before decoding its payload. Version 2 identifies
-the separate compact format below; no migration or persisted-session reuse is
-provided.
+Version 7 includes current RADIUS, SIP/SMS, observation-domain and ECH metadata in
+`PacketDisplay`. Earlier oracle versions are rejected before decoding. Packet
+payload layout is unchanged by the addition of analysis revision; the completion
+manifest carries that revision and analysis version `2`. Compact major version 2
+identifies the separate format below; no migration or persisted-session reuse is
+provided for either format.
 
 Phase 2 replaces the provisional JSON payload and 20-byte frame from the initial
 contract with the binary format below. Standard JSON unmarshalling does not enforce decoded
@@ -56,7 +63,7 @@ All integers are little endian. Each stream starts with a 16-byte header:
 | Byte offset | Width | Value                             |
 | ----------- | ----- | --------------------------------- |
 | 0           | 8     | `LCODATA` followed by a zero byte |
-| 8           | 2     | Schema version, currently 3       |
+| 8           | 2     | Schema version, currently 7       |
 | 10          | 2     | Stream kind                       |
 | 12          | 4     | Reserved, must be zero            |
 
@@ -107,7 +114,7 @@ normalized to UTC on decode. Monotonic clock readings and display time zones are
 not persisted. This retains precision beyond UnixNano's range and supports the
 zero time and timestamps outside JSON's four-digit year restriction.
 
-`TestCodecSchemaV3Shape` pins a SHA-256 fingerprint of both wire structures and
+`TestCodecSchemaV7Shape` pins a SHA-256 fingerprint of both wire structures and
 all recursively included protocol metadata field names, types and order. Any
 metadata field addition or layout change fails the test and requires an explicit
 schema-version decision. `TestCodecAllMetadataRoundTrip` fills every supported
@@ -122,25 +129,29 @@ the cache is not a hard RSS limit. Storage must reserve serialization and read
 working space under its shared cache policy before invoking the codec, in addition
 to accounting for retained and pinned records. Oversized records fail explicitly.
 
-## Schema 2: compact completed dataset
+## Schema 2.7: compact immutable packet revisions
 
-The production `watch file` path uses `NewCompactBuilder` and schema 2 after the
-phase-4 cutover gate. Schema 3 remains a differential test oracle. Both schemas
-publish only completed datasets.
-There is no persisted-session opener, cross-process reuse, or partial-analysis
-publication. Schema 3 is never interpreted as schema 2.
+The production `watch file` path uses schema 2.7 for complete immutable packet
+revisions. `NewCompactBaseBuilder` finalizes base revision 0 before ordered
+analysis; `NewCompactRevisionBuilder` creates independent completed revision 1
+metadata over shared validated backings. `NewCompactBuilder` still creates a
+completed revision directly for synchronous callers. Oracle schema 7 remains a
+differential test backend. There is no persisted-session opener or cross-process
+reuse; oracle schema 7 is never interpreted as compact schema 2.
 
 This implementation refines the **unshipped phase-0 layout proposal**. Base and
-analysis columns share completed row blocks; text and compound values use
+analysis columns share row blocks within each revision; text and compound values use
 block-local arenas; a checksummed 64-byte entry per packet provides direct row
 lookup; bounded source, label and context registries are recorded in the manifest.
 The proposed separate base/analysis/text/registry streams and 72-byte global
 block-directory entries were not implemented. Combining finalized columns keeps
 row navigation and metadata amendments within the existing completed-dataset
-lifecycle. Block-local references avoid a dataset-sized arena index, while the
+lifecycle of that immutable revision. Block-local references avoid a dataset-sized arena index, while the
 row directory permits replacement blocks without copying unchanged packet bytes.
-A future revision-aware overlay or persistent cache requires an explicit format
-and API change rather than assuming the earlier proposal exists on disk.
+Each revision has independent metadata files and statistics. Shared backing
+leases retain source handles, derived bytes and owned directories across revision
+retirement; a pinned base export survives completed publication. Both revisions
+count toward configured shared storage limits. A persistent cache remains deferred.
 
 The implementation is defined by `internal/pkg/offline/compact.go`,
 `compact_block.go`, `compact_value.go`, `compact_labels.go`,
@@ -150,15 +161,15 @@ The implementation is defined by `internal/pkg/offline/compact.go`,
 
 Each of the three indexed files begins with this 32-byte little-endian header:
 
-| Offset | Width | Value              |
-| ------ | ----- | ------------------ |
-| 0      | 8     | `LCOV2DAT`         |
-| 8      | 2     | Schema major: 2    |
-| 10     | 2     | Schema minor: 2    |
-| 12     | 2     | Stream kind        |
-| 14     | 2     | Flags: zero        |
-| 16     | 8     | Dataset generation |
-| 24     | 8     | Reserved: zero     |
+| Offset | Width | Value                           |
+| ------ | ----- | ------------------------------- |
+| 0      | 8     | `LCOV2DAT`                      |
+| 8      | 2     | Schema major: 2                 |
+| 10     | 2     | Schema minor: 7                 |
+| 12     | 2     | Stream kind                     |
+| 14     | 2     | Flags: zero                     |
+| 16     | 8     | Dataset generation              |
+| 24     | 8     | Exact analysis revision: 0 or 1 |
 
 The filenames and stream kinds are `summaries` = 1 (combined completed row
 columns), `details` = 2 (sparse protocol overrides), and `offsets` = 3 (direct row
@@ -170,18 +181,18 @@ Ordering keys and query vectors retain their existing independent formats.
 
 Typed blocks begin with 72 bytes:
 
-| Offset | Width | Value                        |
-| ------ | ----- | ---------------------------- |
-| 0      | 4     | `LCB2`                       |
-| 4      | 2     | Block kind: 1 or 4           |
-| 6      | 2     | Header size: 72              |
-| 8      | 8     | First packet ID              |
-| 16     | 4     | Row count                    |
-| 20     | 2     | Column count                 |
-| 22     | 2     | Encoding: 0 raw, 1 DEFLATE   |
-| 24     | 8     | Expanded payload byte length |
-| 32     | 8     | Analysis revision: 1         |
-| 40     | 32    | SHA-256 of expanded payload  |
+| Offset | Width | Value                           |
+| ------ | ----- | ------------------------------- |
+| 0      | 4     | `LCB2`                          |
+| 4      | 2     | Block kind: 1 or 4              |
+| 6      | 2     | Header size: 72                 |
+| 8      | 8     | First packet ID                 |
+| 16     | 4     | Row count                       |
+| 20     | 2     | Column count                    |
+| 22     | 2     | Encoding: 0 raw, 1 DEFLATE      |
+| 24     | 8     | Expanded payload byte length    |
+| 32     | 8     | Exact analysis revision: 0 or 1 |
+| 40     | 32    | SHA-256 of expanded payload     |
 
 Packet IDs are zero-based and implicit within a block as first ID plus row
 position. The writer buffers at most 128 rows and closes a block earlier when
@@ -193,9 +204,11 @@ Metadata replacement blocks currently contain one row. Both encoded payload and
 decoded allocations must fit configured limits; an oversized first row fails
 explicitly. Buffered rows and eventual disk bytes are charged before admission.
 
-Schema 2.2 appends RADIUS to the sparse metadata override sequence, using mask
-bit 5. Its owned attribute slices participate in cloning and memory accounting.
-Readers reject earlier minor versions, including 2.1, before reading blocks.
+Schema 2.7 binds stream/block identities to the exact analysis revision. Current
+rows also retain observation-domain value/availability, SIP/SMS and ECH metadata.
+RADIUS remains at mask bit 5 in the sparse metadata override sequence; its owned
+attribute slices participate in cloning and memory accounting. Readers reject
+all earlier minor versions, including 2.6, before reading blocks.
 The optional independent DEFLATE blocks introduced in 2.1 remain supported;
 unknown encoding flags are rejected. The directory stores physical block
 lengths; the header stores the exact expanded length, bounded before allocation.
@@ -264,14 +277,19 @@ order.
 | 28  | NodeRef                    | u32       |
 | 29  | DeviceRef                  | u32       |
 | 30  | ContextRef                 | u32       |
+| 31  | ObservationDomain          | u32       |
+| 32  | ObservationDomainKnown     | u8        |
 
 `Argument` indexes the exact ordered source list, including repeated arguments.
 `Sequence` is the per-argument normalized logical sequence; `PhysicalOrdinal`
 counts original frames. `Interface` preserves source/reassembly attribution.
 `Captured`, `Original`, `Timestamp` and `LinkType` are effective export metadata;
 `Length` independently retains the display length. Address and port strings,
-Protocol and Info are exact presentation/search values, preserving empty ports
-versus the string `0` and all existing accessor quirks.
+Protocol and Info in completed revision 1 are exact presentation/search values,
+preserving empty ports versus the string `0` and all existing accessor quirks.
+Base revision 0 retains only fields declared B-ready by the field inventory;
+analysis-dependent columns and protocol metadata are pending, not evidence of
+absence. Consumers must check the revision before interpreting them.
 
 `Locator` encodes BackingID u32, Offset i64, Length u32 and Digest fixed32, in that
 order. Backing IDs start at one. Offsets refer to the originally owned handle or
@@ -304,7 +322,7 @@ summary and raw iteration do not decode protocol overrides. Raw reads validate
 the effective source bytes with the backing registry, including source-change
 checks and the per-record SHA-256 digest.
 
-Block-cache keys use dataset identity, block offset and block kind; cached blocks
+Block-cache keys use dataset identity, exact analysis revision, block offset and block kind; cached blocks
 remain immutable. Full column/arena and checksum validation occurs before cache
 admission; hits select the requested row from that validated encoding. Cached
 encodings, read/decode scratch, owned rows/details,
@@ -365,7 +383,9 @@ backend restores persisted list fields, applies overrides, and returns owned raw
 bytes. Reassembled SIP messages, RTP attribution and other metadata that cannot
 be reproduced from one packet remain bounded retained content in overrides.
 Separate bounded session event/call and TLS-decryption state keep their existing
-ownership; this format does not serialize new event/call snapshot streams.
+ownership for compatibility consumers; completed Events use the separate metadata
+history format above and Calls remain bounded. Packet blocks do not contain those
+history streams.
 
 `AmendVoIP` updates Protocol, Info, the narrow projection and the VoIP override
 without decoding or rewriting source bytes. It appends replacement row/metadata
@@ -377,7 +397,10 @@ are rebuilt from amended rows before publication.
 `TestCompactValueSchemaFingerprint` pins field IDs/order, exact types, widths,
 value representation and sparse projection groups with SHA-256. Field coverage,
 round-trip, fixed-width golden-byte, nil/empty, malformed-container and truncation
-tests supplement this check. The schema-3 fingerprint remains independent.
+tests supplement this check. The oracle schema-7 fingerprint remains independent.
+The explicit VoIP sequence appends `CSeqNumber`, `ViaBranch`, and typed `SMS`
+after `MergeFromCallID`; SMS preserves segment/concatenation/assembly metadata.
+The TLS sequence appends `ClientHelloObserved` and `ECHOffered` after `RiskFlags`.
 
 ### Bounded registries and completion manifest
 
@@ -391,13 +414,14 @@ TimestampMissing remains in the inline context; parser-domain fields come from
 the registry. Inconsistent or out-of-range references are errors.
 
 The private JSON `manifest` has these actual top-level fields:
-`Version` (2), `Generation`, `Sources`, `Count`, `Statistics`, `StreamLengths`,
-`AnalysisVersion` (`"1"`), `Complete` (true), `CompactRegistries`, and `Compact`.
+`Version` (2), `Generation`, `Revision`, `Sources`, `Count`, `Statistics`, `StreamLengths`,
+`AnalysisVersion` (`"2"`), `Complete` (true), `CompactRegistries`, and `Compact`.
 `CompactRegistries` contains `Labels` and `Contexts`; internal accounting fields
-are not serialized. `Compact` contains `SchemaMajor` (2), `SchemaMinor` (2),
+are not serialized. `Compact` contains `SchemaMajor` (2), `SchemaMinor` (7),
 `NormalizationVersion`, `AnalyzerVersion`, `DecoderVersion`,
-`FilterSemanticsVersion` (each `"1"`), `BaseComplete` and `AnalysisComplete`
-(both true), `AnalysisRevision` (1), `FileSHA256`, and `Backings`.
+`FilterSemanticsVersion` (each `"1"`), `BaseComplete` (true), `AnalysisComplete`
+(true only for completed revision 1), `AnalysisRevision` (0 or 1), `FileSHA256`,
+and `Backings`.
 
 `StreamLengths` and `FileSHA256` cover `summaries`, `details` and `offsets`, including
 headers and superseded blocks. Each backing entry records `ID`, `Kind`, `Size`,
@@ -432,7 +456,14 @@ inflater state before allocation. Raw exports use the same block reader, decode
 only raw/provenance columns, and coalesce at most 64 owned source reads within
 256 KiB (larger admitted records use singleton reads). Every locator still gets
 its integrity check, and callback slices cannot grow into adjacent packet bytes.
-Query format is unchanged; there are no bitset/rank or posting files and no phase-5 revisions. Source,
+Packet query format is version 2. Its 32-byte vector header binds generation,
+query identity and exact analysis revision; the completion manifest uses a
+48-byte token/count/revision prefix. There are no bitset/rank or posting files.
+Base query admission checks field dependencies before scanning or creating files.
+Protocol, Info, application metadata and opaque predicates require completed
+revision 1; base-only expressions and raw iteration can use revision 0. `Position`
+uses ordered disk IDs to locate a stable PacketID without a full-history map.
+Source,
 snapshot/decompression and derived bytes, buffered blocks, transposition scratch,
 queries, overrides, registries and retained replacement sessions remain part of
 resource accounting. No compact full `PacketDisplay` records or unchanged packet

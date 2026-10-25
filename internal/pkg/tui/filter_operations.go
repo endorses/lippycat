@@ -118,7 +118,7 @@ func (m Model) handleEventFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		value := input.Value()
-		if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+		if m.offlineSession != nil && m.offlineEvents() != nil {
 			descriptions := m.eventFilterDescriptions()
 			if value == "" {
 				descriptions = nil
@@ -183,6 +183,9 @@ func (m Model) handleEventFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleEnterEventFilterMode() (Model, tea.Cmd) {
+	if m.offlineAnalysisPending() {
+		return m, m.uiState.Toast.Show("Event filters pending ordered analysis", components.ToastInfo, components.ToastDurationLong)
+	}
 	m.uiState.EventFilterMode = true
 	m.uiState.EventFilterInput.Activate()
 	m.uiState.EventFilterInput.Clear()
@@ -192,7 +195,10 @@ func (m Model) handleEnterEventFilterMode() (Model, tea.Cmd) {
 }
 
 func (m Model) handleRemoveLastEventFilter() (Model, tea.Cmd) {
-	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+	if m.offlineAnalysisPending() {
+		return m, m.uiState.Toast.Show("Event filters pending ordered analysis", components.ToastInfo, components.ToastDurationLong)
+	}
+	if m.offlineSession != nil && m.offlineEvents() != nil {
 		descriptions := m.eventFilterDescriptions()
 		if len(descriptions) == 0 {
 			return m, nil
@@ -208,7 +214,10 @@ func (m Model) handleRemoveLastEventFilter() (Model, tea.Cmd) {
 }
 
 func (m Model) handleClearAllEventFilters() (Model, tea.Cmd) {
-	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+	if m.offlineAnalysisPending() {
+		return m, m.uiState.Toast.Show("Event filters pending ordered analysis", components.ToastInfo, components.ToastDurationLong)
+	}
+	if m.offlineSession != nil && m.offlineEvents() != nil {
 		if len(m.eventFilterDescriptions()) == 0 {
 			return m, nil
 		}

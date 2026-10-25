@@ -21,10 +21,15 @@ func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 			return m.uiState.Toast.Show("Invalid filter: "+err.Error(), components.ToastError, components.ToastDurationLong)
 		}
 		chain := m.packetStore.FilterChain.Clone()
+		var protocol *components.Protocol
+		if pending := m.offlinePendingPacketFilter; pending != nil {
+			chain = pending.chain.Clone()
+			protocol = pending.protocol
+		}
 		if filter != nil {
 			chain.Add(filter)
 		}
-		return m.startOfflineFilter(chain, nil)
+		return m.startOfflineFilter(chain, protocol)
 	}
 	// NOTE: We do NOT clear existing filters - this allows filter stacking
 	// Use 'c' to clear all filters or 'C' to remove the last filter

@@ -7,7 +7,9 @@ existing filter constructors, including their current quirks.
 
 ## Filter inventory and parity
 
-Field names are case-sensitive at the record interface. Unknown strings return
+The accessor rules below apply to completed analysis. A base revision cannot
+answer analysis-dependent filters with these missing-value defaults; query
+readiness is checked first. Field names are case-sensitive at the record interface. Unknown strings return
 `""`; unknown/missing numeric values return zero. `RecordType()` is `packet`.
 
 | Kind    | Names / aliases                                                                                                               | Source                                                     |
@@ -63,9 +65,14 @@ and inventory/parity cases. The summary is not a full detail record.
 ## Dataset, query and session ownership
 
 Packet IDs and row counts are uint64, zero-based within one dataset generation.
+Complete ordered base revision 0 and completed-analysis revision 1 preserve the
+same PacketIDs and order. A published revision is immutable; metadata is never
+amended in place after publication. `Dataset.Revision()` identifies the view.
 Query rows refer to a completed ordered match set, never cache positions. Every
-async envelope, including errors, carries dataset generation, query generation
-and request ID (`Token`). Generation/request zero is reserved for synchronous
+async envelope, including errors, carries dataset generation, exact analysis
+revision, query generation and request ID (`Token`). Revision zero means base;
+it is never a wildcard for the current revision. A base token cannot read a
+completed dataset, including via a pin. Generation/request zero is reserved for synchronous
 construction; model-owned requests use monotonically increasing nonzero values.
 Page requests bound both rows and decoded bytes; only bounded page indices may
 be converted to int. An oversized first row fails explicitly rather than making
@@ -82,6 +89,16 @@ bounded maps (initially 1,000 protocols and 10,000 entries per address counter,
 matching the current UI), plus 1 MiB of owned key bytes per map; packet/byte totals and min/max packet sizes are exact,
 capped source/destination frequency and cardinality metrics are identified
 separately. No page read updates statistics or reruns analysis.
+`Query.Position` locates a stable PacketID by bounded lookup in ordered query IDs
+without a dataset-sized map, preserving selection across revision publication.
+
+Base queries admit only expressions proved to use B-ready fields from the
+[field inventory](watch-file-packet-field-inventory.md). Protocol, Info, generic
+text, application metadata/presence and opaque predicates return typed
+`ErrAnalysisPending` before scanning or creating query files. Base counts, bytes,
+sizes, endpoints, network details and raw export are available. Protocol
+statistics, Events, Calls and decrypted results remain pending until completed
+analysis. Pending is distinct from an absent value.
 
 Related-flow lookup initially scans summaries with bounded memory. Preserve
 `store/packet_flow.go`: normalize mapped IPv4, canonicalize both endpoint
@@ -101,16 +118,26 @@ Wait-context cancellation alone must not leak the worker: the caller still owns
 Session and must Cancel/Close. A completed dataset is transferred to the caller;
 Session.Close must not delete transferred storage.
 
-The model keeps the previous dataset, configuration, statistics and bounded
-call/event histories until replacement succeeds. The TUI session adapter owns
-isolated analyzer state and these histories and publishes them atomically with
-the Dataset. Obsolete successes are closed. Query/export/detail reads pin their
-snapshot; close waits for readers before deleting its private directory. Filter
+The model keeps the previous dataset until a complete new ordered base succeeds.
+The TUI progressive adapter then installs that base and continues bounded ordered
+analysis without a modal dialog. It publishes finalized packets, statistics,
+complete Events and bounded Calls together as one immutable completed snapshot.
+Analysis failure or cancellation retains the valid base with explicit status;
+reopening is the retry path. Failed candidate resources remain owned for cleanup
+retry. No provisional scan-time packet IDs are exposed.
+
+One session lifecycle owns the base, completed snapshot, normalized source
+handles, ordered replay and workers. Obsolete/abandoned successes are closed.
+Query/export/detail reads pin their original immutable revision; publication
+retires only view work, preserving already pinned exports. Whole-session cleanup
+cancels analysis/exports/read work before joining query owners and closes backing
+handles only after readers join. Shared backing leases survive retirement of the
+base metadata directory. Filter
 failure/cancellation leaves the prior completed query and filter description
 installed. Progress is coalesced, never an authoritative packet/event channel;
 physical byte percentages appear only when measurable.
 
-## Record and disk schema v1
+## Record and query schemas
 
 Phase 2 refines the provisional JSON record proposal into the bounded binary
 [storage format](offline-storage-format.md). Binary decoding validates decoded
@@ -118,7 +145,7 @@ container allocation before allocating; checksummed 32-byte frames replace the
 provisional 20-byte JSON frames. The schema layout is pinned by a recursive
 fingerprint test, so changing protocol metadata cannot silently change storage.
 
-Private session directories contain separate `summaries`, `details`, `offsets`,
+Oracle schema 7 private session directories contain separate `summaries`, `details`, `offsets`,
 query match vectors and completion manifests. Summary/detail streams use the
 16-byte `LCODATA` header, and offsets use kind 3 followed by fixed 32-byte
 entries: summary offset/length and detail offset/length, all little-endian uint64.
@@ -126,15 +153,15 @@ The offsets stay on disk and frame reads validate stream headers, lengths,
 record IDs, checksums and allocation budgets before exposing decoded records.
 
 The completed JSON dataset manifest records schema/analysis versions,
-generation, source identities, count, statistics, stream lengths and
+generation, revision, source identities, count, statistics, stream lengths and
 `Complete=true`. Timestamps use seconds/nanoseconds DTOs. Data writers are
 synced, closed and reopened read-only before the manifest is flushed, closed and
 atomically renamed into place. This package does not reopen abandoned sessions;
 only a successfully completed builder returns a dataset. Any construction error
 makes the builder terminal, and its owner must close it to reclaim storage.
 
-Query vectors use a 24-byte header: seven bytes `LCQUERY`, version byte 1,
-dataset generation and query generation as little-endian uint64. Ordered uint64
+Packet query vectors use a 32-byte header: seven bytes `LCQUERY`, version byte 2,
+dataset generation, query generation and exact analysis revision as little-endian uint64. Ordered uint64
 match IDs follow; reads validate size, bounds and increasing IDs. A separate
 streamed binary completion manifest includes token, count, complete statistics
 and frozen descriptions, published by rename after flush and close. Empty and
@@ -197,10 +224,10 @@ for the change superseding the initial strict-rejection policy.
 
 ## Compact source index contracts
 
-The compact source index is the completed production backend for `watch file`
-after the phase-4 acceptance gate. Schema 1 remains a differential test oracle.
-Publication still waits for complete ordered analysis and finalized metadata;
-phase-5 progressive readiness is separate work. See the
+The compact source index is the production backend for `watch file`.
+Oracle schema 7 remains a differential test backend. Milestone B publishes a
+complete immutable base before ordered analysis and a separate completed revision
+after finalized metadata. See the
 [full field inventory](watch-file-packet-field-inventory.md) and
 [implemented v2 wire specification](offline-storage-format.md).
 The baseline environment and revision/working-tree identity are recorded in the
@@ -221,48 +248,33 @@ they never rewrite effective packet bytes or full presentation records. TLS
 plaintext remains in the separately bounded, stopped session analyzer (16 MiB
 session plaintext limit), as in the oracle; it is not copied into the index.
 Queries and raw export preserve their completed-generation ownership, with raw
-export bypassing the decoder. No progressive readiness or persistent reuse is
-introduced by phase 3.
+export bypassing the decoder. Milestone B shares validated source backings across
+the two independent metadata revisions; persistent reuse remains deferred.
 
-### Predeclared regression tolerances
+### Correctness, resource limits and readiness observations
 
-Declared 2026-09-06, before evaluating the new acceptance-matrix measurements.
-Compare the same fixture, configuration, budget, host, operation and cache
-condition, using at least three unprofiled fresh processes per condition. Report
-all samples and median; for random operations report within-run p95 as well.
-Profiles are separate runs. Do not change these tolerances to fit observations.
+Acceptance preserves exact logical record identity/order, fields and presence,
+effective bytes, filters, statistics and output semantics. Compare the bounded
+Calls/compatibility history policy separately from complete packet and event
+storage. Configured disk/cache/record/source limits, source integrity, ownership,
+authorization and cleanup remain correctness requirements.
 
-| Metric                                                                     | Regression gate                                                                                              |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Logical records, fields/presence, bytes, filters, statistics, events/calls | Exact equality, zero tolerance; bounded history policy compared separately                                   |
-| First/repeated base/application filters and related lookup                 | Each median and p95 <= baseline × 1.10 + 1 ms                                                                |
-| Random pages/details, first useful rendered page                           | Each median and p95 <= baseline × 1.10 + 1 ms                                                                |
-| Export throughput (effective bytes/second)                                 | >= 90% of baseline, exact records/order                                                                      |
-| Full completed readiness                                                   | Median <= baseline × 1.10; engineering target <= 3.0 s independently                                         |
-| Peak RSS and cumulative allocations                                        | Each <= baseline × 1.10; configured accounted limits remain hard                                             |
-| Completed storage                                                          | Engineering target < 100,000,000 decimal bytes on reported capture, including every owned completed artifact |
-| Temporary/query/combined peak disk and retained memory                     | Report every component and peak; never exceed configured accounting limits                                   |
-| Cold/repeat opens, base readiness                                          | Same 10% + 1 ms rule only with equivalent measured endpoints; missing baseline is unverified, not zero       |
+Earlier plan-selected timing, throughput, storage and RSS comparison targets have
+no independent acceptance authority. They are exploratory references, not gates;
+a benchmark miss does not require a waiver, redesign, optimization cycle or
+another audit. Milestone B records complete-base readiness, first useful page and
+completed-analysis time separately, without a numerical cutoff. Keep optional
+persistent cache/reuse and further parallelization outside this milestone.
 
-A missed timing/storage target requires a measured explanation and a recorded
-acceptance decision; correctness, explicit budget or ownership failures block
-cutover. Warm filesystem means an untimed full input read before each process,
-not reuse of an in-process Dataset. OS-cold runs require recorded eviction or a
-fresh controlled environment; otherwise label them unavailable. Record filesystem,
-storage medium, CPU/load/affinity, Go/build tags, capture SHA-256/size, limits,
-frozen flags/Viper values (without secrets), analyzer/history settings and process
-start/stop boundaries. Keep the original production benchmark reproduction command
-in the performance investigation unchanged. First worker page is not first render.
-The Phase-0 first-render endpoint materializes the page and renders the actual
-packet pane with `PacketList.View` at 120×40. It includes pane construction and
-layout; full model rendering, event-loop delivery and terminal I/O are unverified.
-Compare this same endpoint across backends until a full-UI measurement is added.
-For single-operation endpoints, median and nearest-rank p95 are calculated across
-fresh processes (with only three samples p95 is the maximum, not a population
-estimate). Random page/detail p95 additionally uses 32 observations within each
-process. Disk high-water samples are explicitly lower bounds; they cannot certify
-an exact peak-disk gate without ledger high-water instrumentation at cutover.
-Three-process medians are an engineering comparison, not statistical confidence.
+For reproducible observations, record fixture generation or capture hash/size,
+Go/build tags, relevant configuration and resource limits, operation boundaries,
+and host/storage context. Distinguish warm filesystem from in-process cache reuse;
+label OS-cold and private-fixture evidence unavailable when it was not measured.
+Compare equivalent operations: the existing first-render harness materializes a
+worker page and renders PacketList at 120×40, excluding terminal I/O. Describe
+samples and accounting components honestly rather than claiming a process RSS
+bound from the display cache. The historical benchmark reproduction commands and
+recorded measurements remain available in the linked research documents.
 
 ### Explicit backing policy and source errors
 

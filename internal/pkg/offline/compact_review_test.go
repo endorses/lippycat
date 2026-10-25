@@ -59,7 +59,7 @@ func TestCompactReviewSourceMutationAfterCache(t *testing.T) {
 	d, err := b.Finish(context.Background())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
-	owned, err := d.Detail(context.Background(), Token{Dataset: 17}, 0)
+	owned, err := d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 0)
 	require.NoError(t, err)
 	info, err := os.Stat(detail.Source.Path)
 	require.NoError(t, err)
@@ -67,9 +67,9 @@ func TestCompactReviewSourceMutationAfterCache(t *testing.T) {
 	mutated[0] ^= 0xff
 	require.NoError(t, os.WriteFile(detail.Source.Path, mutated, 0600))
 	require.NoError(t, os.Chtimes(detail.Source.Path, info.ModTime(), info.ModTime()))
-	_, err = d.Detail(context.Background(), Token{Dataset: 17}, 0)
+	_, err = d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 0)
 	require.ErrorIs(t, err, ErrSourceChanged, "cached blocks must not bypass effective-byte validation")
-	q, err := AllPackets(context.Background(), d, Token{Dataset: 17, Query: 1})
+	q, err := AllPackets(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 17, Query: 1})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, q.Close()) })
 	visits := 0
@@ -98,7 +98,7 @@ func TestCompactReviewCorruptStorage(t *testing.T) {
 			case "version":
 				_, err = f.WriteAt([]byte{255, 255}, 8)
 			case "reserved":
-				_, err = f.WriteAt([]byte{1}, 24)
+				_, err = f.WriteAt([]byte{1}, 14)
 			case "block-checksum":
 				_, err = f.WriteAt([]byte{255}, compactHeaderBytes+40)
 			case "row-offset-overflow":
@@ -110,7 +110,7 @@ func TestCompactReviewCorruptStorage(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.NoError(t, f.Close())
-			_, err = d.Detail(context.Background(), Token{Dataset: 17}, 0)
+			_, err = d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 0)
 			require.Error(t, err)
 			require.NoError(t, d.Close())
 			require.Zero(t, s.Resources().DiskBytes)
@@ -197,7 +197,7 @@ func TestCompactReviewPageLimitAndCleanupRetry(t *testing.T) {
 	require.NoError(t, err)
 	d := dataset.(*diskDataset)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
-	q, err := AllPackets(context.Background(), d, Token{Dataset: 17, Query: 1})
+	q, err := AllPackets(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 17, Query: 1})
 	require.NoError(t, err)
 	_, err = q.Page(context.Background(), PageRequest{Token: q.Token(), Limit: 1, MaxBytes: 64})
 	require.Error(t, err, "an oversized first row must fail instead of returning an empty page")

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"sync"
 	"time"
 
@@ -41,122 +40,6 @@ type OfflineAnalysisConfig struct {
 	ESP           capture.OfflineESPConfig
 	Analysis      LocalEventAnalysisOptions
 	SIPConfig     voip.Config
-}
-
-type offlineIndexedSession struct {
-	closeMu      sync.Mutex
-	eventMu      sync.Mutex
-	eventClosed  bool
-	eventClosers []io.Closer
-	markRange    *offlineMarkRangeState
-	export       *offlineExportState
-	browser      *offlineBrowser
-	filter       *offlineFilterOwner
-	related      *offlineRelatedOwner
-	Dataset      offline.Dataset
-	EventDataset offline.EventDataset
-	sortCleanup  io.Closer        // Per-open scratch cleanup retained only after removal failure.
-	builder      *offline.Builder // Retained only until publication or successful cleanup.
-	eventBuilder *offline.EventBuilder
-	EventStore   *store.EventStore
-	Calls        []types.CallInfo
-	Tracker      *CallTracker
-	TLSDecryptor *TLSDecryptor
-}
-
-// registerEventCloser transfers reader/query ownership to this session. A
-// rejected registration leaves ownership with the caller, who must close it.
-// Closers are joined outside Update before either dataset can be removed.
-func (s *offlineIndexedSession) registerEventCloser(closer io.Closer) error {
-	if closer == nil {
-		return errors.New("offline event closer is nil")
-	}
-	s.eventMu.Lock()
-	defer s.eventMu.Unlock()
-	if s.eventClosed {
-		return errors.New("offline event session is closing")
-	}
-	s.eventClosers = append(s.eventClosers, closer)
-	return nil
-}
-
-func (s *offlineIndexedSession) Close() error {
-	if s == nil {
-		return nil
-	}
-	s.closeMu.Lock()
-	defer s.closeMu.Unlock()
-	s.eventMu.Lock()
-	s.eventClosed = true
-	closers := s.eventClosers
-	s.eventClosers = nil
-	s.eventMu.Unlock()
-	var eventCloseErr error
-	failedClosers := closers[:0]
-	for _, closer := range closers {
-		if err := closer.Close(); err != nil {
-			eventCloseErr = errors.Join(eventCloseErr, err)
-			failedClosers = append(failedClosers, closer)
-		}
-	}
-	clear(closers[len(failedClosers):])
-	s.eventMu.Lock()
-	s.eventClosers = failedClosers
-	s.eventMu.Unlock()
-	var closeErr error
-	if s.markRange != nil {
-		s.markRange.cancel()
-		<-s.markRange.done
-	}
-	if s.export != nil {
-		s.export.cancel()
-		<-s.export.done
-	}
-	if s.filter != nil {
-		closeErr = errors.Join(closeErr, s.filter.close())
-	}
-	if s.related != nil {
-		s.related.close()
-	}
-	if s.browser != nil {
-		closeErr = errors.Join(closeErr, s.browser.close())
-	}
-	if eventCloseErr != nil {
-		// A failed owner may still hold a pin. Retain storage until its close
-		// succeeds rather than blocking cleanup behind an unjoined reader.
-		return errors.Join(closeErr, eventCloseErr)
-	}
-	if s.TLSDecryptor != nil {
-		s.TLSDecryptor.Stop()
-	}
-	if s.sortCleanup != nil {
-		if err := s.sortCleanup.Close(); err != nil {
-			closeErr = errors.Join(closeErr, err)
-		} else {
-			s.sortCleanup = nil
-		}
-	}
-	if s.builder != nil {
-		if err := s.builder.Close(); err != nil {
-			closeErr = errors.Join(closeErr, err)
-		} else {
-			s.builder = nil
-		}
-	}
-	if s.eventBuilder != nil {
-		if err := s.eventBuilder.Abort(); err != nil {
-			closeErr = errors.Join(closeErr, err)
-		} else {
-			s.eventBuilder = nil
-		}
-	}
-	if s.EventDataset != nil {
-		closeErr = errors.Join(closeErr, s.EventDataset.Close())
-	}
-	if s.Dataset != nil {
-		return errors.Join(closeErr, s.Dataset.Close())
-	}
-	return closeErr
 }
 
 // Conversion has explicit flow ownership: live callers retain their existing
@@ -217,16 +100,16 @@ func (f *offlineSIPFlows) isUDP(k string) bool {
 	return f.has(f.udp, k)
 }
 
-// indexOfflineDataset owns and joins all reader/analyzer resources. Only a fully
-// drained, flushed session transfers to the model. Packet records bypass the
-// presentation queues and contribute to storage statistics exactly once.
+// indexOfflineDataset retains the complete-only entry point for synchronous
+// callers. Production progressive opens use indexOfflineProgressiveDataset.
+// Both paths share the same ordered analysis, EOF drain, and storage builder.
 func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress)) (*offlineIndexedSession, error) {
 	return indexOfflineDatasetBackend(ctx, storage, generation, cfg, report, nil, true, true)
 }
 
 // indexOfflineDatasetBackend retains the legacy storage builder as a differential
-// test oracle. Production callers select one fixed backend in indexOfflineDataset;
-// backend selection is never part of the frozen configuration or user settings.
+// test oracle. Backend selection is never part of the frozen configuration or
+// user settings; progressive opens always use compact immutable revisions.
 func indexOfflineDatasetBackend(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration), locatorOrdering, compactStorage bool) (*offlineIndexedSession, error) {
 	return indexOfflineDatasetBackendWithWorkers(ctx, storage, generation, cfg, report, observe, locatorOrdering, compactStorage, true, true)
 }
@@ -236,6 +119,32 @@ func indexOfflineDatasetBackendWithAsync(ctx context.Context, storage *offline.S
 }
 
 func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration), locatorOrdering, compactStorage, asynchronous, asynchronousAnalysis bool) (result *offlineIndexedSession, err error) {
+	return indexOfflineDatasetPrepared(ctx, storage, generation, cfg, report, observe, locatorOrdering, compactStorage, asynchronous, asynchronousAnalysis, nil)
+}
+
+// offlinePreparedAnalysis borrows an already normalized, ordered replay. Its
+// caller owns the locator stream until releaseReplay succeeds.
+type offlinePreparedAnalysis struct {
+	stream        *capture.OfflineLocatorStream
+	session       *offlineIndexedSession
+	releaseReplay func() error
+}
+
+func indexOfflineDatasetPrepared(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration), locatorOrdering, compactStorage, asynchronous, asynchronousAnalysis bool, preparedAnalysis *offlinePreparedAnalysis) (result *offlineIndexedSession, err error) {
+	session := &offlineIndexedSession{EventStore: store.NewEventStore(cfg.EventCapacity), Tracker: NewCallTrackerWithCapacity(cfg.MaxCalls)}
+	if preparedAnalysis != nil {
+		session = preparedAnalysis.session
+	}
+	defer func() {
+		if err != nil {
+			result = nil
+			if cleanupErr := session.Close(); cleanupErr != nil {
+				err = errors.Join(err, cleanupErr)
+				// Failed cleanup remains owned for a later retry.
+				result = session
+			}
+		}
+	}()
 	ctx, cancelIndex := context.WithCancelCause(ctx)
 	defer cancelIndex(nil)
 	phase, phaseStart := "setup", time.Now()
@@ -266,25 +175,15 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	for i, path := range cfg.Inputs {
 		sources[i] = offline.SourcePosition{ArgumentIndex: uint32(i), Path: path}
 	}
-	var builder *offline.Builder
+	builder := session.builder
 	if !compactStorage {
 		builder, err = storage.NewBuilder(generation, sources)
+		session.builder = builder // A failed constructor can retain cleanup ownership.
 		if err != nil {
 			return nil, err
 		}
 	}
-	session := &offlineIndexedSession{builder: builder, EventStore: store.NewEventStore(cfg.EventCapacity), Tracker: NewCallTrackerWithCapacity(cfg.MaxCalls)}
-	defer func() {
-		if err != nil {
-			result = nil
-			if cleanupErr := session.Close(); cleanupErr != nil {
-				err = errors.Join(err, cleanupErr)
-				// The controller must own failed cleanup so cancellation,
-				// reopen, or shutdown can retry removal and release its budget.
-				result = session
-			}
-		}
-	}()
+	session.builder = builder
 	// Retain even a constructor result accompanied by failed cleanup, so the
 	// controller can retry event-file removal after returning an open error.
 	session.eventBuilder, err = storage.NewEventBuilder(generation)
@@ -293,7 +192,7 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	}
 	started := time.Now()
 	last := time.Time{}
-	progress := offline.Progress{Token: offline.Token{Dataset: generation}, State: offline.Reading, Sources: uint32(len(cfg.Inputs))}
+	progress := offline.Progress{Token: offline.Token{Dataset: generation, Revision: offline.CompletedRevision}, State: offline.Reading, Sources: uint32(len(cfg.Inputs))}
 	publish := func(force bool) {
 		if report != nil && (force || time.Since(last) >= 100*time.Millisecond) {
 			progress.Elapsed = time.Since(started)
@@ -322,7 +221,13 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 		publish(true)
 	}
 	var prepared *capture.OfflineLocatorStream
-	if locatorOrdering || compactStorage {
+	if preparedAnalysis != nil {
+		prepared = preparedAnalysis.stream
+		progress.TotalPackets = preparedAnalysis.session.expectedPackets
+		progress.State = offline.Indexing
+		publish(true)
+	}
+	if prepared == nil && (locatorOrdering || compactStorage) {
 		mark("scan")
 		var prepareErr error
 		openErr := capture.StartOfflineSnifferOrdered(cfg.Inputs, cfg.BPFFilter, func(devices []pcaptypes.PcapInterface, filter string) {
@@ -335,12 +240,12 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 			return nil, err
 		}
 	}
-	if compactStorage {
+	if compactStorage && builder == nil {
 		builder, err = storage.NewCompactBuilder(generation, sources, prepared.Backings(), materializeOfflinePacket)
+		session.builder = builder // Preserve a non-nil cleanup owner before returning the error.
 		if err != nil {
 			return nil, err
 		}
-		session.builder = builder
 		if err = prepared.TransferBackings(); err != nil {
 			return nil, err
 		}
@@ -515,6 +420,7 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 		// Compact append validates bytes synchronously and stores provenance;
 		// neither it nor call aggregation retains this raw packet buffer.
 		packet := convertEnvelopeWithRawOwnership(env, session.Tracker, protocols, flows, !compactStorage)
+		packet.ObservationDomain, packet.ObservationDomainKnown = env.Source.ObservationDomain, env.Source.ObservationDomainKnown
 		if sipFactory != nil && sipFactory.LastEvent != nil {
 			applyOfflineSIPEvent(&packet, *sipFactory.LastEvent)
 		}
@@ -580,7 +486,9 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 		} else {
 			err = prepared.Replay(ctx, consume)
 		}
-		if closeErr := prepared.Close(); closeErr != nil {
+		if preparedAnalysis != nil {
+			err = errors.Join(err, preparedAnalysis.releaseReplay())
+		} else if closeErr := prepared.Close(); closeErr != nil {
 			err = errors.Join(err, closeErr)
 		} else {
 			session.sortCleanup = nil
@@ -621,6 +529,7 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	}
 	runtime.EOF()
 	runtime.Close()
+	session.AnalysisStats = runtime.Stats()
 	// Always join accepted sink work, including after an append failure cancels
 	// admission. A canceled Close could otherwise leave file writers running
 	// while the unpublished session is being removed.

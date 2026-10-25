@@ -15,7 +15,7 @@ func TestCompactParallelQueryProgressRemainsOrdered(t *testing.T) {
 	baseline := d.Resources().InFlightBytes
 	var updates []QueryProgress
 	q, err := d.Query(context.Background(), QuerySpec{
-		Token: Token{Dataset: 17, Query: 5},
+		Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 5},
 		Match: func(s Summary) bool { return s.ID%2 == 0 },
 		Progress: func(p QueryProgress) {
 			updates = append(updates, p)
@@ -48,7 +48,7 @@ func TestQueryProgressCompleteAndBounded(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			baseline := d.Resources().DiskBytes
-			token := Token{Dataset: 7, Query: 2, Request: 3}
+			token := Token{Revision: CompletedRevision, Dataset: 7, Query: 2, Request: 3}
 			var progress []QueryProgress
 			q, err := d.Query(context.Background(), QuerySpec{Token: token, Match: tc.match, Progress: func(p QueryProgress) {
 				progress = append(progress, p)
@@ -78,7 +78,7 @@ func TestQueryProgressCancellationAndEmptyDataset(t *testing.T) {
 	baseline := d.Resources().DiskBytes
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	q, err := d.Query(ctx, QuerySpec{Token: Token{Dataset: 7, Query: 1}, Progress: func(p QueryProgress) {
+	q, err := d.Query(ctx, QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 1}, Progress: func(p QueryProgress) {
 		if p.Scanned == 1024 {
 			cancel()
 		}
@@ -88,7 +88,7 @@ func TestQueryProgressCancellationAndEmptyDataset(t *testing.T) {
 	require.Equal(t, baseline, d.Resources().DiskBytes)
 	empty := queryDataset(t, 0)
 	calls := 0
-	q, err = empty.Query(context.Background(), QuerySpec{Token: Token{Dataset: 7, Query: 1}, Progress: func(p QueryProgress) {
+	q, err = empty.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 1}, Progress: func(p QueryProgress) {
 		calls++
 		require.Zero(t, p.Scanned)
 		require.Zero(t, p.Matched)

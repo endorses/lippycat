@@ -49,7 +49,7 @@ func TestQueryScanRejectsCorruptStreams(t *testing.T) {
 				_, err = writable.WriteAt(data, offset)
 				require.NoError(t, err)
 			}
-			q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 7, Query: 1}})
+			q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 1}})
 			require.Error(t, err)
 			require.Nil(t, q)
 			require.Equal(t, baseline, d.Resources().DiskBytes)
@@ -92,14 +92,14 @@ func queryDataset(t *testing.T, count int) *diskDataset {
 func TestQueryCancellationFailureAndCleanup(t *testing.T) {
 	d := queryDataset(t, 50)
 	ctx := context.Background()
-	token := Token{Dataset: 7, Query: 1}
+	token := Token{Revision: CompletedRevision, Dataset: 7, Query: 1}
 	first, err := d.Query(ctx, QuerySpec{Token: token})
 	if err != nil {
 		t.Fatal(err)
 	}
 	baseline := d.Resources().DiskBytes
 	cctx, cancel := context.WithCancel(ctx)
-	_, err = d.Query(cctx, QuerySpec{Token: Token{Dataset: 7, Query: 2}, Match: func(s Summary) bool {
+	_, err = d.Query(cctx, QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 2}, Match: func(s Summary) bool {
 		if s.ID == 15 {
 			cancel()
 		}
@@ -123,7 +123,7 @@ func TestQueryCancellationFailureAndCleanup(t *testing.T) {
 	d.storage.mu.Lock()
 	d.storage.limits.DiskBytes = baseline + 30
 	d.storage.mu.Unlock()
-	_, err = d.Query(ctx, QuerySpec{Token: Token{Dataset: 7, Query: 3}})
+	_, err = d.Query(ctx, QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 3}})
 	if err == nil {
 		t.Fatal("expected budget failure")
 	}
@@ -148,7 +148,7 @@ func TestQueryCancellationFailureAndCleanup(t *testing.T) {
 func TestQueryEmptyCorruptionAndReaderJoin(t *testing.T) {
 	d := queryDataset(t, 3)
 	ctx := context.Background()
-	token := Token{Dataset: 7, Query: 1}
+	token := Token{Revision: CompletedRevision, Dataset: 7, Query: 1}
 	empty, err := d.Query(ctx, QuerySpec{Token: token, Match: func(Summary) bool { return false }})
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +228,7 @@ func TestRelatedFlowParity(t *testing.T) {
 		})
 	}
 	d := queryDataset(t, 80)
-	q, err := d.Related(context.Background(), Token{Dataset: 7, Query: 9}, f)
+	q, err := d.Related(context.Background(), Token{Revision: CompletedRevision, Dataset: 7, Query: 9}, f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestStatisticsBoundsAndSnapshot(t *testing.T) {
 func TestQueryManifestAndCorruptOrdering(t *testing.T) {
 	d := queryDataset(t, 4)
 	ctx := context.Background()
-	token := Token{Dataset: 7, Query: 2, Request: 8}
+	token := Token{Revision: CompletedRevision, Dataset: 7, Query: 2, Request: 8}
 	qInterface, err := d.Query(ctx, QuerySpec{Token: token, Description: []string{"udp", "length > 0"}})
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +312,7 @@ func TestQueryManifestAndCorruptOrdering(t *testing.T) {
 
 func TestQueryCleanupFailureRemainsDatasetOwned(t *testing.T) {
 	d := queryDataset(t, 3)
-	qi, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 7, Query: 1}})
+	qi, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestQueryCleanupFailureRemainsDatasetOwned(t *testing.T) {
 func TestQueryManifestFailurePreservesCompletedQuery(t *testing.T) {
 	d := queryDataset(t, 3)
 	ctx := context.Background()
-	token := Token{Dataset: 7, Query: 1}
+	token := Token{Revision: CompletedRevision, Dataset: 7, Query: 1}
 	old, err := d.Query(ctx, QuerySpec{Token: token})
 	if err != nil {
 		t.Fatal(err)
@@ -353,7 +353,7 @@ func TestQueryManifestFailurePreservesCompletedQuery(t *testing.T) {
 	d.storage.mu.Lock()
 	d.storage.limits.DiskBytes = before + queryHeaderBytes + 3*8 + 10
 	d.storage.mu.Unlock()
-	if _, err := d.Query(ctx, QuerySpec{Token: Token{Dataset: 7, Query: 2}}); err == nil {
+	if _, err := d.Query(ctx, QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 2}}); err == nil {
 		t.Fatal("expected manifest write failure")
 	}
 	if d.Resources().DiskBytes != before {
@@ -367,7 +367,7 @@ func TestQueryManifestFailurePreservesCompletedQuery(t *testing.T) {
 func TestPageLeaseAccountsRetainedRowsAndCopies(t *testing.T) {
 	d := queryDataset(t, 4)
 	ctx := context.Background()
-	token := Token{Dataset: 7, Query: 1}
+	token := Token{Revision: CompletedRevision, Dataset: 7, Query: 1}
 	q, err := d.Query(ctx, QuerySpec{Token: token})
 	if err != nil {
 		t.Fatal(err)
@@ -409,7 +409,7 @@ func TestPageLeaseAccountsRetainedRowsAndCopies(t *testing.T) {
 func TestPageFailureDoesNotReturnUnaccountedRows(t *testing.T) {
 	d := queryDataset(t, 4)
 	ctx := context.Background()
-	token := Token{Dataset: 7, Query: 1}
+	token := Token{Revision: CompletedRevision, Dataset: 7, Query: 1}
 	qi, err := d.Query(ctx, QuerySpec{Token: token})
 	if err != nil {
 		t.Fatal(err)
@@ -438,7 +438,7 @@ func TestPageFailureDoesNotReturnUnaccountedRows(t *testing.T) {
 func TestQueryCloseDoesNotWaitForUnrelatedDetailPin(t *testing.T) {
 	s := newTestStorage(t)
 	d := testStorageDataset(t, s)
-	token := Token{Dataset: 1, Query: 1}
+	token := Token{Revision: CompletedRevision, Dataset: 1, Query: 1}
 	q, err := d.Query(context.Background(), QuerySpec{Token: token})
 	require.NoError(t, err)
 	pin, err := d.PinDetail(context.Background(), token, 0)

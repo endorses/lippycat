@@ -29,7 +29,8 @@ const compactHeaderBytes = 32
 // Minor 4 appends observation-domain identity and presence to completed rows.
 // Other minor versions are rejected; temporary completed datasets are not migrated.
 // Minor 5 appends owned SMS metadata to the VoIP override schema.
-const compactSchemaMinor = 6
+// Minor 7 binds each stream to its exact immutable analysis revision.
+const compactSchemaMinor = 7
 const compactBlockHeaderBytes = 72
 const compactRows = 128
 const compactRowSlotBytes = 1024
@@ -46,6 +47,7 @@ type compactState struct {
 	columnEnds         []uint32
 	registries         compactRegistries
 	registry           *BackingRegistry
+	backingLease       *compactBackingLease
 	decode             StatelessDecoder
 	sources            []SourcePosition
 	rows               [][]byte
@@ -130,8 +132,14 @@ func (d *diskDataset) schemaVersion() uint16 {
 }
 
 // NewCompactBuilder constructs a completed source-backed dataset. Ownership of
-// registry transfers only on success. Persistent reuse is not supported.
+// registry transfers only on success. A non-nil builder returned with an error
+// owns failed metadata cleanup only; retain it for Close retries. Persistent
+// reuse is not supported.
 func (s *Storage) NewCompactBuilder(g DatasetGeneration, sources []SourcePosition, registry *BackingRegistry, decode StatelessDecoder) (*Builder, error) {
+	return s.newCompactBuilder(g, sources, registry, decode, CompletedRevision)
+}
+
+func (s *Storage) newCompactBuilder(g DatasetGeneration, sources []SourcePosition, registry *BackingRegistry, decode StatelessDecoder, revision AnalysisRevision) (*Builder, error) {
 	if registry == nil || decode == nil {
 		return nil, errors.New("compact builder requires backing registry and stateless decoder")
 	}
@@ -154,8 +162,9 @@ func (s *Storage) NewCompactBuilder(g DatasetGeneration, sources []SourcePositio
 	}()
 	b, err := s.NewBuilder(g, sources)
 	if err != nil {
-		return nil, err
+		return b, err
 	}
+	b.d.revision = revision
 	for kind, f := range []*os.File{b.d.summaries, b.d.details, b.d.offsets} {
 		var h [compactHeaderBytes]byte
 		copy(h[:], "LCOV2DAT")
@@ -163,6 +172,7 @@ func (s *Storage) NewCompactBuilder(g DatasetGeneration, sources []SourcePositio
 		binary.LittleEndian.PutUint16(h[10:], compactSchemaMinor)
 		binary.LittleEndian.PutUint16(h[12:], uint16(kind+1))
 		binary.LittleEndian.PutUint64(h[16:], uint64(g))
+		binary.LittleEndian.PutUint64(h[24:], uint64(revision))
 		if err = f.Truncate(0); err == nil {
 			s.releaseDisk(streamHeaderBytes)
 			b.d.ownedBytes -= streamHeaderBytes
@@ -172,12 +182,16 @@ func (s *Storage) NewCompactBuilder(g DatasetGeneration, sources []SourcePositio
 			err = b.write(f, h[:])
 		}
 		if err != nil {
-			return nil, errors.Join(err, b.Close())
+			return failedBuilder(b, err)
 		}
 	}
 	b.summaryEnd = compactHeaderBytes
 	b.detailEnd = compactHeaderBytes
-	b.d.compact = &compactState{registry: registry, decode: decode, sources: b.sources, sourceMemory: sourceMemory}
+	lease, leaseErr := registry.retainCompact()
+	if leaseErr != nil {
+		return failedBuilder(b, leaseErr)
+	}
+	b.d.compact = &compactState{registry: registry, backingLease: lease, decode: decode, sources: b.sources, sourceMemory: sourceMemory}
 	transferred = true
 	return b, nil
 }
@@ -202,11 +216,17 @@ func (b *Builder) AppendCompact(ctx context.Context, detail Detail, provenance P
 	if err = ctx.Err(); err != nil {
 		return err
 	}
+	if b.expectedCount != nil && b.d.count >= *b.expectedCount {
+		return errors.New("offline revision exceeds normalized base packet count")
+	}
 	if detail.Packet.Length >= 0 && uint64(detail.Packet.Length) > math.MaxUint64-b.accumulator.stats.Bytes {
 		return errors.New("compact packet byte total exceeds uint64 range")
 	}
 	if b.d.count >= (math.MaxInt64-compactHeaderBytes)/compactIndexBytes {
 		return errors.New("compact packet count overflow")
+	}
+	if b.d.revision == BaseRevision {
+		detail.Packet = basePacket(detail.Packet)
 	}
 	if err = b.validateCompactDetail(ctx, detail, provenance); err != nil {
 		return err
@@ -547,7 +567,7 @@ func (d *diskDataset) validateCompactStreams() error {
 		if _, err := f.ReadAt(h[:], 0); err != nil {
 			return err
 		}
-		if string(h[:8]) != "LCOV2DAT" || binary.LittleEndian.Uint16(h[8:]) != 2 || binary.LittleEndian.Uint16(h[10:]) != compactSchemaMinor || binary.LittleEndian.Uint16(h[12:]) != uint16(i+1) || binary.LittleEndian.Uint16(h[14:]) != 0 || binary.LittleEndian.Uint64(h[16:]) != uint64(d.generation) || binary.LittleEndian.Uint64(h[24:]) != 0 {
+		if string(h[:8]) != "LCOV2DAT" || binary.LittleEndian.Uint16(h[8:]) != 2 || binary.LittleEndian.Uint16(h[10:]) != compactSchemaMinor || binary.LittleEndian.Uint16(h[12:]) != uint16(i+1) || binary.LittleEndian.Uint16(h[14:]) != 0 || binary.LittleEndian.Uint64(h[16:]) != uint64(d.generation) || binary.LittleEndian.Uint64(h[24:]) != uint64(d.revision) {
 			return errors.New("invalid compact stream header/version")
 		}
 	}
@@ -742,7 +762,7 @@ func (d *diskDataset) closeCompact() error {
 		c.rowDisk = 0
 	}
 	c.rows = nil
-	return c.registry.Close()
+	return c.backingLease.Close()
 }
 
 func (b *Builder) updateCompact(ctx context.Context, id PacketID, mutate func(*Detail) error) error {
@@ -787,6 +807,10 @@ func (b *Builder) AmendVoIP(ctx context.Context, id PacketID, protocol, info str
 	}
 	if b.failure != nil {
 		return b.failure
+	}
+	if b.d.revision == BaseRevision {
+		b.failure = ErrAnalysisPending
+		return ErrAnalysisPending
 	}
 	defer func() {
 		if err != nil {
@@ -967,7 +991,7 @@ func (d *diskDataset) compactIndexChecksum(refs []byte, id PacketID) ([32]byte, 
 		if i == 1 {
 			kind = 20
 		}
-		if cached := d.storage.cached(cacheKey{dataset: d, id: PacketID(off), kind: kind}); len(cached) >= 80 {
+		if cached := d.storage.cached(cacheKey{dataset: d, id: PacketID(off), kind: kind, revision: d.revision}); len(cached) >= 80 {
 			if binary.LittleEndian.Uint64(cached[:8]) != size {
 				return [32]byte{}, errors.New("compact cached block reference mismatch")
 			}

@@ -1,7 +1,9 @@
 # Compact source-backed offline index implementation plan
 
 Status: Milestone A (Phases 0–4 and completed-open performance follow-ups) is
-complete. Milestone B (Phases 5–6) is deferred and pending.
+complete. Milestone B Phase 5 and its selected correctness/readiness acceptance
+are complete through [umbrella workstream 5](operational-visibility-and-offline-investigation.md#workstream-5-completion--2026-10-25).
+Optional persistent reuse and the broader historical measurement matrix remain deferred.
 
 All unqualified phase references in this document refer to this compact
 source-backed index plan, not the earlier scalable offline dataset plan.
@@ -9,18 +11,15 @@ Scope: `lc watch file`.
 
 ## Merge boundary
 
-This branch delivers milestone A: the compact source-backed index is the
-production path for a completed analysis. Dataset publication still waits for
-analyzer EOF, so users do not browse a complete base while analysis continues.
+The original merge delivered milestone A: the compact source-backed index for
+completed analysis. Its profiling and optimization history below remains closed.
 
-Milestone B is deferred beyond this merge. It comprises Phase 5's complete-base
-publication, analysis revisions, pending-field behavior, revision-pinned
-queries/exports, and background-analysis lifecycle. Every Phase 5 task remains
-unchecked until that behavior and its lifecycle tests are implemented.
-
-The completed milestone-A profiling and optimization work recorded below is
-evidence for the completed-analysis path only. It does not satisfy milestone B
-or the Phase-5-dependent final acceptance work.
+The later umbrella workstream 5 delivers complete-base publication, immutable
+analysis revisions, pending-field behavior, revision-pinned queries/exports and
+background-analysis lifecycle. Complete offline Events history from umbrella
+workstream 4 supersedes Phase 5's original bounded Events clause; Calls remain
+bounded. The completion evidence below concerns this selected extension and does
+not reopen milestone A or implement optional persistent reuse.
 
 Phase 0 establishes the baseline, injectable differential oracle, measurement
 runner, v2 schema, field inventory and source/resource contracts. Verification
@@ -40,12 +39,12 @@ packet identity, ordering, filters, statistics, event identities and export byte
 
 Read these documents before implementation:
 
-| Document                                                                                     | Role                                                                                |
-| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [Compact index investigation](../research/watch-file-compact-index-design.md) | Primary design, feasibility measurements, source lifetime and readiness constraints |
-| [Compact-index performance record](../research/watch-file-compact-performance.md) | Production baseline, optimization history, profiling and reproduction commands |
-| [Offline contracts](../design/watch-file-offline-contracts.md) | Field/filter semantics, ownership, budgets and publication behavior |
-| [Current storage format](../design/offline-storage-format.md) | Existing codec and integrity contract to replace explicitly |
+| Document                                                                          | Role                                                                                |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [Compact index investigation](../research/watch-file-compact-index-design.md)     | Primary design, feasibility measurements, source lifetime and readiness constraints |
+| [Compact-index performance record](../research/watch-file-compact-performance.md) | Production baseline, optimization history, profiling and reproduction commands      |
+| [Offline contracts](../design/watch-file-offline-contracts.md)                    | Field/filter semantics, ownership, budgets and publication behavior                 |
+| [Current storage format](../design/offline-storage-format.md)                     | Existing codec and integrity contract to replace explicitly                         |
 
 The reported capture is 323,454,505 bytes. The current normalizer emits 579,990
 logical packets and 44,873 events; the measured warm full-index median is 10.26 s
@@ -86,15 +85,15 @@ Do not silently switch to a fresh copy after detecting mutation.
 
 ## Milestones and dependencies
 
-| Phase | Deliverable                                                | Prerequisite | Completion gate                                                   |
-| ----- | ---------------------------------------------------------- | ------------ | ----------------------------------------------------------------- |
-| 0     | Baseline, differential oracle and format/lifetime contract | None         | Reproducible comparisons and reviewed schema                      |
-| 1     | Validated source and derived locators                      | 0            | Reader, provenance, mutation and ownership parity                 |
-| 2     | Locator-only ordering and scan-integrated identity         | 1            | Stable normalized replay without all-packet raw spool             |
-| 3     | Compact completed dataset, lazy details and raw export     | 2            | Full semantic parity and bounded resource accounting              |
-| 4     | Block queries and production cutover: milestone A          | 3            | Correctness suite and measured completed-ready performance        |
-| 5     | Complete-base browsing: milestone B                        | 4            | Revision-safe operations and failure/cancellation lifecycle       |
-| 6     | Milestone-B acceptance and optional persistent reuse       | 5            | Revision-aware measurements and disposition of optional work      |
+| Phase | Deliverable                                                | Prerequisite | Completion gate                                              |
+| ----- | ---------------------------------------------------------- | ------------ | ------------------------------------------------------------ |
+| 0     | Baseline, differential oracle and format/lifetime contract | None         | Reproducible comparisons and reviewed schema                 |
+| 1     | Validated source and derived locators                      | 0            | Reader, provenance, mutation and ownership parity            |
+| 2     | Locator-only ordering and scan-integrated identity         | 1            | Stable normalized replay without all-packet raw spool        |
+| 3     | Compact completed dataset, lazy details and raw export     | 2            | Full semantic parity and bounded resource accounting         |
+| 4     | Block queries and production cutover: milestone A          | 3            | Correctness suite and measured completed-ready performance   |
+| 5     | Complete-base browsing: milestone B                        | 4            | Revision-safe operations and failure/cancellation lifecycle  |
+| 6     | Milestone-B acceptance and optional persistent reuse       | 5            | Revision-aware measurements and disposition of optional work |
 
 Each phase is a reviewable implementation unit; split it into smaller commits as
 needed. Keep the completed-dataset gate intact through milestone A. A missed performance
@@ -410,23 +409,27 @@ Touchpoints: `internal/pkg/offline/contracts.go`, manifest/cache/query ownership
 `internal/pkg/tui/{offline_indexer,offline_lifecycle,offline_export,offline_event}.go`,
 offline page/detail/filter message handlers and watch-file user documentation.
 
-- [ ] Refactor construction into complete scan/order/base finalization followed by bounded ordered analysis. Publish only the immutable complete base; never expose provisional logical IDs during scanning.
-- [ ] Introduce analysis revision in request/result tokens, query/detail/export pins, cache keys and stale-result checks. Define the base-only revision and first completed revision explicitly; publish the completed overlay, protocol statistics and bounded event/call views atomically.
-- [ ] Apply the phase-0 field dependency inventory to navigation, detail, filtering, statistics and export. Offer complete base-field operations while analysis runs; show dependent operations/fields as pending. Treat Protocol and Info as dependent unless their base equivalence is proven.
-- [ ] Keep raw unfiltered export available from the base. Pin analysis-dependent filtered export to a completed revision; never silently change matches or metadata during iteration. Reissue active UI queries explicitly on revision transition while preserving valid selection IDs.
-- [ ] Define lifecycle behavior for base success followed by analysis failure/cancellation: retain the valid base with an explicit status, release failed overlay resources, and preserve previously pinned revisions until their owners close.
-- [ ] Extend session transfer/close ownership so cancellation, rapid reopen, stale completion, mode switch and quit cancel and join analysis/readers before closing backing handles. Keep blocking cleanup outside Bubble Tea Update and retain retryable cleanup failures.
-- [ ] Add lifecycle/race tests for stale revision errors and successes, filter requests while pending, late overlay publication, pinned export across revision change, analyzer EOF failure and replacement during background analysis.
-- [ ] Document and measure complete-base time, first useful page and completed-analysis time separately. Do not relabel faster browsing as faster full analysis.
+- [x] Refactor construction into complete scan/order/base finalization followed by bounded ordered analysis. Publish only the immutable complete base; never expose provisional logical IDs during scanning.
+- [x] Introduce analysis revision in request/result tokens, query/detail/export pins, cache keys and stale-result checks. Define the base-only revision and first completed revision explicitly; publish the completed overlay, protocol statistics and bounded event/call views atomically.
+- [x] Apply the phase-0 field dependency inventory to navigation, detail, filtering, statistics and export. Offer complete base-field operations while analysis runs; show dependent operations/fields as pending. Treat Protocol and Info as dependent unless their base equivalence is proven.
+- [x] Keep raw unfiltered export available from the base. Pin analysis-dependent filtered export to a completed revision; never silently change matches or metadata during iteration. Reissue active UI queries explicitly on revision transition while preserving valid selection IDs.
+- [x] Define lifecycle behavior for base success followed by analysis failure/cancellation: retain the valid base with an explicit status, release failed overlay resources, and preserve previously pinned revisions until their owners close.
+- [x] Extend session transfer/close ownership so cancellation, rapid reopen, stale completion, mode switch and quit cancel and join analysis/readers before closing backing handles. Keep blocking cleanup outside Bubble Tea Update and retain retryable cleanup failures.
+- [x] Add lifecycle/race tests for stale revision errors and successes, filter requests while pending, late overlay publication, pinned export across revision change, analyzer EOF failure and replacement during background analysis.
+- [x] Document and measure complete-base time, first useful page and completed-analysis time separately. Do not relabel faster browsing as faster full analysis.
 
 Gate: no partial query is presented as complete, no unfinished metadata is treated
 as absent, and a pinned operation sees one immutable generation/revision pair.
 
-## Phase 6 — Deferred milestone-B acceptance and optional reuse
+## Phase 6 — Milestone-B acceptance and deferred optional reuse
 
-Phase 6 follows Phase 5 and is outside this merge boundary. Its final acceptance
-matrix includes complete-base and analysis-revision behavior and therefore
-cannot be completed against milestone A alone.
+The selected correctness/readiness acceptance follows the completed Phase 5.
+See the umbrella completion record and
+[generated readiness report](../research/watch-file-progressive-readiness.md)
+for parity, lifecycle, format, resource-limit and UI verification. The private
+capture was unavailable; no historical agent-selected performance target is
+adopted as a product gate. The broader historical matrix below remains unverified
+for this increment, and no additional optimization cycle is implied.
 
 Persistent index reuse is also deferred. Current measurements establish the
 completed-open cost, but do not yet demonstrate that reuse is worth the source
@@ -441,7 +444,10 @@ include verification cost.
       settings/key-material identity without persisting secrets.
 - [ ] For an implemented cache, require verified sources, atomic complete manifests, independent base/analysis completeness, bounded eviction and leases. Test stale/corrupt entries, source mutation, settings changes and concurrent readers. Report verification cost as part of repeat-open latency.
 - [ ] Run the final acceptance matrix, publish measurements and explicitly report unmet targets plus the next measured bottleneck. Update documentation and remove obsolete migration code once its oracle coverage is retained.
-- [ ] Format changed files before staging. Check off only verified tasks, and commit the implementation and updated plan in scoped commits as required by repository instructions; exclude unrelated baseline changes.
+- [x] Complete the selected base/revision correctness, ownership, readiness and
+      documentation acceptance from umbrella workstream 5; record unavailable
+      private fixtures and observational timings explicitly.
+- [x] Format changed files before staging. Check off only verified tasks, and commit the implementation and updated plan in scoped commits as required by repository instructions; exclude unrelated baseline changes.
 
 ## Validation corpus and acceptance matrix
 

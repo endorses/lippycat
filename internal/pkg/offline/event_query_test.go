@@ -19,7 +19,7 @@ func TestEventQueryCancellationFailureAndPageMemoryBounds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	predicate, err := eventquery.Compile("kind:dns")
 	require.NoError(t, err)
-	_, err = d.Query(ctx, EventQuerySpec{Token: Token{Dataset: 7, Query: 2}, Match: predicate, Progress: func(p QueryProgress) {
+	_, err = d.Query(ctx, EventQuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 2}, Match: predicate, Progress: func(p QueryProgress) {
 		if p.Scanned >= 256 {
 			cancel()
 		}
@@ -27,7 +27,7 @@ func TestEventQueryCancellationFailureAndPageMemoryBounds(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, base, s.Resources())
 	require.Zero(t, d.queryCount)
-	q, err := AllEvents(context.Background(), d, Token{Dataset: 7, Query: 1})
+	q, err := AllEvents(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 7, Query: 1})
 	require.NoError(t, err)
 	installed := s.Resources()
 	callbackErr := errors.New("consumer failed")
@@ -52,7 +52,7 @@ func TestEventQueryCancellationFailureAndPageMemoryBounds(t *testing.T) {
 	require.Equal(t, installed, s.Resources())
 	reservation, err := s.ReserveTransient(context.Background(), s.MemoryLimit()-s.Resources().InFlightBytes-100)
 	require.NoError(t, err)
-	_, err = d.Detail(context.Background(), Token{Dataset: 7}, 1)
+	_, err = d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 7}, 1)
 	require.Error(t, err)
 	require.NoError(t, reservation.Close())
 	require.Equal(t, installed, s.Resources())
@@ -66,12 +66,12 @@ func TestEventQueryQuotaFailureAndCleanupRemainOwned(t *testing.T) {
 	s.limits.DiskBytes = base.DiskBytes + eventQueryHeaderBytes + eventQueryEntryBytes
 	predicate, err := eventquery.Compile("kind:dns")
 	require.NoError(t, err)
-	_, err = d.Query(context.Background(), EventQuerySpec{Token: Token{Dataset: 7, Query: 2}, Match: predicate})
+	_, err = d.Query(context.Background(), EventQuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 2}, Match: predicate})
 	require.Error(t, err)
 	require.Equal(t, base, s.Resources())
 	require.Zero(t, d.queryCount)
 	s.limits.DiskBytes = 8 << 20
-	value, err := d.Query(context.Background(), EventQuerySpec{Token: Token{Dataset: 7, Query: 3}, Match: predicate})
+	value, err := d.Query(context.Background(), EventQuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 3}, Match: predicate})
 	require.NoError(t, err)
 	q := value.(*diskEventQuery)
 	withQuery := s.Resources()
@@ -97,7 +97,7 @@ func TestEventQueryCorruptionRejectsHeaderAndMatchRows(t *testing.T) {
 			s, d := eventStorageDataset(t, 6)
 			predicate, err := eventquery.Compile("kind:dns")
 			require.NoError(t, err)
-			value, err := d.Query(context.Background(), EventQuerySpec{Token: Token{Dataset: 7, Query: 2}, Match: predicate})
+			value, err := d.Query(context.Background(), EventQuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 2}, Match: predicate})
 			require.NoError(t, err)
 			q := value.(*diskEventQuery)
 			f := eventStorageWritable(t, q.file)
@@ -126,7 +126,7 @@ func TestEventQueryPinJoinsCloseAndReadsBehindPendingClose(t *testing.T) {
 	for _, target := range []string{"query", "dataset"} {
 		t.Run(target, func(t *testing.T) {
 			_, d := eventStorageDataset(t, 10)
-			q, err := AllEvents(context.Background(), d, Token{Dataset: 7, Query: 1})
+			q, err := AllEvents(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 7, Query: 1})
 			require.NoError(t, err)
 			pin, err := PinEventQuery(q)
 			require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestEventDatasetCloseRetriesFailedRemovalAccounting(t *testing.T) {
 	require.NoError(t, d.Close())
 	require.Zero(t, s.Resources().DiskBytes)
 	require.Zero(t, s.Resources().InFlightBytes)
-	_, err := d.Detail(context.Background(), Token{Dataset: 7}, 1)
+	_, err := d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 7}, 1)
 	require.Error(t, err)
 }
 
@@ -236,10 +236,10 @@ func TestEventDetailMutationDoesNotChangeDiskSnapshot(t *testing.T) {
 	require.NoError(t, b.Append(context.Background(), e))
 	d, err := b.Finish(context.Background())
 	require.NoError(t, err)
-	a, err := d.Detail(context.Background(), Token{Dataset: 1}, 1)
+	a, err := d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 1}, 1)
 	require.NoError(t, err)
 	a.Record.Event.(events.HTTPEvent).Headers["x"][0] = "changed"
-	c, err := d.Detail(context.Background(), Token{Dataset: 1}, 1)
+	c, err := d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 1}, 1)
 	require.NoError(t, err)
 	require.Equal(t, "original", c.Record.Event.(events.HTTPEvent).Headers["x"][0])
 	require.NoError(t, a.Close())

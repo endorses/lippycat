@@ -80,7 +80,7 @@ func TestOfflineCompactTLSResultsSurviveKeyRemoval(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, session.Close()) })
 	require.NoError(t, os.Remove(keyPath))
 	for _, id := range []offline.PacketID{2, 0, 1, 2} {
-		_, err := session.Dataset.Detail(context.Background(), offline.Token{Dataset: 92}, id)
+		_, err := session.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 92}, id)
 		require.NoError(t, err)
 		clientData, serverData := session.TLSDecryptor.GetDecryptedData("192.0.2.1", "192.0.2.2", "12345", "443")
 		require.Equal(t, plaintext, clientData)

@@ -46,7 +46,7 @@ func TestOfflineIndexerDoesNotJoinSIPAcrossIdleTimeout(t *testing.T) {
 	session, err := indexOfflineDataset(context.Background(), testOfflineStorage(t), 42, OfflineAnalysisConfig{Inputs: []string{path}, VoIP: true, EventCapacity: 32, SIPConfig: *voip.GetConfig()}, nil)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, session.Close()) }()
-	detail, err := session.Dataset.Detail(context.Background(), offline.Token{Dataset: 42}, 1)
+	detail, err := session.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 42}, 1)
 	require.NoError(t, err)
 	if detail.Packet.VoIPData != nil {
 		require.NotEqual(t, "stale-framing", detail.Packet.VoIPData.CallID, "expired SIP prefix must not complete using later bytes")
@@ -69,7 +69,7 @@ func TestOfflineIndexerExpiryPreservesQueuedSIPPacketIdentity(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, session.Close()) }()
 	for _, id := range []offline.PacketID{2, 3, 4} {
-		detail, err := session.Dataset.Detail(context.Background(), offline.Token{Dataset: 43}, id)
+		detail, err := session.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 43}, id)
 		require.NoError(t, err)
 		if id == 2 {
 			require.NotNil(t, detail.Packet.VoIPData)

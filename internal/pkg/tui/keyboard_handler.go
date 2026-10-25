@@ -87,6 +87,10 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return model.(Model), cmd
 	}
 
+	if msg.String() == "ctrl+x" && m.offlineAnalysisPending() {
+		return m, m.cancelOfflineAnalysis()
+	}
+
 	// Settings tab gets priority for most keys (except q, ctrl+c, ctrl+z, space, tab/shift+tab)
 	if m.uiState.Tabs.GetActive() == 3 {
 		// If actively editing ANY field, pass ALL keys to settings view
@@ -485,8 +489,13 @@ func (m Model) handleClearAllFilters() (Model, tea.Cmd) {
 func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 	if m.offlineSession != nil {
 		chain := m.packetStore.FilterChain.Clone()
+		var protocol *components.Protocol
+		if pending := m.offlinePendingPacketFilter; pending != nil {
+			chain = pending.chain.Clone()
+			protocol = pending.protocol
+		}
 		chain.RemoveLast()
-		return m, m.startOfflineFilter(chain, nil)
+		return m, m.startOfflineFilter(chain, protocol)
 	}
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()
@@ -524,7 +533,7 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 // handleClearPackets clears all packets from the buffer
 func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	if m.uiState.ViewMode == "events" && m.eventStore != nil {
-		if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+		if m.offlineSession != nil && m.offlineEvents() != nil {
 			return m, m.uiState.Toast.Show("Offline dataset events cannot be cleared.", components.ToastInfo, components.ToastDurationShort)
 		}
 		stats := m.eventStore.Stats()

@@ -16,11 +16,11 @@ import (
 )
 
 // Match vectors use a dedicated fixed-width schema: LCQUERY/version byte,
-// dataset and query uint64 generations, followed by ordered uint64 IDs.
-const queryHeaderBytes = 24
+// dataset/query generations and analysis revision, followed by ordered IDs.
+const queryHeaderBytes = 32
 const queryEntryBytes = 8
 
-var queryMagic = [8]byte{'L', 'C', 'Q', 'U', 'E', 'R', 'Y', 1}
+var queryMagic = [8]byte{'L', 'C', 'Q', 'U', 'E', 'R', 'Y', 2}
 
 type diskQuery struct {
 	mu             sync.RWMutex
@@ -52,8 +52,8 @@ func AllPackets(ctx context.Context, dataset Dataset, token Token) (Query, error
 	if d.closed {
 		return nil, fmt.Errorf("offline dataset closed")
 	}
-	if token.Dataset != d.generation {
-		return nil, fmt.Errorf("offline query dataset generation mismatch")
+	if token.Dataset != d.generation || token.Revision != d.revision {
+		return nil, fmt.Errorf("offline query dataset generation/revision mismatch")
 	}
 	q := &diskQuery{dataset: d, token: token, count: d.count, stats: d.stats, identity: true}
 	d.queryMu.Lock()
@@ -68,10 +68,13 @@ func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, 
 	if d.closed {
 		return nil, fmt.Errorf("offline dataset closed")
 	}
-	if spec.Token.Dataset != d.generation {
-		return nil, fmt.Errorf("offline query dataset generation mismatch")
+	if spec.Token.Dataset != d.generation || spec.Token.Revision != d.revision {
+		return nil, fmt.Errorf("offline query dataset generation/revision mismatch")
 	}
 	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err = CheckQueryReadiness(d.revision, spec); err != nil {
 		return nil, err
 	}
 	if spec.Expression != nil {
@@ -142,6 +145,7 @@ func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, 
 		copy(header[:], queryMagic[:])
 		binary.LittleEndian.PutUint64(header[8:16], uint64(d.generation))
 		binary.LittleEndian.PutUint64(header[16:24], uint64(spec.Token.Query))
+		binary.LittleEndian.PutUint64(header[24:32], uint64(d.revision))
 		return q.write(header[:])
 	}
 	if d.compact == nil {
@@ -354,7 +358,7 @@ func (q *diskQuery) Count() uint64          { return q.count }
 func (q *diskQuery) Statistics() Statistics { return cloneStatistics(q.stats) }
 
 func (q *diskQuery) validate() error {
-	if q.closed || q.dataset.closed {
+	if q.closed || q.dataset.closed || q.token.Dataset != q.dataset.generation || q.token.Revision != q.dataset.revision {
 		return fmt.Errorf("offline query closed")
 	}
 	if q.identity {
@@ -371,21 +375,21 @@ func (q *diskQuery) validate() error {
 	if _, err := q.file.ReadAt(h[:], 0); err != nil {
 		return fmt.Errorf("read query header: %w", err)
 	}
-	if string(h[:8]) != string(queryMagic[:]) || binary.LittleEndian.Uint64(h[8:16]) != uint64(q.token.Dataset) || binary.LittleEndian.Uint64(h[16:24]) != uint64(q.token.Query) {
+	if string(h[:8]) != string(queryMagic[:]) || binary.LittleEndian.Uint64(h[8:16]) != uint64(q.token.Dataset) || binary.LittleEndian.Uint64(h[16:24]) != uint64(q.token.Query) || binary.LittleEndian.Uint64(h[24:32]) != uint64(q.token.Revision) {
 		return fmt.Errorf("incompatible or corrupt offline query header")
 	}
 	mf, err := os.Open(q.manifest)
 	if err != nil {
 		return fmt.Errorf("open completed query manifest: %w", err)
 	}
-	var mh [40]byte
+	var mh [48]byte
 	_, readErr := mf.ReadAt(mh[:], 0)
 	mst, statErr := mf.Stat()
 	closeErr := mf.Close()
 	if err := errors.Join(readErr, statErr, closeErr); err != nil {
 		return fmt.Errorf("read completed query manifest: %w", err)
 	}
-	if uint64(mst.Size()) != q.manifestBytes || string(mh[:8]) != "LCQMAN\x00\x01" || binary.LittleEndian.Uint64(mh[8:16]) != uint64(q.token.Dataset) || binary.LittleEndian.Uint64(mh[16:24]) != uint64(q.token.Query) || binary.LittleEndian.Uint64(mh[24:32]) != uint64(q.token.Request) || binary.LittleEndian.Uint64(mh[32:40]) != q.count {
+	if uint64(mst.Size()) != q.manifestBytes || string(mh[:8]) != "LCQMAN\x00\x02" || binary.LittleEndian.Uint64(mh[8:16]) != uint64(q.token.Dataset) || binary.LittleEndian.Uint64(mh[16:24]) != uint64(q.token.Query) || binary.LittleEndian.Uint64(mh[24:32]) != uint64(q.token.Request) || binary.LittleEndian.Uint64(mh[32:40]) != q.count || binary.LittleEndian.Uint64(mh[40:48]) != uint64(q.token.Revision) {
 		return fmt.Errorf("corrupt completed query manifest")
 	}
 	return nil
@@ -437,8 +441,8 @@ func (q *diskQuery) Page(ctx context.Context, req PageRequest) (page Page, err e
 	if err := q.validate(); err != nil {
 		return page, err
 	}
-	if req.Token.Dataset != q.token.Dataset || req.Token.Query != q.token.Query {
-		return page, fmt.Errorf("offline page generation mismatch")
+	if req.Token.Dataset != q.token.Dataset || req.Token.Revision != q.token.Revision || req.Token.Query != q.token.Query {
+		return page, fmt.Errorf("offline page generation/revision mismatch")
 	}
 	if req.Limit == 0 || req.MaxBytes == 0 {
 		return page, fmt.Errorf("offline page requires positive row and byte limits")
@@ -674,7 +678,7 @@ func matchesNormalizedFlow(s Summary, f Flow) bool {
 // descriptions. Every integer is little endian uint64. Strings stream in
 // bounded chunks, so arbitrary supported metadata cannot inflate scratch RAM.
 func (q *diskQuery) writeManifest(ctx context.Context, f *os.File, descriptions []string) error {
-	if err := q.writeTo(f, []byte{'L', 'C', 'Q', 'M', 'A', 'N', 0, 1}); err != nil {
+	if err := q.writeTo(f, []byte{'L', 'C', 'Q', 'M', 'A', 'N', 0, 2}); err != nil {
 		return err
 	}
 	number := func(n uint64) error { var b [8]byte; binary.LittleEndian.PutUint64(b[:], n); return q.writeTo(f, b[:]) }
@@ -696,7 +700,7 @@ func (q *diskQuery) writeManifest(ctx context.Context, f *os.File, descriptions 
 		return nil
 	}
 	s := q.stats
-	for _, n := range []uint64{uint64(q.token.Dataset), uint64(q.token.Query), uint64(q.token.Request), q.count, s.Packets, s.Bytes, s.MinPacketSize, s.MaxPacketSize, s.Sources, s.Destinations} {
+	for _, n := range []uint64{uint64(q.token.Dataset), uint64(q.token.Query), uint64(q.token.Request), q.count, uint64(q.token.Revision), s.Packets, s.Bytes, s.MinPacketSize, s.MaxPacketSize, s.Sources, s.Destinations} {
 		if err := number(n); err != nil {
 			return err
 		}

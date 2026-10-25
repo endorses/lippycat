@@ -58,6 +58,14 @@ type offlineEventBrowseMsg struct {
 	result *offlineEventBrowseResult
 }
 
+func (b *offlineEventBrowser) Cancel() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.cancel != nil {
+		b.cancel()
+	}
+}
+
 func (b *offlineEventBrowser) releaseResultLocked(r *offlineEventBrowseResult) error {
 	if r == nil {
 		return nil
@@ -217,7 +225,7 @@ func (b *offlineEventBrowser) load(token offline.Token, offset, cursor uint64, r
 		q := b.query
 		b.mu.Unlock()
 		if r.err == nil && q == nil {
-			q, r.err = offline.AllEvents(ctx, b.dataset, offline.Token{Dataset: token.Dataset, Query: token.Query})
+			q, r.err = offline.AllEvents(ctx, b.dataset, offline.Token{Dataset: token.Dataset, Revision: token.Revision, Query: token.Query})
 			if q != nil {
 				b.mu.Lock()
 				b.query, b.queries[q] = q, struct{}{}
@@ -270,10 +278,10 @@ func (b *offlineEventBrowser) load(token offline.Token, offset, cursor uint64, r
 }
 
 func (m *Model) ensureOfflineEventBrowser() error {
-	if m.offlineEventBrowse != nil || m.offlineSession == nil || m.offlineSession.EventDataset == nil {
+	if m.offlineEventBrowse != nil || m.offlineSession == nil || m.offlineEvents() == nil {
 		return nil
 	}
-	b := &offlineEventBrowser{dataset: m.offlineSession.EventDataset, results: make(map[*offlineEventBrowseResult]struct{}), queries: make(map[offline.EventQuery]struct{})}
+	b := &offlineEventBrowser{dataset: m.offlineEvents(), results: make(map[*offlineEventBrowseResult]struct{}), queries: make(map[offline.EventQuery]struct{})}
 	if err := m.offlineSession.registerEventCloser(b); err != nil {
 		// No worker has started: ownership was rejected and immediate cleanup
 		// cannot wait on I/O or on another goroutine.
@@ -306,7 +314,7 @@ func (m *Model) detachOfflineEvents() {
 }
 
 func (m *Model) syncOfflineEventBrowser() tea.Cmd {
-	if m.offlineSession == nil || m.offlineSession.EventDataset == nil || m.offlineOpening || m.offlineLeaving || m.offlineEventFilter != nil {
+	if m.offlineSession == nil || m.offlineEvents() == nil || m.offlineOpening || m.offlineLeaving || m.offlineEventFilter != nil {
 		return nil
 	}
 	if m.uiState.ViewMode != "events" || m.uiState.Tabs.GetActive() != 0 {
@@ -368,7 +376,7 @@ func (m *Model) syncOfflineEventBrowser() tea.Cmd {
 		s.owner.current = nil
 		s.owner.mu.Unlock()
 	}
-	return s.owner.load(offline.Token{Dataset: s.owner.dataset.Generation(), Query: s.queryGeneration, Request: s.request}, offset, cursor, rows, offlinePageBudget(m.offlineInstalled.Limits))
+	return s.owner.load(offline.Token{Dataset: s.owner.dataset.Generation(), Revision: s.owner.dataset.Revision(), Query: s.queryGeneration, Request: s.request}, offset, cursor, rows, offlinePageBudget(m.offlineInstalled.Limits))
 }
 
 func (m *Model) offlineEventCount() uint64 {
@@ -379,8 +387,8 @@ func (m *Model) offlineEventCount() uint64 {
 			return s.owner.query.Count()
 		}
 	}
-	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
-		return m.offlineSession.EventDataset.Count()
+	if m.offlineSession != nil && m.offlineEvents() != nil {
+		return m.offlineEvents().Count()
 	}
 	return 0
 }
@@ -390,7 +398,7 @@ func (m Model) handleOfflineEventBrowse(msg offlineEventBrowseMsg) (Model, tea.C
 	if s != nil && s.current == r {
 		return m, nil
 	}
-	if s == nil || s.owner != msg.owner || s.request != r.token.Request || s.queryGeneration != r.token.Query || m.offlineSession == nil || m.offlineSession.EventDataset == nil || r.token.Dataset != m.offlineSession.EventDataset.Generation() || m.offlineOpening || m.offlineLeaving {
+	if s == nil || s.owner != msg.owner || s.request != r.token.Request || s.queryGeneration != r.token.Query || m.offlineSession == nil || m.offlineEvents() == nil || r.token.Dataset != m.offlineEvents().Generation() || r.token.Revision != m.offlineEvents().Revision() || m.offlineOpening || m.offlineLeaving {
 		return m, func() tea.Msg { return offlineCleanupMsg{err: msg.owner.releaseResult(r)} }
 	}
 	if r.err != nil {

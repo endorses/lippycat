@@ -77,7 +77,7 @@ func (b *Builder) compactCompletion(ctx context.Context) (completion *compactCom
 	}
 	defer b.d.storage.releaseMemory(scratchBytes)
 	buffer := make([]byte, scratchBytes)
-	result := &compactCompletion{SchemaMajor: 2, SchemaMinor: compactSchemaMinor, NormalizationVersion: "1", AnalyzerVersion: "1", DecoderVersion: "1", FilterSemanticsVersion: "1", BaseComplete: true, AnalysisComplete: true, AnalysisRevision: 1, FileSHA256: make(map[string]string, 3)}
+	result := &compactCompletion{SchemaMajor: 2, SchemaMinor: compactSchemaMinor, NormalizationVersion: "1", AnalyzerVersion: "1", DecoderVersion: "1", FilterSemanticsVersion: "1", BaseComplete: true, AnalysisComplete: b.d.revision == CompletedRevision, AnalysisRevision: uint64(b.d.revision), FileSHA256: make(map[string]string, 3)}
 	hashFile := func(f *os.File, size int64) (string, error) {
 		hash := sha256.New()
 		reader := io.NewSectionReader(f, 0, size)

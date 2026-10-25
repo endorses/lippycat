@@ -49,7 +49,7 @@ func TestCompactRawPinSurvivesReplacementWithoutDecoding(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, storage.Close()) })
 	var decodes atomic.Int64
 	old := compactRawDataset(t, storage, 1, &decodes)
-	query, err := old.Query(context.Background(), QuerySpec{Token: Token{Dataset: 1, Query: 1}, Match: func(s Summary) bool { return s.ID != 1 }})
+	query, err := old.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 1, Query: 1}, Match: func(s Summary) bool { return s.ID != 1 }})
 	require.NoError(t, err)
 	pin, err := PinQuery(query)
 	require.NoError(t, err)
@@ -91,7 +91,7 @@ func TestCompactRawCancellationAndCallbackRelease(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, storage.Close()) })
 	var decodes atomic.Int64
 	dataset := compactRawDataset(t, storage, 1, &decodes)
-	query, err := AllPackets(context.Background(), dataset, Token{Dataset: 1, Query: 1})
+	query, err := AllPackets(context.Background(), dataset, Token{Revision: CompletedRevision, Dataset: 1, Query: 1})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, query.Close()) }()
 	baseline := storage.Resources().InFlightBytes
@@ -108,7 +108,7 @@ func TestCompactRawCancellationAndCallbackRelease(t *testing.T) {
 
 func TestCompactRawBatchCallbackOwnershipAndFailure(t *testing.T) {
 	d := compactQueryFixture(t, 130)
-	query, err := AllPackets(context.Background(), d, Token{Dataset: 17, Query: 1})
+	query, err := AllPackets(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 17, Query: 1})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, query.Close()) }()
 	detail, err := d.Detail(context.Background(), query.Token(), 0)

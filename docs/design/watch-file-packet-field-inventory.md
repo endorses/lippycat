@@ -1,10 +1,12 @@
 # Compact offline packet field inventory
 
-Phase-0 contract, verified against `internal/pkg/types/packet.go`,
+Readiness contract, reconciled for Milestone B against `internal/pkg/types/packet.go`,
 `internal/pkg/offline/summary.go`, `internal/pkg/tui/offline_indexer.go`,
 `internal/pkg/tui/offline_sip.go`, `internal/pkg/tui/components/detailspanel.go`
-and `internal/pkg/tui/store/packet_flow.go`. Every declared field in PacketDisplay
-and its seven nested metadata types appears below. New fields require inventory,
+and `internal/pkg/tui/store/packet_flow.go`, with RADIUS metadata from
+`internal/pkg/types/radius.go` and SMS metadata from `internal/pkg/sms/message.go`.
+Every declared field in PacketDisplay and its nested metadata appears below.
+New fields require inventory,
 codec-version and parity-oracle review together.
 
 S = source-decodable from **effective normalized bytes** or original capture
@@ -17,38 +19,48 @@ not currently render them. “Detail/API” means that full-object contract, not
 the details panel renders every field. List means the scalar DisplayFields
 projection; filter means an accessor/metadata-presence or flow lookup consumer.
 
-No field in PacketDisplay is safely discardable as presentation-only. Formatting
+`CaptureID` is the explicit presentation-only exception: it is excluded from
+offline storage and reconstructed as PacketID + 1 for the active dataset.
+Other PacketDisplay fields must retain their declared persistence semantics. Formatting
 (timezone, colors, widths, hex-dump layout, selection) is P outside this struct.
 Protocol and Info remain A even if some individual packets can be labeled earlier.
 Source-decodable application fields also remain A: their presence, parser choice
 and overrides depend on final classification. Pending never means nil/zero.
 
-| PacketDisplay field | Class | Consumers                                                | Ready |
-| ------------------- | ----- | -------------------------------------------------------- | ----- |
-| `Timestamp`         | S     | list, detail, export/order                               | B     |
-| `SrcIP`             | S     | list, filter, detail, statistics, flow                   | B     |
-| `DstIP`             | S     | list, filter, detail, statistics, flow                   | B     |
-| `SrcPort`           | S     | list, filter, detail, flow                               | B     |
-| `DstPort`           | S     | list, filter, detail, flow                               | B     |
-| `Protocol`          | F     | list, filter, detail, protocol statistics, flow fallback | A     |
-| `Transport`         | S     | list projection, flow, detail/API                        | B     |
-| `Length`            | S     | list, filter, detail, statistics                         | B     |
-| `Info`              | F     | list, filter (including SIP fallback), detail            | A     |
-| `RawData`           | S/D   | detail hex/tree, effective-byte export                   | B     |
-| `NodeID`            | S     | list, filter, detail, flow                               | B     |
-| `Interface`         | S     | list, filter, detail                                     | B     |
-| `VoIPData`          | F     | metadata presence filter, detail/API                     | A     |
-| `DNSData`           | F     | metadata presence filter, detail/API                     | A     |
-| `EmailData`         | F     | metadata presence filter, detail/API                     | A     |
-| `TLSData`           | F     | metadata presence filter, detail/API                     | A     |
-| `HTTPData`          | F     | metadata presence filter, detail/API                     | A     |
-| `LinkType`          | S/D   | list projection, detail decoder, export                  | B     |
+| PacketDisplay field      | Class | Consumers                                                | Ready             |
+| ------------------------ | ----- | -------------------------------------------------------- | ----------------- |
+| `ObservationDomain`      | S     | detail/API, scoped flow lookup                           | B                 |
+| `ObservationDomainKnown` | S     | detail/API, scoped flow lookup                           | B                 |
+| `CaptureID`              | P     | list selection, marks, arrival identity                  | B (reconstructed) |
+| `Timestamp`              | S     | list, detail, export/order                               | B                 |
+| `SrcIP`                  | S     | list, filter, detail, statistics, flow                   | B                 |
+| `DstIP`                  | S     | list, filter, detail, statistics, flow                   | B                 |
+| `SrcPort`                | S     | list, filter, detail, flow                               | B                 |
+| `DstPort`                | S     | list, filter, detail, flow                               | B                 |
+| `Protocol`               | F     | list, filter, detail, protocol statistics, flow fallback | A                 |
+| `Transport`              | S     | list projection, flow, detail/API                        | B                 |
+| `Length`                 | S     | list, filter, detail, statistics                         | B                 |
+| `Info`                   | F     | list, filter (including SIP fallback), detail            | A                 |
+| `RawData`                | S/D   | detail hex/tree, effective-byte export                   | B                 |
+| `NodeID`                 | S     | list, filter, detail, flow                               | B                 |
+| `Interface`              | S     | list, filter, detail                                     | B                 |
+| `VoIPData`               | F     | metadata presence filter, detail/API                     | A                 |
+| `DNSData`                | F     | metadata presence filter, detail/API                     | A                 |
+| `EmailData`              | F     | metadata presence filter, detail/API                     | A                 |
+| `TLSData`                | F     | metadata presence filter, detail/API                     | A                 |
+| `HTTPData`               | F     | metadata presence filter, detail/API                     | A                 |
+| `RADIUSData`             | F     | detail/API                                               | A                 |
+| `LinkType`               | S/D   | list projection, detail decoder, export                  | B                 |
 
 RawData uses source bytes only for proven unchanged outputs; fragments, rewritten
 ESP and derived tunnel output use owned D bytes. LinkType is the effective decoder
 context, separate from original context; Length is display length, separate from
 captured/original lengths. NodeID and Interface come from frozen source attribution,
 not from packet header decoding. Missing ports preserve the exact empty string.
+Observation-domain value and availability preserve the frozen source facts.
+Current offline normalization can supply only unknown domain context, including
+decapsulated input; both revisions preserve that absence of evidence. Do not
+infer a known domain from a default zero or reconstruct richer provenance here.
 
 The following tables enumerate nested fields. All are A-ready, including fields
 marked S, until packet-local analyzer equivalence is established. F fields must
@@ -64,12 +76,15 @@ never fill an unpopulated packet field from richer normalized protocol events.
 | `CallID`            | `string`             | F     | filter, detail/API  |
 | `Method`            | `string`             | S     | filter, detail/API  |
 | `CSeqMethod`        | `string`             | S     | detail/API          |
+| `CSeqNumber`        | `uint64`             | S     | detail/API          |
+| `ViaBranch`         | `string`             | S     | detail/API          |
 | `Status`            | `int`                | S     | filter, detail/API  |
 | `From`              | `string`             | S     | filter, detail/API  |
 | `To`                | `string`             | S     | filter, detail/API  |
 | `FromTag`           | `string`             | S     | filter, detail/API  |
 | `ToTag`             | `string`             | S     | filter, detail/API  |
 | `User`              | `string`             | S     | filter, detail/API  |
+| `SMS`               | `*sms.Message`       | F/D   | filter, detail/API  |
 | `ContentType`       | `string`             | S     | detail/API          |
 | `Body`              | `string`             | D     | detail/API          |
 | `Headers`           | `map[string]string`  | D     | detail/API          |
@@ -183,35 +198,37 @@ never fill an unpopulated packet field from richer normalized protocol events.
 
 ## TLSMetadata
 
-| Field               | Type       | Class | Consumers (A-ready) |
-| ------------------- | ---------- | ----- | ------------------- |
-| `Version`           | `string`   | S     | detail/API          |
-| `VersionRaw`        | `uint16`   | S     | detail/API          |
-| `RecordVersion`     | `uint16`   | S     | detail/API          |
-| `HandshakeType`     | `string`   | S     | detail/API          |
-| `IsServer`          | `bool`     | S     | detail/API          |
-| `SessionID`         | `string`   | S     | detail/API          |
-| `SNI`               | `string`   | S     | filter, detail/API  |
-| `CipherSuites`      | `[]uint16` | S     | detail/API          |
-| `Extensions`        | `[]uint16` | S     | detail/API          |
-| `SupportedVersions` | `[]uint16` | S     | detail/API          |
-| `SupportedGroups`   | `[]uint16` | S     | detail/API          |
-| `SignatureAlgos`    | `[]uint16` | S     | detail/API          |
-| `ECPointFormats`    | `[]uint8`  | S     | detail/API          |
-| `ALPNProtocols`     | `[]string` | S     | detail/API          |
-| `SelectedCipher`    | `uint16`   | S     | detail/API          |
-| `Compression`       | `uint8`    | S     | detail/API          |
-| `JA3String`         | `string`   | S     | detail/API          |
-| `JA3Fingerprint`    | `string`   | S     | filter, detail/API  |
-| `JA3SString`        | `string`   | S     | detail/API          |
-| `JA3SFingerprint`   | `string`   | S     | detail/API          |
-| `JA4String`         | `string`   | S     | detail/API          |
-| `JA4Fingerprint`    | `string`   | S     | detail/API          |
-| `FlowKey`           | `string`   | F     | detail/API          |
-| `CorrelatedPeer`    | `bool`     | F     | detail/API          |
-| `HandshakeTimeMs`   | `int64`    | F     | detail/API          |
-| `RiskScore`         | `float64`  | S     | detail/API          |
-| `RiskFlags`         | `int`      | S     | detail/API          |
+| Field                 | Type       | Class | Consumers (A-ready)              |
+| --------------------- | ---------- | ----- | -------------------------------- |
+| `Version`             | `string`   | S     | detail/API                       |
+| `VersionRaw`          | `uint16`   | S     | detail/API                       |
+| `RecordVersion`       | `uint16`   | S     | detail/API                       |
+| `HandshakeType`       | `string`   | S     | detail/API                       |
+| `IsServer`            | `bool`     | S     | detail/API                       |
+| `SessionID`           | `string`   | S     | detail/API                       |
+| `SNI`                 | `string`   | S     | filter, detail/API               |
+| `ClientHelloObserved` | `bool`     | F     | detail/API, observation counters |
+| `ECHOffered`          | `bool`     | S     | detail/API, observation counters |
+| `CipherSuites`        | `[]uint16` | S     | detail/API                       |
+| `Extensions`          | `[]uint16` | S     | detail/API                       |
+| `SupportedVersions`   | `[]uint16` | S     | detail/API                       |
+| `SupportedGroups`     | `[]uint16` | S     | detail/API                       |
+| `SignatureAlgos`      | `[]uint16` | S     | detail/API                       |
+| `ECPointFormats`      | `[]uint8`  | S     | detail/API                       |
+| `ALPNProtocols`       | `[]string` | S     | detail/API                       |
+| `SelectedCipher`      | `uint16`   | S     | detail/API                       |
+| `Compression`         | `uint8`    | S     | detail/API                       |
+| `JA3String`           | `string`   | S     | detail/API                       |
+| `JA3Fingerprint`      | `string`   | S     | filter, detail/API               |
+| `JA3SString`          | `string`   | S     | detail/API                       |
+| `JA3SFingerprint`     | `string`   | S     | detail/API                       |
+| `JA4String`           | `string`   | S     | detail/API                       |
+| `JA4Fingerprint`      | `string`   | S     | detail/API                       |
+| `FlowKey`             | `string`   | F     | detail/API                       |
+| `CorrelatedPeer`      | `bool`     | F     | detail/API                       |
+| `HandshakeTimeMs`     | `int64`    | F     | detail/API                       |
+| `RiskScore`           | `float64`  | S     | detail/API                       |
+| `RiskFlags`           | `int`      | S     | detail/API                       |
 
 ## HTTPMetadata
 
@@ -241,6 +258,63 @@ never fill an unpopulated packet field from richer normalized protocol events.
 | `BodyPreview`           | `string`            | D     | detail/API          |
 | `BodySize`              | `int`               | D     | detail/API          |
 | `BodyTruncated`         | `bool`              | D     | detail/API          |
+
+## RADIUSMetadata
+
+Credential-redacted RADIUS fields remain A-ready because classification and
+association context belong to analysis. Preserve the safe attribute list, its
+ordering, and nil/empty distinctions; raw secret attributes are not reconstructed
+into packet metadata.
+
+| Field           | Type       | Class | Consumers (A-ready) |
+| --------------- | ---------- | ----- | ------------------- |
+| `Code`          | `uint8`    | S     | detail/API          |
+| `CodeName`      | `string`   | S     | detail/API          |
+| `Identifier`    | `uint8`    | S     | detail/API          |
+| `MessageLength` | `uint16`   | S     | detail/API          |
+| `Association`   | `string`   | F     | detail/API          |
+| `ObservationID` | `string`   | F     | detail/API          |
+| `RequestID`     | `string`   | F     | detail/API          |
+| `Attributes`    | `[]string` | S     | detail/API          |
+
+## SMS metadata within VoIPMetadata
+
+All SMS fields are A-ready. Per-segment content and assembly results are distinct;
+pending analysis must not be confused with SMS's own `AssemblyPending` status.
+The existing SMS content and projection limits continue to apply.
+
+| sms.Message field | Type             | Class | Consumers (A-ready) |
+| ----------------- | ---------------- | ----- | ------------------- |
+| `Text`            | `string`         | D     | filter, detail/API  |
+| `Status`          | `DecodeStatus`   | F     | filter, detail/API  |
+| `Encoding`        | `Encoding`       | S     | detail/API          |
+| `Direction`       | `Direction`      | S     | detail/API          |
+| `RPType`          | `uint8`          | S     | detail/API          |
+| `TPType`          | `uint8`          | S     | detail/API          |
+| `Reference`       | `uint8`          | S     | detail/API          |
+| `DCS`             | `uint8`          | S     | detail/API          |
+| `PID`             | `uint8`          | S     | detail/API          |
+| `From`            | `string`         | S     | filter, detail/API  |
+| `To`              | `string`         | S     | filter, detail/API  |
+| `Timestamp`       | `time.Time`      | S     | detail/API          |
+| `Concat`          | `*Concatenation` | S     | detail/API          |
+| `Assembly`        | `AssemblyInfo`   | F/D   | filter, detail/API  |
+| `Header`          | `[]byte`         | D     | detail/API          |
+
+| sms.Concatenation field | Type     | Class | Consumers (A-ready) |
+| ----------------------- | -------- | ----- | ------------------- |
+| `Reference`             | `uint16` | S     | detail/API          |
+| `ReferenceBits`         | `uint8`  | S     | detail/API          |
+| `Total`                 | `uint8`  | S     | detail/API          |
+| `Part`                  | `uint8`  | S     | detail/API          |
+
+| sms.AssemblyInfo field | Type             | Class | Consumers (A-ready) |
+| ---------------------- | ---------------- | ----- | ------------------- |
+| `ID`                   | `string`         | F     | detail/API          |
+| `Status`               | `AssemblyStatus` | F     | filter, detail/API  |
+| `Text`                 | `string`         | D     | filter, detail/API  |
+| `Received`             | `[]uint8`        | F     | detail/API          |
+| `Missing`              | `[]uint8`        | F     | detail/API          |
 
 SIP TCP assembly can replace all VoIP fields and Protocol/Info at EOF: store the
 final packet-local amendment, including fields whose UDP origin is S. SequenceNum

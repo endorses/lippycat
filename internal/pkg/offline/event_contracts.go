@@ -19,7 +19,7 @@ type EventRecord struct {
 
 // EventSchemaVersion identifies the event framing and payload contract. Event
 // storage is private to a completed analysis; persistent reuse is not supported.
-const EventSchemaVersion uint16 = 1
+const EventSchemaVersion uint16 = 2
 
 // EventPresentationBytesPerRow reserves one borrowed presentation record in
 // addition to the decoded event and EventRecord backing. A frontend must fit its
@@ -44,6 +44,7 @@ type EventQuery interface {
 
 type EventDataset interface {
 	Generation() DatasetGeneration
+	Revision() AnalysisRevision
 	Count() uint64
 	Query(context.Context, EventQuerySpec) (EventQuery, error)
 	Detail(context.Context, Token, EventRowID) (*EventDetail, error)
@@ -64,6 +65,7 @@ type EventPage struct {
 func (p EventPage) Close() error { p.lease.close(); return nil }
 
 type EventDetail struct {
+	Token  Token
 	Record EventRecord
 	lease  *eventLease
 }

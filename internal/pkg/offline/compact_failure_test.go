@@ -87,7 +87,7 @@ func TestCompactMalformedColumnsWithValidChecksum(t *testing.T) {
 			_, err = directory.WriteAt(entry[:], compactHeaderBytes)
 			require.NoError(t, err)
 			require.NoError(t, directory.Close())
-			_, err = d.Detail(context.Background(), Token{Dataset: 17}, 0)
+			_, err = d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 0)
 			require.ErrorContains(t, err, message)
 			require.NoError(t, d.Close())
 			require.Zero(t, s.Resources().DiskBytes)

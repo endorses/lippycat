@@ -37,7 +37,7 @@ func offlineEventFilterTick(s *offlineEventFilterState) tea.Cmd {
 }
 
 func (m *Model) eventFilterDescriptions() []string {
-	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+	if m.offlineSession != nil && m.offlineEvents() != nil {
 		if s := m.offlineEventBrowse; s != nil {
 			return append([]string(nil), s.descriptions...)
 		}
@@ -72,7 +72,10 @@ func compileOfflineEventFilter(descriptions []string, protocol string) (eventque
 }
 
 func (m *Model) startOfflineEventFilter(descriptions []string, protocol string) tea.Cmd {
-	if m.offlineSession == nil || m.offlineSession.EventDataset == nil || m.offlineOpening || m.offlineLeaving {
+	if m.offlineSession != nil && m.offlineAnalysisPending() {
+		return m.uiState.Toast.Show("Event filters pending ordered analysis", components.ToastInfo, components.ToastDurationLong)
+	}
+	if m.offlineSession == nil || m.offlineEvents() == nil || m.offlineOpening || m.offlineLeaving {
 		return nil
 	}
 	descriptions = append([]string(nil), descriptions...)
@@ -86,7 +89,7 @@ func (m *Model) startOfflineEventFilter(descriptions []string, protocol string) 
 	browser := m.offlineEventBrowse
 	m.cancelOfflineEventReads()
 	m.offlineEventFilterGeneration = max(m.offlineEventFilterGeneration, browser.queryGeneration) + 1
-	s := &offlineEventFilterState{owner: browser.owner, token: offline.Token{Dataset: browser.owner.dataset.Generation(), Query: m.offlineEventFilterGeneration}, descriptions: descriptions, protocol: protocol}
+	s := &offlineEventFilterState{owner: browser.owner, token: offline.Token{Dataset: browser.owner.dataset.Generation(), Revision: browser.owner.dataset.Revision(), Query: m.offlineEventFilterGeneration}, descriptions: descriptions, protocol: protocol}
 	browser.attempted = protocol
 	m.offlineEventFilter = s
 	ctx, prior, done, ok := s.owner.begin()
@@ -136,7 +139,7 @@ func (m *Model) startOfflineEventFilter(descriptions []string, protocol string) 
 func (m Model) handleOfflineEventFilter(msg offlineEventFilterMsg) (Model, tea.Cmd) {
 	s := msg.state
 	dispose := func() tea.Msg { return offlineCleanupMsg{err: s.owner.releaseQuery(msg.query)} }
-	if m.offlineEventFilter != s || m.offlineSession == nil || m.offlineSession.EventDataset == nil || m.offlineSession.EventDataset.Generation() != s.token.Dataset || m.offlineOpening || m.offlineLeaving {
+	if m.offlineEventFilter != s || m.offlineSession == nil || m.offlineEvents() == nil || m.offlineEvents().Generation() != s.token.Dataset || m.offlineEvents().Revision() != s.token.Revision || m.offlineOpening || m.offlineLeaving {
 		return m, dispose
 	}
 	m.offlineEventFilter = nil

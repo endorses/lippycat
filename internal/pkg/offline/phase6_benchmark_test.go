@@ -54,7 +54,7 @@ func BenchmarkPhase6Dataset(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.ReportMetric(float64(count)/time.Since(start).Seconds(), "index-packets/s")
-				token := offline.Token{Dataset: 1, Query: 1}
+				token := offline.Token{Revision: offline.CompletedRevision, Dataset: 1, Query: 1}
 				start = time.Now()
 				q, err := ds.Query(ctx, offline.QuerySpec{Token: token, Match: func(offline.Summary) bool { return true }, Progress: func(offline.QueryProgress) { sampleHeap() }})
 				if err != nil {

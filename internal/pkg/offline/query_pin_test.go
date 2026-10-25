@@ -17,7 +17,7 @@ func TestQueryPinSurvivesPendingDatasetAndQueryClose(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			d := queryDataset(t, 5)
-			q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 7, Query: 1}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
+			q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 1}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
 			require.NoError(t, err)
 			pin, err := PinQuery(q)
 			require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestQueryPinSurvivesPendingDatasetAndQueryClose(t *testing.T) {
 
 func TestQueryPinCancellationAndCallbackFailure(t *testing.T) {
 	d := queryDataset(t, 5)
-	q, err := AllPackets(context.Background(), d, Token{Dataset: 7, Query: 1})
+	q, err := AllPackets(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 7, Query: 1})
 	require.NoError(t, err)
 	pin, err := PinQuery(q)
 	require.NoError(t, err)

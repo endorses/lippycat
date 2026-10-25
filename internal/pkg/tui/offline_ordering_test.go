@@ -62,7 +62,7 @@ func TestOfflineOrderingPublishesSortedDatasetAndCancelsReplacement(t *testing.T
 	dataset := m.offlineSession.Dataset
 	for id, sourceSequence := range [][2]int{{1, 2}, {0, 1}, {0, 2}, {1, 1}, {1, 0}, {0, 0}} {
 		source, sequence := sourceSequence[0], sourceSequence[1]
-		detail, err := dataset.Detail(context.Background(), offline.Token{Dataset: dataset.Generation()}, offline.PacketID(id))
+		detail, err := dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: dataset.Generation()}, offline.PacketID(id))
 		require.NoError(t, err)
 		require.Equal(t, raw[source][sequence], detail.Packet.RawData)
 		require.Equal(t, offline.SourcePosition{ArgumentIndex: uint32(source), Path: paths[source], Sequence: uint64(sequence)}, detail.Source)

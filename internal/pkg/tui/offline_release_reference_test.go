@@ -80,7 +80,7 @@ func TestOfflineReleaseIndexerFullScanReference(t *testing.T) {
 	ds := session.Dataset
 	require.EqualValues(t, len(reference), ds.Count())
 	require.Equal(t, statistics(false), ds.Statistics())
-	token := offline.Token{Dataset: 81, Query: 1}
+	token := offline.Token{Revision: offline.CompletedRevision, Dataset: 81, Query: 1}
 	q, err := ds.Query(ctx, offline.QuerySpec{Token: token, Match: func(s offline.Summary) bool { return s.ID%3 == 1 }})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, q.Close()) }()

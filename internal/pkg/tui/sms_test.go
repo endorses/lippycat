@@ -66,7 +66,7 @@ func TestOfflineSMSFramingStorageAndCallContent(t *testing.T) {
 				require.Equal(t, "hellohello", call.SMS[0].Message.Text)
 				require.Equal(t, sms.StatusDecoded, call.SMS[0].Message.Status)
 			}
-			detail, err := session.Dataset.Detail(context.Background(), offline.Token{Dataset: 77}, 1)
+			detail, err := session.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 77}, 1)
 			require.NoError(t, err)
 			require.NotNil(t, detail.Packet.VoIPData)
 			require.NotNil(t, detail.Packet.VoIPData.SMS)
@@ -119,7 +119,7 @@ func TestOfflineSMSUDPPreservesDecodedBodyInBothStorageFormats(t *testing.T) {
 			require.Len(t, session.Calls, 1)
 			require.Len(t, session.Calls[0].SMS, 1)
 			require.Equal(t, "hellohello", session.Calls[0].SMS[0].Message.Text)
-			detail, err := session.Dataset.Detail(context.Background(), offline.Token{Dataset: 78}, 0)
+			detail, err := session.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 78}, 0)
 			require.NoError(t, err)
 			require.NotNil(t, detail.Packet.VoIPData.SMS)
 			require.Equal(t, "hellohello", detail.Packet.VoIPData.SMS.Text)

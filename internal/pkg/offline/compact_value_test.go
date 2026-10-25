@@ -105,7 +105,7 @@ func TestCompactValueFixedWidthsAndCanonicalMaps(t *testing.T) {
 // Pin schema-v2.6 field order, field types, integer widths and sparse projection
 // groups. A declaration edit must never silently reinterpret completed blocks.
 func TestCompactValueSchemaFingerprint(t *testing.T) {
-	require.Equal(t, 6, compactSchemaMinor)
+	require.Equal(t, 7, compactSchemaMinor)
 	var schema bytes.Buffer
 	schema.WriteString("schema-v2.6; little-endian; int=8; timestamp=seconds8+nanos4; string=length4+bytes; container=presence1+length4; pointer=presence1; bool=1; float64=8; array=fixed-elements\n")
 	var structs []reflect.Type

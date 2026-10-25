@@ -113,9 +113,9 @@ func TestOfflineCompactDetailsFrozenAndOwned(t *testing.T) {
 	rng := rand.New(rand.NewSource(3))
 	for repeat := 0; repeat < 4; repeat++ {
 		for _, id := range rng.Perm(int(session.Dataset.Count())) {
-			want, err := legacy.Dataset.Detail(ctx, offline.Token{Dataset: 81}, offline.PacketID(id))
+			want, err := legacy.Dataset.Detail(ctx, offline.Token{Revision: offline.CompletedRevision, Dataset: 81}, offline.PacketID(id))
 			require.NoError(t, err)
-			got, err := session.Dataset.Detail(ctx, offline.Token{Dataset: 82}, offline.PacketID(id))
+			got, err := session.Dataset.Detail(ctx, offline.Token{Revision: offline.CompletedRevision, Dataset: 82}, offline.PacketID(id))
 			require.NoError(t, err)
 			require.NoError(t, offlineOracleRecord(want, got))
 			require.NoError(t, offlineOracleMetadata(want, got))

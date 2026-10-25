@@ -51,7 +51,7 @@ func TestCompactQueryRepresentationsPagesPinsAndStatistics(t *testing.T) {
 	d := compactQueryFixture(t, 2051)
 	for _, kind := range []string{"sparse", "dense", "all", "implicit", "expression", "amended"} {
 		t.Run(kind, func(t *testing.T) {
-			spec := QuerySpec{Token: Token{Dataset: 17, Query: 2}}
+			spec := QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 2}}
 			switch kind {
 			case "sparse":
 				spec.Match = func(s Summary) bool { return s.ID%127 == 0 }
@@ -120,14 +120,14 @@ func TestCompactQueryRepresentationsPagesPinsAndStatistics(t *testing.T) {
 
 func TestCompactQueryCancellationAndBufferedDiskAdmission(t *testing.T) {
 	d := compactQueryFixture(t, 2051)
-	old, err := AllPackets(context.Background(), d, Token{Dataset: 17, Query: 1})
+	old, err := AllPackets(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 17, Query: 1})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, old.Close()) }()
 	baseline := d.Resources().DiskBytes
 	baselineMemory := d.Resources().InFlightBytes
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	q, err := d.Query(ctx, QuerySpec{Token: Token{Dataset: 17, Query: 2}, Match: func(Summary) bool { return true }, Progress: func(p QueryProgress) {
+	q, err := d.Query(ctx, QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 2}, Match: func(Summary) bool { return true }, Progress: func(p QueryProgress) {
 		if p.Scanned == 1024 {
 			cancel()
 		}
@@ -138,7 +138,7 @@ func TestCompactQueryCancellationAndBufferedDiskAdmission(t *testing.T) {
 	require.Equal(t, baselineMemory, d.Resources().InFlightBytes)
 	diskLimit := d.storage.limits.DiskBytes
 	d.storage.limits.DiskBytes = baseline + queryHeaderBytes + queryEntryBytes*5
-	q, err = d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 3}, Match: func(s Summary) bool { return s.ID != 100 }})
+	q, err = d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 3}, Match: func(s Summary) bool { return s.ID != 100 }})
 	d.storage.limits.DiskBytes = diskLimit
 	require.Error(t, err)
 	require.Nil(t, q)
@@ -165,7 +165,7 @@ func TestCompactRelatedTypedComparison(t *testing.T) {
 		{Flow{Source: netip.MustParseAddrPort("192.0.2.1:0"), Destination: netip.MustParseAddrPort("198.51.100.2:5061")}, 0},
 		{Flow{}, 0},
 	} {
-		q, err := d.Related(context.Background(), Token{Dataset: 17, Query: 2}, tc.flow)
+		q, err := d.Related(context.Background(), Token{Revision: CompletedRevision, Dataset: 17, Query: 2}, tc.flow)
 		require.NoError(t, err)
 		require.Equal(t, tc.count, q.Count())
 		require.NoError(t, q.Close())
@@ -178,7 +178,7 @@ func TestCompactAllMatchNeedsNoQueryDiskAndLateMissMaterializesPrefix(t *testing
 	diskLimit := d.storage.limits.DiskBytes
 	d.storage.limits.DiskBytes = baseline
 	for _, expression := range []bool{false, true} {
-		spec := QuerySpec{Token: Token{Dataset: 17, Query: 1}, Match: func(Summary) bool { return true }}
+		spec := QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 1}, Match: func(Summary) bool { return true }}
 		if expression {
 			var err error
 			spec.Expression, err = NewExpression(ExpressionSpec{Op: "all"})
@@ -191,7 +191,7 @@ func TestCompactAllMatchNeedsNoQueryDiskAndLateMissMaterializesPrefix(t *testing
 		require.NoError(t, q.Close())
 	}
 	d.storage.limits.DiskBytes = diskLimit
-	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 2}, Match: func(s Summary) bool { return s.ID != 32 }})
+	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 2}, Match: func(s Summary) bool { return s.ID != 32 }})
 	require.NoError(t, err)
 	require.EqualValues(t, 32, q.Count())
 	page, err := q.Page(context.Background(), PageRequest{Token: q.Token(), Limit: 33, MaxBytes: 1 << 20})
@@ -212,7 +212,7 @@ func TestCompactQueryRejectsCorruptDirectoryAndReleasesScratch(t *testing.T) {
 	_, err = writable.WriteAt([]byte{255}, compactHeaderBytes+17*compactIndexBytes)
 	require.NoError(t, err)
 	require.NoError(t, writable.Close())
-	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 1}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
+	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 1}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
 	require.ErrorContains(t, err, "checksum")
 	require.Nil(t, q)
 	require.Equal(t, baseline.DiskBytes, d.Resources().DiskBytes)
@@ -271,7 +271,7 @@ func TestCompactParallelScanFallsBackWhenBudgetAdmitsOneReader(t *testing.T) {
 	used, err := d.scanCompactSummariesParallel(context.Background(), nil, false, func(Summary) error { return nil })
 	require.NoError(t, err)
 	require.False(t, used)
-	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 3}, Match: func(s Summary) bool { return s.ID == 2050 }})
+	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 3}, Match: func(s Summary) bool { return s.ID == 2050 }})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, q.Count())
 	require.NoError(t, q.Close())
@@ -289,7 +289,7 @@ func TestCompactParallelScanCorruptLateDirectoryReleasesWorkers(t *testing.T) {
 	_, err = writable.WriteAt([]byte{255}, compactHeaderBytes+1700*compactIndexBytes+32)
 	require.NoError(t, err)
 	require.NoError(t, writable.Close())
-	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 3}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
+	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 3}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
 	require.ErrorContains(t, err, "checksum")
 	require.Nil(t, q)
 	require.Equal(t, baseline.DiskBytes, d.Resources().DiskBytes)
@@ -305,7 +305,7 @@ func TestCompactParallelQueryCancellationProgressAndDiskCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var progress []QueryProgress
-	q, err := d.Query(ctx, QuerySpec{Token: Token{Dataset: 17, Query: 3}, Match: func(Summary) bool { return true }, Progress: func(p QueryProgress) {
+	q, err := d.Query(ctx, QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 3}, Match: func(Summary) bool { return true }, Progress: func(p QueryProgress) {
 		progress = append(progress, p)
 		if p.Scanned == 1024 {
 			cancel()
@@ -320,7 +320,7 @@ func TestCompactParallelQueryCancellationProgressAndDiskCleanup(t *testing.T) {
 
 	diskLimit := d.storage.limits.DiskBytes
 	d.storage.limits.DiskBytes = baseline.DiskBytes + queryHeaderBytes + queryEntryBytes*5
-	q, err = d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 4}, Match: func(s Summary) bool { return s.ID != 100 }})
+	q, err = d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 4}, Match: func(s Summary) bool { return s.ID != 100 }})
 	d.storage.limits.DiskBytes = diskLimit
 	require.ErrorContains(t, err, "disk budget")
 	require.Nil(t, q)

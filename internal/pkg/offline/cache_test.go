@@ -23,7 +23,7 @@ func TestCacheEvictionOwnershipAndPins(t *testing.T) {
 	ds, err := b.Finish(ctx)
 	require.NoError(t, err)
 	d := ds.(*diskDataset)
-	token := Token{Dataset: 1}
+	token := Token{Revision: CompletedRevision, Dataset: 1}
 	first, err := d.Detail(ctx, token, 0)
 	require.NoError(t, err)
 	first.Packet.RawData[0] = 255
@@ -41,7 +41,7 @@ func TestCacheEvictionOwnershipAndPins(t *testing.T) {
 		usage := s.Resources()
 		require.LessOrEqual(t, usage.CachedBytes+usage.PinnedBytes+usage.InFlightBytes+usage.PrefetchBytes, s.limits.CacheBytes)
 	}
-	require.Nil(t, s.cached(cacheKey{d, 0, 2}), "first frame should be evicted under pressure")
+	require.Nil(t, s.cached(cacheKey{d, 0, 2, CompletedRevision}), "first frame should be evicted under pressure")
 	require.Zero(t, pin.Value.Packet.RawData[0])
 	again, err = d.Detail(ctx, token, 0)
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestConcurrentCacheReadersRemainBounded(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 30; j++ {
-				pin, err := d.PinDetail(ctx, Token{Dataset: 1}, 0)
+				pin, err := d.PinDetail(ctx, Token{Revision: CompletedRevision, Dataset: 1}, 0)
 				if err != nil {
 					t.Error(err)
 					return
@@ -110,7 +110,7 @@ func TestLargeSummaryPageAndDetailFitTightCache(t *testing.T) {
 	d, err := b.Finish(ctx)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, d.Close()); require.NoError(t, s.Close()) }()
-	token := Token{Dataset: 1, Query: 1}
+	token := Token{Revision: CompletedRevision, Dataset: 1, Query: 1}
 	q, err := AllPackets(ctx, d, token)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, q.Close()) }()

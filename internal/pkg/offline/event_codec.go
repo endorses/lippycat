@@ -18,7 +18,7 @@ import (
 
 const (
 	eventFrameBytes        = 32
-	eventStreamHeaderBytes = 32
+	eventStreamHeaderBytes = 40
 	eventOffsetBytes       = 16
 	eventManifestBytes     = 64
 )
@@ -123,6 +123,7 @@ func eventStreamHeader(magic [8]byte, generation DatasetGeneration, count uint64
 	binary.LittleEndian.PutUint16(h[8:10], EventSchemaVersion)
 	binary.LittleEndian.PutUint64(h[16:24], uint64(generation))
 	binary.LittleEndian.PutUint64(h[24:32], count)
+	binary.LittleEndian.PutUint64(h[32:40], uint64(CompletedRevision))
 	return h
 }
 

@@ -22,6 +22,10 @@ func (b *Builder) UpdateDetail(ctx context.Context, id PacketID, mutate func(*De
 	if b.failure != nil {
 		return b.failure
 	}
+	if b.d.revision == BaseRevision {
+		b.failure = ErrAnalysisPending
+		return ErrAnalysisPending
+	}
 	defer func() {
 		if err != nil {
 			b.failure = err
@@ -84,7 +88,7 @@ func (b *Builder) UpdateDetail(ctx context.Context, id PacketID, mutate func(*De
 	}
 	d.storage.mu.Lock()
 	for _, kind := range [...]uint16{1, 2} {
-		if entry := d.storage.cache[cacheKey{dataset: d, id: id, kind: kind}]; entry != nil {
+		if entry := d.storage.cache[cacheKey{dataset: d, id: id, kind: kind, revision: d.revision}]; entry != nil {
 			d.storage.removeCacheLocked(entry)
 		}
 	}

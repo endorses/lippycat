@@ -137,7 +137,7 @@ func BenchmarkOfflineFilter(b *testing.B) {
 					require.NotNil(b, expression)
 				}
 
-				token := offline.Token{Dataset: session.Dataset.Generation(), Query: offline.QueryGeneration(i + 1)}
+				token := offline.Token{Revision: offline.CompletedRevision, Dataset: session.Dataset.Generation(), Query: offline.QueryGeneration(i + 1)}
 				spec := offline.QuerySpec{Token: token, Description: chain.GetFilterDescriptions()}
 				if !chain.IsEmpty() {
 					spec.Expression = expression

@@ -118,6 +118,15 @@ type Model struct {
 	captureStackRatio            float64
 	offlineController            *offlineController
 	offlineSession               *offlineIndexedSession
+	offlineTasks                 *offlineTaskOwner
+	offlineView                  *offlineRevisionSnapshot
+	offlinePacketViews           map[offline.AnalysisRevision]*offlineBrowserState
+	offlineFilterOwners          map[offline.AnalysisRevision]*offlineFilterOwner
+	offlineRelatedOwner          *offlineRelatedOwner
+	offlineAnalysisState         string
+	offlineAnalysisError         string
+	offlineAnalysisCancelled     bool
+	offlinePendingPacketFilter   *offlinePendingFilter
 	offlineBrowse                *offlineBrowserState
 	offlineFilter                *offlineFilterState
 	offlineFilterGeneration      offline.QueryGeneration
@@ -529,10 +538,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.openOffline(value)
 	case offlineRelatedMsg:
 		return m.handleOfflineRelated(value)
+	case offlineBaseReadyMsg:
+		return m.completeOfflineBase(value)
+	case offlineAnalysisCompleteMsg:
+		return m.completeOfflineAnalysis(value)
+	case offlineExportCompleteMsg:
+		if m.offlineSession != value.session || m.offlineExport != value.state || value.token != value.state.token {
+			return m, nil
+		}
+		return m.handleSaveCompleteMsg(value.state.result)
 	case offlineOpenCompleteMsg:
 		return m.completeOffline(value)
 	case offlineProgressMsg:
-		if value.generation == m.offlineGeneration && m.offlineOpening {
+		if value.generation == m.offlineGeneration && (m.offlineOpening || (value.revision == m.offlineRevision() && m.offlineAnalysisState == "Analysis running")) {
 			m.offlineController.mu.Lock()
 			p := m.offlineController.progress
 			m.offlineController.mu.Unlock()
@@ -540,7 +558,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.offlineProgress = p
 			}
 			m.offlineProgress.Elapsed = time.Since(m.offlineStarted)
-			return m, offlineProgressCmd(value.generation)
+			return m, offlineProgressCmd(value.generation, value.revision)
 		}
 		return m, nil
 	case offlineCleanupMsg:
@@ -575,6 +593,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.offlineCleanupError = ""
 			m.offlineRestart = nil
 			m.offlineSession = nil
+			m.uiState.DetailsPanel.SetAnalysisPending(false)
+			m.offlineView = nil
+			m.offlinePacketViews = nil
+			m.offlineFilterOwners = nil
+			m.offlineTasks = nil
+			m.offlineExport = nil
+			m.uiState.SaveInProgress = markedExportActive(m.markedExports.current())
+			m.offlineRelatedOwner = nil
 			m.offlineBrowse = nil
 			m.detachOfflineEvents()
 			m.offlineLastClickValid = false

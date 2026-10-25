@@ -24,7 +24,14 @@ import (
 type offlineExportState struct {
 	cancel context.CancelFunc
 	done   chan struct{}
+	token  offline.Token
 	result SaveCompleteMsg // published by closing done
+}
+
+type offlineExportCompleteMsg struct {
+	session *offlineIndexedSession
+	state   *offlineExportState
+	token   offline.Token
 }
 
 func (m *Model) exportRunning() bool {
@@ -60,23 +67,23 @@ func (m *Model) startOfflineExport(path string) tea.Cmd {
 		return m.uiState.Toast.Show("A packet export is already in progress.", components.ToastInfo, components.ToastDurationNormal)
 	}
 	if m.offlineBrowse == nil {
-		b := &offlineBrowser{dataset: m.offlineSession.Dataset, results: make(map[*offlineBrowseResult]struct{})}
-		m.offlineSession.browser = b
-		m.offlineBrowse = &offlineBrowserState{owner: b}
+		state, err := m.packetBrowserFor(m.offlineDataset())
+		if err != nil {
+			return m.markError(err)
+		}
+		m.offlineBrowse = state
 	}
 	b := m.offlineBrowse.owner
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
-		return func() tea.Msg {
-			return SaveCompleteMsg{Path: path, Error: fmt.Errorf("offline packet dataset is closing")}
-		}
+		return m.markError(fmt.Errorf("offline packet dataset is closing"))
 	}
 	if b.query == nil && !b.closed {
-		q, err := offline.AllPackets(context.Background(), b.dataset, offline.Token{Dataset: b.dataset.Generation(), Query: 1})
+		q, err := offline.AllPackets(context.Background(), b.dataset, offline.Token{Dataset: b.dataset.Generation(), Revision: b.dataset.Revision(), Query: 1})
 		if err != nil {
 			b.mu.Unlock()
-			return func() tea.Msg { return SaveCompleteMsg{Path: path, Error: err} }
+			return m.markError(err)
 		}
 		b.query = q
 	}
@@ -85,21 +92,37 @@ func (m *Model) startOfflineExport(path string) tea.Cmd {
 	pin, err := offline.PinQuery(b.query)
 	b.mu.Unlock()
 	if err != nil {
-		return func() tea.Msg { return SaveCompleteMsg{Path: path, Error: err} }
+		return m.markError(err)
+	}
+	return m.startOfflinePinnedExport(path, pin, pin.IterateRaw, "Saving packets… Esc cancels export")
+}
+
+func (m *Model) startOfflinePinnedExport(path string, pin *offline.QueryPin, iterate offlineRawIterator, label string) tea.Cmd {
+	owner, err := m.offlineTaskOwner()
+	if err != nil {
+		return m.markError(errors.Join(err, pin.Close()))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &offlineExportState{cancel: cancel, done: make(chan struct{})}
+	s := &offlineExportState{cancel: cancel, done: make(chan struct{}), token: pin.Token()}
+	owner.mu.Lock()
+	if owner.closed {
+		owner.mu.Unlock()
+		cancel()
+		return m.markError(errors.Join(errors.New("offline capture is closing"), pin.Close()))
+	}
 	m.offlineExport = s
-	m.offlineSession.export = s
+	owner.export = s
+	owner.mu.Unlock()
+	session := m.offlineSession
 	m.uiState.SaveInProgress = true
 	go func() {
 		defer close(s.done)
 		defer cancel()
-		count, err := exportOfflinePCAP(ctx, path, pin.IterateRaw)
+		count, err := exportOfflinePCAP(ctx, path, iterate)
 		err = errors.Join(err, pin.Close())
 		s.result = SaveCompleteMsg{Success: err == nil, Path: path, PacketsSaved: count, Error: err}
 	}()
-	return tea.Batch(m.uiState.Toast.ShowWithKey("Saving packets… Esc cancels export", components.ToastInfo, 0, components.ToastKeyFileSave), func() tea.Msg { <-s.done; return s.result })
+	return tea.Batch(m.uiState.Toast.ShowWithKey(label, components.ToastInfo, 0, components.ToastKeyFileSave), func() tea.Msg { <-s.done; return offlineExportCompleteMsg{session: session, state: s, token: s.token} })
 }
 
 type offlineRawIterator func(context.Context, func(offline.RawRecord) error) error

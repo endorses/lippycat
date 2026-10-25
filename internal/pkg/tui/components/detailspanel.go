@@ -22,6 +22,7 @@ type DecryptedDataGetter func(srcIP, dstIP, srcPort, dstPort string) (clientData
 
 // DetailsPanel displays detailed information about a selected packet
 type DetailsPanel struct {
+	analysisPending     bool
 	viewport            viewport.Model
 	packet              *PacketDisplay
 	width               int
@@ -55,6 +56,19 @@ func (d *DetailsPanel) SetTheme(theme themes.Theme) {
 // SetDecryptedDataGetter sets the callback for retrieving decrypted TLS data
 func (d *DetailsPanel) SetDecryptedDataGetter(getter DecryptedDataGetter) {
 	d.decryptedDataGetter = getter
+}
+
+// SetAnalysisPending keeps unknown application metadata distinct from absence.
+func (d *DetailsPanel) SetAnalysisPending(pending bool) {
+	if d.analysisPending == pending {
+		return
+	}
+	d.analysisPending = pending
+	if d.ready {
+		offset := d.viewport.YOffset
+		d.viewport.SetContent(d.renderContent())
+		d.viewport.SetYOffset(offset)
+	}
 }
 
 // SetPacket sets the packet to display
@@ -203,7 +217,11 @@ func (d *DetailsPanel) renderContent() string {
 
 	content.WriteString(labelStyle.Render("Protocol: "))
 	protocolStyle := valueStyle.Foreground(d.getProtocolColor(d.packet.Protocol))
-	content.WriteString(protocolStyle.Render(d.packet.Protocol))
+	protocol := d.packet.Protocol
+	if d.analysisPending {
+		protocol = "Pending ordered analysis"
+	}
+	content.WriteString(protocolStyle.Render(protocol))
 	content.WriteString("\n")
 
 	content.WriteString(labelStyle.Render("Origin: "))
@@ -228,7 +246,11 @@ func (d *DetailsPanel) renderContent() string {
 	content.WriteString("\n")
 
 	content.WriteString(labelStyle.Render("Info: "))
-	content.WriteString(valueStyle.Render(d.packet.Info))
+	info := d.packet.Info
+	if d.analysisPending {
+		info = "Application metadata and decrypted content pending ordered analysis"
+	}
+	content.WriteString(valueStyle.Render(info))
 
 	// Layer Summary Section (parsed from raw packet data)
 	if layerSummary := d.renderLayerSummary(contentWidth); layerSummary != "" {
@@ -534,7 +556,7 @@ func (d *DetailsPanel) renderContent() string {
 	}
 
 	// Decrypted Data Section (for TLS-encrypted traffic with keylog)
-	if d.decryptedDataGetter != nil && d.packet.Protocol == "TLS" {
+	if !d.analysisPending && d.decryptedDataGetter != nil && d.packet.Protocol == "TLS" {
 		clientData, serverData := d.decryptedDataGetter(d.packet.SrcIP, d.packet.DstIP, d.packet.SrcPort, d.packet.DstPort)
 		if len(clientData) > 0 || len(serverData) > 0 {
 			writeDetailSectionBreak(&content)

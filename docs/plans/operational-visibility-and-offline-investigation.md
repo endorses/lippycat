@@ -1,7 +1,7 @@
 # Operational visibility and offline investigation implementation plan
 
 **Date:** 2026-10-25
-**Status:** In progress; workstreams 1–4 implemented and verified; workstreams 5–6 pending
+**Status:** In progress; workstreams 1–5 implemented and verified; workstream 6 pending
 **Assessment baseline:** `8ba8ed27`
 **Scope:** Six ordered workstreams selected from the existing plans and research
 
@@ -292,41 +292,41 @@ and `internal/pkg/tui/offline_{indexer,lifecycle,export,event}.go`.
 
 ### Implementation
 
-- [ ] Refactor construction into complete normalization/order/base finalization
+- [x] Refactor construction into complete normalization/order/base finalization
       followed by bounded ordered analysis. Publish an immutable complete base;
       retain stable logical packet IDs and never expose scan-time provisional IDs.
-- [ ] Add analysis revision to asynchronous request/result tokens, including
+- [x] Add analysis revision to asynchronous request/result tokens, including
       errors, query/detail/export pins, cache keys, and stale-result checks.
       Specify base-only and completed-analysis revisions explicitly.
-- [ ] Apply the existing field dependency inventory to navigation, details,
+- [x] Apply the existing field dependency inventory to navigation, details,
       filters, statistics, and export. Permit complete base-field operations while
       analysis runs; show analysis-dependent fields and operations as pending.
       Treat Protocol and Info as dependent unless equivalence is demonstrated.
-- [ ] Keep complete raw unfiltered export available from the base. Pin
+- [x] Keep complete raw unfiltered export available from the base. Pin
       analysis-dependent queries/exports to one completed immutable revision;
       refresh active queries explicitly on publication while preserving valid
       selection IDs.
-- [ ] Atomically publish finalized metadata, protocol statistics, and workstream
+- [x] Atomically publish finalized metadata, protocol statistics, and workstream
       4's complete event dataset as one completed analysis revision. Calls retain
       their documented bounded history. This extends the original plan's bounded
       Events-view clause only for offline sessions; live/remote retention stays
       bounded.
-- [ ] Retain a valid base after analysis failure or cancellation with an explicit
+- [x] Retain a valid base after analysis failure or cancellation with an explicit
       status. Release failed overlay resources while keeping revisions already
       pinned by readers alive until those readers close.
-- [ ] Extend cancellation and ownership across base construction, background
+- [x] Extend cancellation and ownership across base construction, background
       analysis, event storage, queries, and export. Close source/backing handles
       only after workers/readers join; preserve source-integrity checks, budgets,
       cleanup error reporting, and retryable cleanup ownership.
-- [ ] Test pending-field filters, stale revision successes/errors, pinned exports
+- [x] Test pending-field filters, stale revision successes/errors, pinned exports
       across publication, analyzer EOF failures, cancellation after base success,
       replacement during analysis, source mutation, and concurrent close. Include
       workstream 4's complete-history and query invariants in these tests.
-- [ ] Run the relevant original correctness/format/ownership acceptance cases.
+- [x] Run the relevant original correctness/format/ownership acceptance cases.
       Measure complete-base readiness, first useful page, and completed-analysis
       time separately with reproducible generated captures; record any unavailable
       private fixtures without inventing substitutes or performance gates.
-- [ ] Update progress/readiness UI, operator documentation, and original milestone
+- [x] Update progress/readiness UI, operator documentation, and original milestone
       status to match the delivered behavior. Leave optional cache/reuse work
       explicitly deferred.
 
@@ -429,8 +429,8 @@ decryption, application attribution, and coherence scoring require separate scop
 | 1. Failover integration      | `9bd9b347`, `0e1c05d4` | Runtime, custody, topology, expiry, race and build checks below                | Complete    |
 | 2. ECH visibility            | `07945e59`             | Parser/runtime/wire/log/CLI/TUI race checks; manual and build matrix           | Complete    |
 | 3. DNS notices               | `2767d2bf`             | Canonical runtime/transport/log/action/UI race suites, manual and build matrix | Complete    |
-| 4. Offline event history     | This increment         | Complete storage/UI lifecycle race suites, build matrix and translated manual  | Complete    |
-| 5. Compact-index Milestone B | Pending                | Pending                                                                        | Not started |
+| 4. Offline event history     | `e966aefb`             | Complete storage/UI lifecycle race suites, build matrix and translated manual  | Complete    |
+| 5. Compact-index Milestone B | This increment         | Revision/pipeline/UI race checks, generated readiness report, build and manual | Complete    |
 | 6A. SSH/HASSH                | Pending                | Pending                                                                        | Not started |
 | 6B. QUIC study               | Pending                | Pending                                                                        | Not started |
 
@@ -693,3 +693,85 @@ cross-boundary persistence/ownership evidence. **CLOSED**, discovery 1/1, primar
 The event-history extension in the original scalable-offline plan is fulfilled
 and checked. Call-history persistence remains separate and deferred, as selected
 by this umbrella plan. No packet completeness or retention milestone is reopened.
+
+### Workstream 5 checkpoint — 2026-10-25
+
+Starting revision: `e966aefb`; the W4 tree was clean before W5 began. The single
+W4 closure campaign is complete and is not reopened by this work. Separately
+owned backend, pipeline/session, and UI changes implement immutable base and
+completed-analysis revisions over shared validated backings. All W5 checklist
+items remain unchecked until their implementation and named correctness cases
+are verified. No new performance acceptance target is adopted.
+
+### Workstream 6 parser preparation — 2026-10-25
+
+Isolated `internal/pkg/ssh` parser work began from `e966aefb` while the separately
+owned W5 backend/pipeline/UI changes were in progress. These files are excluded
+from the W5 release increment; SSH runtime/schema/log/TUI integration follows it.
+The current maintained Corelight HASSH implementation and RFC 4251/4253/8308
+were checked directly. The new parser preserves exact list order and requires
+independent endpoint role evidence, with bounded per-direction framing and no
+encrypted rekey parsing. It introduces no dependency.
+
+`go test -race ./internal/pkg/ssh -count=1` passed, including published client
+reference, independently calculated server reference, asymmetric-direction,
+segmentation/ownership, invalid-list/length, partial, NEWKEYS and fuzz-seed cases.
+A focused fuzz-seed rerun passed after tightening the error-state assertion.
+These are parser tests only; no W6 production integration/completion task is
+checked by this preparation checkpoint.
+
+### Workstream 5 completion — 2026-10-25
+
+Complete ordered base revision 0 now publishes before application analysis.
+Completed revision 1 owns independent immutable metadata, statistics and complete
+Events history over the same validated backing leases. Exact revision tokens bind
+queries, caches, manifests, pages, details and pins. Pending fields are explicit;
+base-field filters and raw exports remain usable. Completed query refresh preserves
+PacketID selection, and failures preserve the installed query and its revision.
+Analysis cancellation/failure retains the base; session replacement cancels all
+owners before joining them and preserves failed cleanup for retry. Optional
+persistent reuse remains deferred.
+
+Verification passed using the shared task cache and authorized host execution:
+
+```sh
+go test -race ./internal/pkg/offline
+go test -race -tags all ./internal/pkg/tui -run 'TestOffline(Indexer|Compact|Locator|Session|Progressive)' -count=1 -timeout=3m
+go test -race -tags all ./internal/pkg/tui ./internal/pkg/tui/components ./internal/pkg/tui/store -count=1
+go test -race -tags all ./internal/pkg/tui/components -count=1
+go test -race -tags all ./internal/pkg/tui -run '^(TestOfflineProgressive|TestOfflineLifecycle|TestOfflineBrowser|TestOfflineFilter|TestOfflineEvent|TestOfflineMark|TestOfflineExport)' -count=1
+go test -race -tags all ./internal/pkg/tui -run '^TestOfflineSessionDiscardCandidate' -count=1 -timeout=90s
+go test -tags tui ./internal/pkg/tui ./internal/pkg/tui/components -run '^(TestOfflineProgressive|TestOfflineReadiness)' -count=1
+make build-matrix
+make manual-check
+make manual
+```
+
+The first combined UI run exposed two component assertions about count-label
+prefixes; the labels retain those prefixes with readiness qualifiers, and the
+complete component race suite subsequently passed. Final focused UI races passed
+after the closure fixes, and the full offline race suite passed again (11.672 s).
+Correctness coverage includes 1086 mixed-source/protocol rows with completed-path
+packet/metadata/event parity, exact revision rejection, immutable pinned exports,
+source mutation and frozen-handle ownership, query selection, quota/EOF failure,
+accepted cancellation, replacement, concurrent close and retryable cleanup.
+All 47 manual helper tests passed; CA/DE catalogs have 5935/5935 current
+translations and all three editions built with structural parity.
+
+The single bounded closure campaign found two P2 defects: failed constructor
+cleanup discarded its retry owner, and accepted cancellation could lose to an
+already queued successful analysis result. Constructors now return a cleanup-only
+Builder with the error when removal fails, and all session sites retain it before
+checking that error. Cancellation wins before publication and disposes of the
+candidate asynchronously without touching base exports. Real permission-denied
+constructor regressions and candidate-discard retry/concurrent-close regressions
+passed. One integrated check confirmed both fixes and their ownership boundaries.
+**CLOSED**, discovery 1/1, primary 1/1, integrated 1/1, supplemental 0, with no
+remaining material finding.
+
+[Generated readiness observations](../research/watch-file-progressive-readiness.md)
+separate base readiness, first useful page and completed analysis. They are one
+reproducible observation, not acceptance thresholds. The private capture was
+unavailable. Original compact-plan Phase 5 is fulfilled; the selected Phase 6
+correctness/readiness work is recorded there without claiming the historical
+private/performance matrix or optional reuse was completed.

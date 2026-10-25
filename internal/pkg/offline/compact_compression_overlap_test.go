@@ -57,7 +57,7 @@ func TestCompactCompressionOverlapEmptyBatchBarrierAndClose(t *testing.T) {
 		if finish {
 			d, err := b.Finish(context.Background())
 			require.NoError(t, err)
-			_, err = d.Detail(context.Background(), Token{Dataset: 17}, compactRows-1)
+			_, err = d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, compactRows-1)
 			require.NoError(t, err)
 			require.NoError(t, d.Close())
 		} else {
@@ -160,7 +160,7 @@ func TestCompactCompressionOverlapAmendmentBarrier(t *testing.T) {
 	require.Nil(t, b.d.compact.overlap)
 	d, err := b.Finish(context.Background())
 	require.NoError(t, err)
-	got, err := d.Detail(context.Background(), Token{Dataset: 17}, 0)
+	got, err := d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 0)
 	require.NoError(t, err)
 	require.Equal(t, "finalized", got.Packet.Info)
 	require.Equal(t, "call", got.Packet.VoIPData.CallID)
@@ -202,7 +202,7 @@ func TestCompactCompressionOverlapMetadataTransition(t *testing.T) {
 	require.False(t, b.d.compact.overlap.pending)
 	d, err := b.Finish(context.Background())
 	require.NoError(t, err)
-	got, err := d.Detail(context.Background(), Token{Dataset: 17}, compactRows+1)
+	got, err := d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, compactRows+1)
 	require.NoError(t, err)
 	require.Equal(t, "retained-override", got.Packet.VoIPData.CallID)
 	require.NoError(t, d.Close())

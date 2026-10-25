@@ -255,22 +255,24 @@ func (bs *BridgeStatistics) deliveredPackets() int64 {
 
 // StatisticsView displays statistics
 type StatisticsView struct {
-	viewport          viewport.Model
-	scrollbarDrag     scrollbarDrag
-	width             int
-	displayWidth      int
-	height            int
-	theme             themes.Theme
-	stats             *Statistics
-	offlineGlobal     *offline.Statistics
-	offlineMatching   *offline.Statistics
-	offlineCachedRows int
-	offlineResources  offline.ResourceUsage
-	bridgeStats       *BridgeStatistics
-	ready             bool
-	dirty             bool      // Content needs re-render
-	lastRender        time.Time // Last time content was rendered
-	isVisible         bool      // Tab is currently visible
+	viewport                viewport.Model
+	scrollbarDrag           scrollbarDrag
+	width                   int
+	displayWidth            int
+	height                  int
+	theme                   themes.Theme
+	stats                   *Statistics
+	offlineAnalysisPending  bool
+	offlineGlobal           *offline.Statistics
+	offlineMatching         *offline.Statistics
+	offlineMatchingRevision offline.AnalysisRevision
+	offlineCachedRows       int
+	offlineResources        offline.ResourceUsage
+	bridgeStats             *BridgeStatistics
+	ready                   bool
+	dirty                   bool      // Content needs re-render
+	lastRender              time.Time // Last time content was rendered
+	isVisible               bool      // Tab is currently visible
 
 	// Phase 1: Core infrastructure
 	rateTracker *RateTracker // Time-series rate sampling
@@ -291,10 +293,11 @@ type StatisticsView struct {
 	distributedStats *DistributedStats // Aggregated distributed fleet statistics
 
 	// Phase 5: Protocol-specific stats
-	tlsObservations  TLSObservationStats
-	protocolRegistry *ProtocolStatsRegistry // Registry of protocol stats providers
-	voipProvider     *VoIPStatsProvider     // VoIP-specific stats provider
-	selectedProtocol string                 // Currently selected protocol filter
+	tlsObservationsComplete bool
+	tlsObservations         TLSObservationStats
+	protocolRegistry        *ProtocolStatsRegistry // Registry of protocol stats providers
+	voipProvider            *VoIPStatsProvider     // VoIP-specific stats provider
+	selectedProtocol        string                 // Currently selected protocol filter
 
 	// Phase 6: TUI process metrics
 	cpuTracker *CPUTracker // CPU usage history for sparkline
@@ -692,7 +695,7 @@ func (s *StatisticsView) GetSelectedProtocol() string {
 // HasProtocolStats returns true if there are protocol-specific stats to show.
 func (s *StatisticsView) HasProtocolStats() bool {
 	if s.selectedProtocol == "HTTPS/TLS" {
-		return s.tlsObservations.Rows > 0
+		return s.tlsObservationsComplete || s.tlsObservations.Rows > 0
 	}
 	if s.protocolRegistry == nil || s.selectedProtocol == "All" {
 		return false
@@ -948,6 +951,9 @@ func (s *StatisticsView) View() string {
 
 // renderContent generates the statistics content based on current sub-view
 func (s *StatisticsView) renderContent() string {
+	if s.offlineAnalysisPending {
+		return s.renderOfflineStatistics() + "\n\nProtocol statistics, Events, Calls and application metadata pending ordered analysis."
+	}
 	if s.stats == nil || s.stats.TotalPackets == 0 {
 		parts := []string{s.renderOfflineStatistics()}
 		if s.HasProtocolStats() {
@@ -3083,9 +3089,12 @@ func (s *StatisticsView) renderTUIMetrics(titleStyle, labelStyle, valueStyle lip
 // renderProtocolStats renders protocol-specific statistics from the active provider.
 // Returns a full-width card with protocol stats in columnar layout.
 func (s *StatisticsView) renderProtocolStats() string {
-	if s.selectedProtocol == "HTTPS/TLS" && s.tlsObservations.Rows > 0 {
+	if s.selectedProtocol == "HTTPS/TLS" && (s.tlsObservationsComplete || s.tlsObservations.Rows > 0) {
 		counts := s.tlsObservations
 		content := fmt.Sprintf("ECH offered / ClientHello: %d / %d\nScope: retained canonical TLS events\nTLS rows without ClientHello evidence: %d", counts.ECHOffered, counts.ClientHellos, counts.Unavailable)
+		if s.tlsObservationsComplete {
+			content = fmt.Sprintf("ECH offered / ClientHello: %d / %d\nScope: complete offline canonical analysis", counts.ECHOffered, counts.ClientHellos)
+		}
 		return dashboard.NewCard("TLS OBSERVATIONS", content, s.theme, dashboard.WithWidth(s.width-2)).Render()
 	}
 	if s.protocolRegistry == nil || s.selectedProtocol == "All" {
@@ -3125,10 +3134,24 @@ type TLSObservationStats struct {
 
 // SetTLSObservations updates the scope-qualified TLS statistics card.
 func (s *StatisticsView) SetTLSObservations(stats TLSObservationStats) {
-	if s.tlsObservations == stats {
+	if !s.tlsObservationsComplete && s.tlsObservations == stats {
 		return
 	}
 	s.tlsObservations = stats
+	s.tlsObservationsComplete = false
+	s.dirty = true
+	s.lastRender = time.Time{}
+}
+
+// SetOfflineTLSObservations installs counters from the complete ordered runtime,
+// independent of the bounded compatibility event ring.
+func (s *StatisticsView) SetOfflineTLSObservations(clientHellos, echOffered uint64) {
+	stats := TLSObservationStats{ClientHellos: clientHellos, ECHOffered: echOffered}
+	if s.tlsObservationsComplete && s.tlsObservations == stats {
+		return
+	}
+	s.tlsObservations = stats
+	s.tlsObservationsComplete = true
 	s.dirty = true
 	s.lastRender = time.Time{}
 }

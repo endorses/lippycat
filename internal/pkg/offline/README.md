@@ -8,6 +8,9 @@ Create one `Storage` with validated `ResourceLimits` and share it between the
 current dataset and replacement builders. This keeps their disk and display
 memory use under one budget. `NewBuilder` creates a private child directory;
 only that owned child is eligible for cleanup.
+A constructor error may return a nonnil cleanup-only `Builder` when removal
+fails. Retain that owner before checking the error and retry `Close`; it cannot
+append or publish. Successful failure-path cleanup returns a nil builder.
 
 Append finalized logical `Detail` records in order. The builder assigns
 zero-based packet IDs and ignores caller tokens/IDs.
@@ -64,6 +67,31 @@ record, and 64 sources. The watch command exposes `--offline-session-dir`, `--of
 `--offline-max-sources`, also configurable through `watch.offline` in Viper. The precise framing,
 metadata projection, and ownership contract is documented in
 [offline contracts](../../../docs/design/watch-file-offline-contracts.md).
+
+Production progressive opens use `NewCompactBaseBuilder` for complete ordered
+base revision 0, followed by `NewCompactRevisionBuilder` for independent completed
+analysis revision 1. The base contains only B-ready fields; a base read never
+runs the application metadata decoder. Protocol, Info and application fields
+remain pending until completed analysis. No published dataset is amended.
+`Dataset.Revision()` and `Token.Revision` must match exactly on requests and pins;
+zero identifies the base and never aliases the current revision. Query, cache,
+manifest and typed-block identities include the revision.
+
+`CheckQueryReadiness` rejects base operations requiring application fields with
+`ErrAnalysisPending` before scanning or admitting query files. Expressions proven
+to use base fields and raw iteration remain available; opaque predicates are
+analysis-dependent. `Query.Position` performs bounded ordered lookup of a stable
+PacketID when refreshing a query after publication. The caller preserves the last
+installed query if a refresh fails or is cancelled.
+
+Revisions share an explicit lease on originally validated source handles and
+owned snapshot/decompressed/derived backings. Metadata directories are independent;
+retiring the base cannot invalidate a completed revision or a pinned base export.
+Both metadata revisions and replacement sessions count toward shared resource
+limits. The session adapter retains the base after analysis failure/cancellation,
+publishes completed packets/statistics/events atomically, and cancels workers and
+exports before joining query owners during whole-session cleanup. Failed cleanup
+ownership remains retryable. Persistent reuse is not implemented.
 
 `NewEventBuilder` adds complete metadata event history under the same storage
 budgets. Append immutable arrivals in analysis order; `EventRowID` starts at one

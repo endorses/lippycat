@@ -82,7 +82,7 @@ func TestOfflineEventSinkPreservesAllKindsAndAmendedSnapshots(t *testing.T) {
 	require.EqualValues(t, len(want), dataset.Count())
 	require.EqualValues(t, 1, retained.Stats().Retained)
 	require.EqualValues(t, len(want), retained.Stats().Arrived)
-	query, err := offline.AllEvents(context.Background(), dataset, offline.Token{Dataset: 17, Query: 1})
+	query, err := offline.AllEvents(context.Background(), dataset, offline.Token{Revision: offline.CompletedRevision, Dataset: 17, Query: 1})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, query.Close()) }()
 	var index int

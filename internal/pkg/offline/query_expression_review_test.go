@@ -27,7 +27,7 @@ func TestCompactExpressionSelectedColumnsReview(t *testing.T) {
 				}
 				d.storage.releaseMemory(held)
 			}
-			q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 3}, Expression: e})
+			q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 17, Query: 3}, Expression: e})
 			require.NoError(t, err, "%s %s", op, field)
 			require.EqualValues(t, len(ids), q.Count(), "%s %s", op, field)
 			require.Equal(t, expected.Snapshot(), q.Statistics(), "%s %s", op, field)

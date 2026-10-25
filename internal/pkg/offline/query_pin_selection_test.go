@@ -12,7 +12,7 @@ import (
 
 func TestPinnedSelectionRangesFollowFilteredOrder(t *testing.T) {
 	d := queryDataset(t, 12)
-	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 7, Query: 1}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
+	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 1}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, q.Close()) })
 	pin, err := PinQuery(q)
@@ -43,7 +43,7 @@ func TestPinnedSelectedRawIncludesFilteredOutRecordsWithoutDecoding(t *testing.T
 	t.Cleanup(func() { require.NoError(t, storage.Close()) })
 	var decodes atomic.Int64
 	d := compactRawDataset(t, storage, 1, &decodes)
-	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 1, Query: 1}, Match: func(s Summary) bool { return s.ID == 1 }})
+	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 1, Query: 1}, Match: func(s Summary) bool { return s.ID == 1 }})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, q.Close()) })
 	pin, err := PinQuery(q)
@@ -72,7 +72,7 @@ func TestPinnedSelectedRawIncludesFilteredOutRecordsWithoutDecoding(t *testing.T
 
 func TestPinnedSelectionSurvivesPendingDatasetClose(t *testing.T) {
 	d := queryDataset(t, 8)
-	q, err := AllPackets(context.Background(), d, Token{Dataset: 7, Query: 1})
+	q, err := AllPackets(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 7, Query: 1})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, q.Close()) })
 	pin, err := PinQuery(q)

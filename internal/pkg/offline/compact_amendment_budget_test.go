@@ -44,7 +44,7 @@ func TestCompactAmendedCombinedDetailBudget(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, d.Close()) })
-				got, err := d.Detail(ctx, Token{Dataset: 17}, 2)
+				got, err := d.Detail(ctx, Token{Revision: CompletedRevision, Dataset: 17}, 2)
 				require.NoError(t, err)
 				require.Equal(t, body, got.Packet.VoIPData.Body)
 				require.NoError(t, d.Close())

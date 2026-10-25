@@ -33,13 +33,27 @@ type offlineFilterState struct {
 	protocol   *components.Protocol
 	cancelled  bool
 	jump       *offline.PacketID
+	browser    *offlineBrowserState
+	refresh    bool
+	preserve   *offline.PacketID
 }
 type offlineFilterMsg struct {
-	state *offlineFilterState
-	query offline.Query
-	err   error
+	state  *offlineFilterState
+	query  offline.Query
+	err    error
+	cursor uint64
 }
 type offlineFilterProgressMsg struct{ state *offlineFilterState }
+
+func (o *offlineFilterOwner) Cancel() {
+	o.mu.Lock()
+	if o.cancel != nil {
+		o.cancel()
+	}
+	o.mu.Unlock()
+}
+
+func (o *offlineFilterOwner) Close() error { return o.close() }
 
 func (o *offlineFilterOwner) close() error {
 	o.mu.Lock()
@@ -100,7 +114,7 @@ func (m *Model) offlinePacketCount() uint64 {
 		}
 	}
 	if m.offlineSession != nil {
-		return m.offlineSession.Dataset.Count()
+		return m.offlineDataset().Count()
 	}
 	return 0
 }
@@ -112,19 +126,38 @@ func (m *Model) startOfflineFilter(chain *filters.FilterChain, protocol *compone
 		return nil
 	}
 	if m.offlineBrowse == nil {
-		b := &offlineBrowser{dataset: m.offlineSession.Dataset, results: make(map[*offlineBrowseResult]struct{})}
-		m.offlineSession.browser = b
-		m.offlineBrowse = &offlineBrowserState{owner: b}
+		state, err := m.packetBrowserFor(m.offlineDataset())
+		if err != nil {
+			return m.uiState.Toast.Show(err.Error(), components.ToastError, components.ToastDurationLong)
+		}
+		m.offlineBrowse = state
 	}
 	chain = chain.Clone()
 	expression, compileErr := chain.OfflineExpression()
 	if compileErr != nil {
 		return m.uiState.Toast.Show(compileErr.Error(), components.ToastError, components.ToastDurationLong)
 	}
-	o := m.offlineSession.filter
-	if o == nil {
-		o = &offlineFilterOwner{queries: make(map[offline.Query]struct{})}
-		m.offlineSession.filter = o
+	dataset := m.offlineDataset()
+	spec := offline.QuerySpec{}
+	if !chain.IsEmpty() {
+		spec.Expression = expression
+		spec.Match = func(summary offline.Summary) bool { return chain.Match(summary) }
+	}
+	if err := offline.CheckQueryReadiness(dataset.Revision(), spec); err != nil {
+		if errors.Is(err, offline.ErrAnalysisPending) {
+			m.offlinePendingPacketFilter = &offlinePendingFilter{chain: chain, protocol: protocol}
+			return m.uiState.Toast.Show("Filter pending ordered analysis; previous query remains active", components.ToastInfo, components.ToastDurationLong)
+		}
+		return m.uiState.Toast.Show(err.Error(), components.ToastError, components.ToastDurationLong)
+	}
+	m.offlinePendingPacketFilter = nil
+	o, ownerErr := m.filterOwnerFor(dataset.Revision())
+	if ownerErr != nil {
+		return m.uiState.Toast.Show(ownerErr.Error(), components.ToastError, components.ToastDurationLong)
+	}
+	target, ownerErr := m.packetBrowserFor(dataset)
+	if ownerErr != nil {
+		return m.uiState.Toast.Show(ownerErr.Error(), components.ToastError, components.ToastDurationLong)
 	}
 	m.cancelOfflineBrowserReads()
 	// Keep the last completed rows visible, but release the selected detail's
@@ -139,12 +172,19 @@ func (m *Model) startOfflineFilter(chain *filters.FilterChain, protocol *compone
 	b := m.offlineBrowse.owner
 	b.mu.Lock()
 	browserDone := b.done
+	previousQuery := b.query
+	previousCursor := m.uiState.PacketList.LogicalCursor()
 	cutoff := m.offlineBrowse.request
 	b.mu.Unlock()
 	m.offlineFilterGeneration++
-	s := &offlineFilterState{owner: o, token: offline.Token{Dataset: m.offlineSession.Dataset.Generation(), Query: m.offlineFilterGeneration + 1}, chain: chain, protocol: protocol}
+	s := &offlineFilterState{owner: o, token: offline.Token{Dataset: dataset.Generation(), Revision: dataset.Revision(), Query: m.offlineFilterGeneration + 1}, chain: chain, protocol: protocol, browser: target, refresh: target != m.offlineBrowse}
+	if s.refresh {
+		if selected := m.uiState.PacketList.GetSelectedPacket(); selected != nil && selected.CaptureID != 0 {
+			id := offline.PacketID(selected.CaptureID - 1)
+			s.preserve = &id
+		}
+	}
 	m.offlineFilter = s
-	dataset := m.offlineSession.Dataset
 	o.mu.Lock()
 	if o.cancel != nil {
 		o.cancel()
@@ -156,6 +196,7 @@ func (m *Model) startOfflineFilter(chain *filters.FilterChain, protocol *compone
 	o.done = done
 	o.progress = offline.QueryProgress{Token: s.token, Total: dataset.Count()}
 	o.mu.Unlock()
+	pageBudget := offlinePageBudget(m.offlineInstalled.Limits)
 	ch := make(chan tea.Msg, 1)
 	go func() {
 		defer close(done)
@@ -167,8 +208,23 @@ func (m *Model) startOfflineFilter(chain *filters.FilterChain, protocol *compone
 		}
 		var q offline.Query
 		var err error
+		if s.refresh && s.preserve == nil && previousQuery != nil && previousCursor < previousQuery.Count() {
+			page, pageErr := previousQuery.Page(ctx, offline.PageRequest{Token: previousQuery.Token(), Row: previousCursor, Limit: 1, MaxBytes: pageBudget})
+			if pageErr != nil {
+				ch <- offlineFilterMsg{state: s, err: pageErr}
+				return
+			}
+			if len(page.Rows) == 1 {
+				id := page.Rows[0].ID
+				s.preserve = &id
+			}
+			if pageErr = page.Close(); pageErr != nil {
+				ch <- offlineFilterMsg{state: s, err: pageErr}
+				return
+			}
+		}
 		if err = b.drainBefore(browserDone, cutoff); err != nil {
-			ch <- offlineFilterMsg{s, nil, err}
+			ch <- offlineFilterMsg{state: s, err: err}
 			return
 		}
 		o.mu.Lock()
@@ -181,7 +237,7 @@ func (m *Model) startOfflineFilter(chain *filters.FilterChain, protocol *compone
 			err = errors.Join(err, o.release(obsolete))
 		}
 		if err != nil {
-			ch <- offlineFilterMsg{s, nil, err}
+			ch <- offlineFilterMsg{state: s, err: err}
 			return
 		}
 		if err = ctx.Err(); err == nil {
@@ -198,12 +254,20 @@ func (m *Model) startOfflineFilter(chain *filters.FilterChain, protocol *compone
 			}
 			q, err = dataset.Query(ctx, spec)
 		}
+		cursor := uint64(0)
+		if err == nil && q != nil && s.preserve != nil {
+			var found bool
+			cursor, found, err = q.Position(ctx, *s.preserve)
+			if !found {
+				cursor = 0
+			}
+		}
 		o.mu.Lock()
 		if q != nil {
 			o.queries[q] = struct{}{}
 		}
 		o.mu.Unlock()
-		ch <- offlineFilterMsg{s, q, err}
+		ch <- offlineFilterMsg{state: s, query: q, err: err, cursor: cursor}
 	}()
 	return tea.Batch(func() tea.Msg { return <-ch }, offlineFilterTick(s))
 }
@@ -219,7 +283,7 @@ func (m Model) handleOfflineFilter(msg offlineFilterMsg) (Model, tea.Cmd) {
 		}
 		return nil
 	}
-	if m.offlineFilter != s || m.offlineSession == nil || m.offlineSession.Dataset.Generation() != s.token.Dataset || m.offlineLeaving || m.offlineOpening {
+	if m.offlineFilter != s || m.offlineSession == nil || m.offlineDataset().Generation() != s.token.Dataset || m.offlineRevision() != s.token.Revision || m.offlineLeaving || m.offlineOpening {
 		return m, dispose
 	}
 	m.offlineFilter = nil
@@ -235,7 +299,9 @@ func (m Model) handleOfflineFilter(msg offlineFilterMsg) (Model, tea.Cmd) {
 	s.owner.mu.Lock()
 	delete(s.owner.queries, msg.query)
 	s.owner.mu.Unlock()
-	b := m.offlineBrowse.owner
+	previousBrowser := m.offlineBrowse
+	m.offlineBrowse = s.browser
+	b := s.browser.owner
 	b.mu.Lock()
 	old := b.query
 	b.query = msg.query
@@ -256,6 +322,9 @@ func (m Model) handleOfflineFilter(msg offlineFilterMsg) (Model, tea.Cmd) {
 	m.resetCaptureInspection()
 	m.uiState.PacketList.Reset()
 	m.uiState.PacketList.SetVirtualPackets(msg.query.Count(), 0, nil)
+	m.uiState.PacketList.SetLogicalCursor(msg.cursor)
+	m.uiState.PacketList.SetAnalysisPending(s.token.Revision == offline.BaseRevision)
+	m.uiState.DetailsPanel.SetAnalysisPending(s.token.Revision == offline.BaseRevision)
 	if s.jump != nil {
 		m.uiState.ViewMode = "packets"
 		m.uiState.PacketList.SetLogicalCursor(uint64(*s.jump))
@@ -279,6 +348,11 @@ func (m Model) handleOfflineFilter(msg offlineFilterMsg) (Model, tea.Cmd) {
 		s.owner.mu.Unlock()
 	}
 	return m, func() tea.Msg {
+		if previousBrowser != s.browser {
+			// Query.Close may await an export pin on the base revision. The
+			// session retains this owner even if Tea abandons cleanup delivery.
+			return offlineCleanupMsg{err: previousBrowser.owner.Close()}
+		}
 		if old != nil {
 			return offlineCleanupMsg{err: s.owner.release(old)}
 		}
@@ -294,7 +368,7 @@ func (m *Model) offlineFilterModalOptions() components.ModalRenderOptions {
 	p := s.owner.progress
 	s.owner.mu.Unlock()
 	if p.Token != s.token {
-		p = offline.QueryProgress{Token: s.token, Total: m.offlineSession.Dataset.Count()}
+		p = offline.QueryProgress{Token: s.token, Total: m.offlineDataset().Count()}
 	}
 	title := "Filtering offline packets"
 	footer := "Esc: Cancel"

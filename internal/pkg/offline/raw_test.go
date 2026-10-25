@@ -17,7 +17,7 @@ func TestRawQueryPinSurvivesPendingDatasetAndQueryClose(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			d := queryDataset(t, 5)
-			q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 7, Query: 1}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
+			q, err := d.Query(context.Background(), QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 7, Query: 1}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
 			require.NoError(t, err)
 			pin, err := PinQuery(q)
 			require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestRawQueryPinSurvivesPendingDatasetAndQueryClose(t *testing.T) {
 
 func TestRawQueryPinCancellationAndCallbackFailure(t *testing.T) {
 	d := queryDataset(t, 5)
-	q, err := AllPackets(context.Background(), d, Token{Dataset: 7, Query: 1})
+	q, err := AllPackets(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 7, Query: 1})
 	require.NoError(t, err)
 	pin, err := PinQuery(q)
 	require.NoError(t, err)
@@ -87,7 +87,7 @@ func TestRawIteratorIdentityFilteredAndCompatibility(t *testing.T) {
 	for _, filtered := range []bool{false, true} {
 		var q Query
 		var err error
-		token := Token{Dataset: 7, Query: 1}
+		token := Token{Revision: CompletedRevision, Dataset: 7, Query: 1}
 		if filtered {
 			q, err = d.Query(context.Background(), QuerySpec{Token: token, Match: func(s Summary) bool { return s.ID%2 == 0 }})
 		} else {

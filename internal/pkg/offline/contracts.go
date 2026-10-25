@@ -11,15 +11,25 @@ import (
 
 type PacketID uint64
 type DatasetGeneration uint64
+
+// AnalysisRevision separates the immutable normalized base from completed analysis.
+type AnalysisRevision uint64
+
+const (
+	BaseRevision      AnalysisRevision = 0
+	CompletedRevision AnalysisRevision = 1
+)
+
 type QueryGeneration uint64
 type RequestID uint64
 
 // Token accompanies every asynchronous request/result, including errors. The
 // model rejects obsolete tokens and closes any resources they transfer.
 type Token struct {
-	Dataset DatasetGeneration
-	Query   QueryGeneration
-	Request RequestID
+	Dataset  DatasetGeneration
+	Revision AnalysisRevision
+	Query    QueryGeneration
+	Request  RequestID
 }
 
 // PageRequest bounds both row count and decoded bytes. Row is a logical query
@@ -101,15 +111,19 @@ type Query interface {
 	Count() uint64
 	Statistics() Statistics
 	Page(context.Context, PageRequest) (Page, error)
+	Position(context.Context, PacketID) (uint64, bool, error)
 	Iterate(context.Context, func(Detail) error) error
 	Close() error
 }
 
-// Dataset is published only after analyzer EOF drain and all streams flush.
+// Dataset is an immutable normalized base or completed-analysis revision.
+// Every revision publishes only after its own streams flush; completed analysis
+// additionally requires analyzer EOF drain.
 // Query/Related return completed snapshots or errors, never partial matches.
 // Dataset Close joins readers, removes owned storage, and surfaces cleanup errors.
 type Dataset interface {
 	Generation() DatasetGeneration
+	Revision() AnalysisRevision
 	Count() uint64
 	Statistics() Statistics
 	Query(context.Context, QuerySpec) (Query, error)
@@ -120,8 +134,9 @@ type Dataset interface {
 	Close() error
 }
 
-// Detail contains an owned finalized PacketDisplay, including all protocol
-// metadata and effective raw bytes. It must not alias analyzer scratch storage.
+// Detail contains owned fields available at its exact immutable revision and
+// effective raw bytes. Base details omit application metadata. Values must not
+// alias analyzer scratch storage.
 type Detail struct {
 	Token                          Token
 	ID                             PacketID

@@ -52,7 +52,7 @@ func TestObservationDomainStorageRoundTrip(t *testing.T) {
 					}
 					for i := 0; i < 2; i++ {
 						storage.discardDatasetCache(disk)
-						got, err := dataset.Detail(ctx, Token{Dataset: 17}, 0)
+						got, err := dataset.Detail(ctx, Token{Revision: CompletedRevision, Dataset: 17}, 0)
 						require.NoError(t, err)
 						assertDomain(got.Packet)
 						require.Equal(t, original.Packet.RawData, got.Packet.RawData)
@@ -61,7 +61,7 @@ func TestObservationDomainStorageRoundTrip(t *testing.T) {
 						assertDomain(summary.DisplayFields())
 						storage.releaseMemory(held)
 					}
-					query, err := AllPackets(ctx, dataset, Token{Dataset: 17, Query: 1})
+					query, err := AllPackets(ctx, dataset, Token{Revision: CompletedRevision, Dataset: 17, Query: 1})
 					require.NoError(t, err)
 					page, err := query.Page(ctx, PageRequest{Token: query.Token(), Limit: 1, MaxBytes: 16 << 10})
 					require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestObservationDomainStorageRoundTrip(t *testing.T) {
 					if compact {
 						require.EqualValues(t, 2, version.Version)
 						require.EqualValues(t, 2, version.Compact.SchemaMajor)
-						require.EqualValues(t, 6, version.Compact.SchemaMinor)
+						require.EqualValues(t, 7, version.Compact.SchemaMinor)
 					} else {
 						require.EqualValues(t, 7, version.Version)
 					}

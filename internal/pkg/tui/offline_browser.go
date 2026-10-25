@@ -15,6 +15,7 @@ import (
 // offlineBrowser owns every page/detail lease, including results whose messages
 // are abandoned when the program exits. Reads are serialized and cancellable.
 type offlineBrowser struct {
+	closeMu sync.Mutex
 	mu      sync.Mutex
 	dataset offline.Dataset
 	query   offline.Query
@@ -49,6 +50,16 @@ type offlineBrowserState struct {
 	detailScrollToken  offline.Token
 	detailScrollValid  bool
 }
+
+func (b *offlineBrowser) Cancel() {
+	b.mu.Lock()
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.mu.Unlock()
+}
+
+func (b *offlineBrowser) Close() error { return b.close() }
 
 func (b *offlineBrowser) releaseLocked(r *offlineBrowseResult) error {
 	if r == nil {
@@ -90,6 +101,8 @@ func (m *Model) cancelOfflineBrowserReads() {
 }
 
 func (b *offlineBrowser) close() error {
+	b.closeMu.Lock()
+	defer b.closeMu.Unlock()
 	b.mu.Lock()
 	b.closed = true
 	if b.cancel != nil {
@@ -101,15 +114,23 @@ func (b *offlineBrowser) close() error {
 		<-done
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	var err error
 	for r := range b.results {
 		err = errors.Join(err, b.releaseLocked(r))
 	}
 	b.current = nil
-	if b.query != nil {
-		err = errors.Join(err, b.query.Close())
-		b.query = nil
+	query := b.query
+	b.mu.Unlock()
+	// Closing a query can wait for an export pin. Cancellation must remain
+	// able to acquire mu so session shutdown can cancel every owner first.
+	if query != nil {
+		closeErr := query.Close()
+		err = errors.Join(err, closeErr)
+		if closeErr == nil {
+			b.mu.Lock()
+			b.query = nil
+			b.mu.Unlock()
+		}
 	}
 	return err
 }
@@ -151,7 +172,7 @@ func (b *offlineBrowser) load(token offline.Token, offset, cursor uint64, rows i
 		} else {
 			b.mu.Lock()
 			if b.query == nil {
-				b.query, r.err = offline.AllPackets(ctx, b.dataset, offline.Token{Dataset: token.Dataset, Query: token.Query})
+				b.query, r.err = offline.AllPackets(ctx, b.dataset, offline.Token{Dataset: token.Dataset, Revision: token.Revision, Query: token.Query})
 			}
 			b.mu.Unlock()
 			if r.err == nil && !reuse {
@@ -236,9 +257,11 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 		return func() tea.Msg { return offlineCleanupMsg{err: errors.Join(err, s.owner.drainBefore(done, cutoff))} }
 	}
 	if m.offlineBrowse == nil {
-		b := &offlineBrowser{dataset: m.offlineSession.Dataset, results: make(map[*offlineBrowseResult]struct{})}
-		m.offlineSession.browser = b
-		m.offlineBrowse = &offlineBrowserState{owner: b}
+		state, err := m.packetBrowserFor(m.offlineDataset())
+		if err != nil {
+			return m.uiState.Toast.Show(err.Error(), components.ToastError, components.ToastDurationLong)
+		}
+		m.offlineBrowse = state
 	}
 	s := m.offlineBrowse
 	cursor, offset, rows := m.uiState.PacketList.LogicalCursor(), m.uiState.PacketList.LogicalOffset(), m.uiState.PacketList.VisibleRows()
@@ -250,7 +273,7 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 	if s.requested && s.cursor == cursor && s.offset == offset && s.rows == rows && !selectedMissing {
 		return nil
 	}
-	token := offline.Token{Dataset: m.offlineSession.Dataset.Generation(), Query: m.offlineQueryGeneration()}
+	token := offline.Token{Dataset: s.owner.dataset.Generation(), Revision: s.owner.dataset.Revision(), Query: m.offlineQueryGeneration()}
 	m.rememberOfflineDetailScroll(s)
 	if !s.matchesDetailScroll(token, cursor) {
 		s.detailScrollValid = false
@@ -282,14 +305,14 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 	if m.offlinePacketCount() > 0 {
 		m.uiState.DetailsPanel.SetLoading()
 	}
-	return s.owner.load(offline.Token{Dataset: m.offlineSession.Dataset.Generation(), Query: m.offlineQueryGeneration(), Request: s.request}, loadOffset, cursor, rows, offlinePageBudget(m.offlineInstalled.Limits), reuse)
+	return s.owner.load(offline.Token{Dataset: s.owner.dataset.Generation(), Revision: s.owner.dataset.Revision(), Query: m.offlineQueryGeneration(), Request: s.request}, loadOffset, cursor, rows, offlinePageBudget(m.offlineInstalled.Limits), reuse)
 }
 func (m Model) handleOfflineBrowse(msg offlineBrowseMsg) (Model, tea.Cmd) {
 	s, r := m.offlineBrowse, msg.result
 	if s != nil && s.current == r {
 		return m, nil
 	}
-	if s == nil || s.owner != msg.owner || s.request != r.token.Request || m.offlineSession == nil || r.token.Dataset != m.offlineSession.Dataset.Generation() || r.token.Query != m.offlineQueryGeneration() || m.offlineLeaving {
+	if s == nil || s.owner != msg.owner || s.request != r.token.Request || m.offlineSession == nil || r.token.Dataset != m.offlineDataset().Generation() || r.token.Revision != s.owner.dataset.Revision() || r.token.Query != m.offlineQueryGeneration() || m.offlineLeaving || m.offlineOpening {
 		if err := msg.owner.release(r); err != nil {
 			return m, m.uiState.Toast.Show(err.Error(), components.ToastError, components.ToastDurationLong)
 		}
@@ -317,6 +340,8 @@ func (m Model) handleOfflineBrowse(msg offlineBrowseMsg) (Model, tea.Cmd) {
 		packets[i].CaptureID = uint64(row.ID) + 1
 	}
 	m.uiState.PacketList.SetVirtualPackets(m.offlinePacketCount(), r.page.Row, packets)
+	m.uiState.PacketList.SetAnalysisPending(r.token.Revision == offline.BaseRevision)
+	m.uiState.DetailsPanel.SetAnalysisPending(r.token.Revision == offline.BaseRevision)
 	m.uiState.DetailsPanel.SetPacket(nil)
 	if r.detail != nil {
 		m.uiState.DetailsPanel.SetPacket(&r.detail.Value.Packet)

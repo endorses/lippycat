@@ -69,9 +69,9 @@ func TestOfflineBrowserSupersededResultReleasesPinBudget(t *testing.T) {
 		require.NoError(t, dataset.Close())
 		require.NoError(t, storage.Close())
 	}()
-	first := b.load(offline.Token{Dataset: 1, Query: 1, Request: 1}, 0, 0, 1, limits.CacheBytes/4, false)().(offlineBrowseMsg)
+	first := b.load(offline.Token{Revision: offline.CompletedRevision, Dataset: 1, Query: 1, Request: 1}, 0, 0, 1, limits.CacheBytes/4, false)().(offlineBrowseMsg)
 	require.NoError(t, first.result.err)
-	second := b.load(offline.Token{Dataset: 1, Query: 1, Request: 2}, 1, 1, 1, limits.CacheBytes/4, false)().(offlineBrowseMsg)
+	second := b.load(offline.Token{Revision: offline.CompletedRevision, Dataset: 1, Query: 1, Request: 2}, 1, 1, 1, limits.CacheBytes/4, false)().(offlineBrowseMsg)
 	require.NoError(t, second.result.err)
 }
 

@@ -91,6 +91,14 @@ func (s *Storage) Close() error {
 		files = append(files, f)
 	}
 	s.mu.Unlock()
+	for _, r := range registries {
+		r.mu.Lock()
+		active := r.compactOwners != 0
+		r.mu.Unlock()
+		if active {
+			return errors.New("offline storage still owns active analysis revisions")
+		}
+	}
 	var cleanupErr error
 	for _, r := range registries {
 		cleanupErr = errors.Join(cleanupErr, r.Close())
@@ -120,6 +128,7 @@ type diskDataset struct {
 	dir                         string
 	count                       uint64
 	generation                  DatasetGeneration
+	revision                    AnalysisRevision
 	stats                       Statistics
 	summaries, details, offsets *os.File
 	ownedBytes                  uint64
@@ -153,8 +162,12 @@ type Builder struct {
 	published             bool
 	failure               error
 	amended               bool
+	expectedCount         *uint64
 }
 
+// NewBuilder creates an unpublished metadata owner. If constructor cleanup
+// fails, a non-nil builder accompanies the error and must be retained for Close
+// retries. Such a builder permits cleanup only and never publishes a dataset.
 func (s *Storage) NewBuilder(generation DatasetGeneration, sources []SourcePosition) (*Builder, error) {
 	if len(sources) > int(s.limits.MaxSources) {
 		return nil, fmt.Errorf("offline source count exceeds %d", s.limits.MaxSources)
@@ -167,7 +180,7 @@ func (s *Storage) NewBuilder(generation DatasetGeneration, sources []SourcePosit
 	if err != nil {
 		return nil, fmt.Errorf("create private offline session: %w", err)
 	}
-	d := &diskDataset{storage: s, dir: dir, generation: generation, queries: make(map[*diskQuery]struct{})}
+	d := &diskDataset{storage: s, dir: dir, generation: generation, revision: CompletedRevision, queries: make(map[*diskQuery]struct{})}
 	b := &Builder{d: d, summaryEnd: streamHeaderBytes, detailEnd: streamHeaderBytes, sources: append([]SourcePosition(nil), sources...), accumulator: newStatisticsAccumulator()}
 	for _, entry := range []struct {
 		name   string
@@ -176,7 +189,7 @@ func (s *Storage) NewBuilder(generation DatasetGeneration, sources []SourcePosit
 	}{{"summaries", 1, &d.summaries}, {"details", 2, &d.details}, {"offsets", 3, &d.offsets}} {
 		f, e := os.OpenFile(filepath.Join(dir, entry.name), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
 		if e != nil {
-			return nil, errors.Join(e, b.Close())
+			return failedBuilder(b, e)
 		}
 		*entry.target = f
 		var header [16]byte
@@ -184,10 +197,22 @@ func (s *Storage) NewBuilder(generation DatasetGeneration, sources []SourcePosit
 		binary.LittleEndian.PutUint16(header[8:], RecordSchemaVersion)
 		binary.LittleEndian.PutUint16(header[10:], entry.kind)
 		if e = b.write(f, header[:]); e != nil {
-			return nil, errors.Join(e, b.Close())
+			return failedBuilder(b, e)
 		}
 	}
 	return b, nil
+}
+
+// Preserve the only retry owner when construction fails after admission. Source
+// descriptions and statistics are unused by cleanup and must not remain held
+// after a compact constructor releases its source-memory reservation.
+func failedBuilder(b *Builder, cause error) (*Builder, error) {
+	b.failure = cause
+	b.sources, b.accumulator = nil, nil
+	if cleanupErr := b.Close(); cleanupErr != nil {
+		return b, errors.Join(cause, cleanupErr)
+	}
+	return nil, cause
 }
 func (b *Builder) write(f *os.File, p []byte) error {
 	if err := b.d.storage.reserveDisk(uint64(len(p))); err != nil {
@@ -314,6 +339,9 @@ func (b *Builder) Finish(ctx context.Context) (dataset Dataset, finishErr error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if b.expectedCount != nil && b.d.count != *b.expectedCount {
+		return nil, fmt.Errorf("offline revision contains %d packets, expected complete base count %d", b.d.count, *b.expectedCount)
+	}
 	if b.d.compact != nil {
 		if err := b.flushCompact(); err != nil {
 			return nil, err
@@ -373,6 +401,7 @@ func (b *Builder) Finish(ctx context.Context) (dataset Dataset, finishErr error)
 	manifest := struct {
 		Version           uint16
 		Generation        DatasetGeneration
+		Revision          AnalysisRevision
 		Sources           []SourcePosition
 		Count             uint64
 		Statistics        manifestStatistics
@@ -381,7 +410,7 @@ func (b *Builder) Finish(ctx context.Context) (dataset Dataset, finishErr error)
 		Complete          bool
 		CompactRegistries *compactRegistries `json:",omitempty"`
 		Compact           *compactCompletion `json:",omitempty"`
-	}{b.d.schemaVersion(), b.d.generation, b.sources, b.d.count, statisticsForManifest(b.d.stats), lengths, "1", true, registries, completion}
+	}{b.d.schemaVersion(), b.d.generation, b.d.revision, b.sources, b.d.count, statisticsForManifest(b.d.stats), lengths, "2", true, registries, completion}
 	// Preflight source/statistics strings and maps before JSON allocates escaped
 	// text. This independently bounds the manifest serializer, not just records.
 	var manifestMemory uint64
@@ -431,6 +460,7 @@ func (b *Builder) Close() error {
 	return b.d.Close()
 }
 func (d *diskDataset) Generation() DatasetGeneration { return d.generation }
+func (d *diskDataset) Revision() AnalysisRevision    { return d.revision }
 func (d *diskDataset) Count() uint64                 { return d.count }
 func (d *diskDataset) Statistics() Statistics        { return cloneStatistics(d.stats) }
 func (d *diskDataset) Resources() ResourceUsage      { return d.storage.Resources() }
@@ -512,14 +542,14 @@ func (d *diskDataset) Detail(ctx context.Context, token Token, id PacketID) (Det
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	if d.closed {
-		return Detail{}, errors.New("offline dataset closed")
+		return Detail{Token: token}, errors.New("offline dataset closed")
 	}
-	if token.Dataset != d.generation {
-		return Detail{}, errors.New("offline dataset generation mismatch")
+	if token.Dataset != d.generation || token.Revision != d.revision {
+		return Detail{Token: token}, errors.New("offline dataset generation/revision mismatch")
 	}
 	v, n, err := d.readDetail(ctx, id)
 	if err != nil {
-		return Detail{}, err
+		return Detail{Token: token}, err
 	}
 	d.storage.releaseMemory(n)
 	v.Token = token

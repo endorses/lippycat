@@ -55,7 +55,7 @@ func TestOfflineIndexerPublishesCompleteEventHistoryBeyondRing(t *testing.T) {
 	require.EqualValues(t, 8, session.EventStore.Stats().Retained)
 	require.EqualValues(t, count-8, session.EventStore.Stats().Evicted)
 	require.Zero(t, session.EventStore.Stats().TransportLost)
-	oldest, err := session.EventDataset.Detail(context.Background(), offline.Token{Dataset: 71}, 1)
+	oldest, err := session.EventDataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 71}, 1)
 	require.NoError(t, err)
 	oldestEvent := oldest.Record.Event
 	require.NoError(t, oldest.Close())
@@ -64,7 +64,7 @@ func TestOfflineIndexerPublishesCompleteEventHistoryBeyondRing(t *testing.T) {
 	}
 	predicate, err := eventquery.Compile("event_sequence:=" + strconv.FormatUint(oldestEvent.Envelope().EventSequence, 10))
 	require.NoError(t, err)
-	query, err := session.EventDataset.Query(context.Background(), offline.EventQuerySpec{Token: offline.Token{Dataset: 71, Query: 2}, Match: predicate})
+	query, err := session.EventDataset.Query(context.Background(), offline.EventQuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: 71, Query: 2}, Match: predicate})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, query.Count())
 	page, err := query.Page(context.Background(), offline.PageRequest{Token: query.Token(), Limit: 1, MaxBytes: 16 << 10})
@@ -81,7 +81,7 @@ func TestOfflineIndexerPublishesCompleteEventHistoryBeyondRing(t *testing.T) {
 	defer func() { require.NoError(t, baseline.Close()) }()
 	want := baseline.EventStore.Events()
 	require.Len(t, want, count)
-	all, err := offline.AllEvents(context.Background(), session.EventDataset, offline.Token{Dataset: 71, Query: 3})
+	all, err := offline.AllEvents(context.Background(), session.EventDataset, offline.Token{Revision: offline.CompletedRevision, Dataset: 71, Query: 3})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, all.Close()) }()
 	uids := offlineOracleUIDs{forward: map[string]string{}, reverse: map[string]string{}}
@@ -104,9 +104,9 @@ func TestOfflineIndexerPublishesCompleteEventHistoryBeyondRing(t *testing.T) {
 	require.Equal(t, count, i)
 	require.NoError(t, all.Close())
 	for _, id := range []offline.PacketID{0, count - 1} {
-		want, err := baseline.Dataset.Detail(context.Background(), offline.Token{Dataset: 72}, id)
+		want, err := baseline.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 72}, id)
 		require.NoError(t, err)
-		got, err := session.Dataset.Detail(context.Background(), offline.Token{Dataset: 71}, id)
+		got, err := session.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 71}, id)
 		require.NoError(t, err)
 		require.NoError(t, offlineOracleRecord(want, got))
 	}
@@ -144,7 +144,7 @@ func TestOfflineIndexerPersistsCanonicalECHAndDNSNotice(t *testing.T) {
 	session, err := indexOfflineDataset(context.Background(), testOfflineStorage(t), 80, OfflineAnalysisConfig{Inputs: []string{path}, EventCapacity: 1, Analysis: LocalEventAnalysisOptions{Policy: &policy}}, nil)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, session.Close()) }()
-	query, err := offline.AllEvents(context.Background(), session.EventDataset, offline.Token{Dataset: 80, Query: 1})
+	query, err := offline.AllEvents(context.Background(), session.EventDataset, offline.Token{Revision: offline.CompletedRevision, Dataset: 80, Query: 1})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, query.Close()) }()
 	var hellos, offered uint64
@@ -263,7 +263,7 @@ func TestOfflineSessionJoinsEventOwnersBeforeStorageAndRetriesFailure(t *testing
 	require.NoError(t, builder.Append(context.Background(), offlineSinkMetadataKinds()[0]))
 	dataset, err := builder.Finish(context.Background())
 	require.NoError(t, err)
-	query, err := offline.AllEvents(context.Background(), dataset, offline.Token{Dataset: 100, Query: 1})
+	query, err := offline.AllEvents(context.Background(), dataset, offline.Token{Revision: offline.CompletedRevision, Dataset: 100, Query: 1})
 	require.NoError(t, err)
 	pin, err := offline.PinEventQuery(query)
 	require.NoError(t, err)

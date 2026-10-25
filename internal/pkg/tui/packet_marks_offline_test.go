@@ -49,7 +49,7 @@ func TestOfflinePacketMarksDiscardStaleRange(t *testing.T) {
 func TestOfflineMarkedExportIgnoresCurrentFilter(t *testing.T) {
 	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
 	b := m.offlineBrowse.owner
-	q, err := b.dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Dataset: b.dataset.Generation(), Query: 2}, Match: func(s offline.Summary) bool { return s.ID == 500 }})
+	q, err := b.dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: b.dataset.Generation(), Query: 2}, Match: func(s offline.Summary) bool { return s.ID == 500 }})
 	require.NoError(t, err)
 	b.mu.Lock()
 	old := b.query
@@ -67,7 +67,7 @@ func TestOfflineMarkedExportIgnoresCurrentFilter(t *testing.T) {
 	r, err := pcapgo.NewReader(f)
 	require.NoError(t, err)
 	for _, id := range []offline.PacketID{0, 1076} {
-		want, err := m.offlineSession.Dataset.Detail(context.Background(), offline.Token{Dataset: b.dataset.Generation()}, id)
+		want, err := m.offlineSession.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: b.dataset.Generation()}, id)
 		require.NoError(t, err)
 		raw, ci, err := r.ReadPacketData()
 		require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestOfflineMarkedExportIgnoresCurrentFilter(t *testing.T) {
 func TestOfflineMarkRangeAbandonedCommandSessionCleanup(t *testing.T) {
 	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
 	m.startOfflineMarkRange(1, 1076, false)
-	state := m.offlineSession.markRange
+	state := m.offlineTasks.markRange
 	closed := make(chan error, 1)
 	go func() { closed <- m.offlineSession.Close() }()
 	select {

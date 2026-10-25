@@ -19,7 +19,7 @@ func TestAllPacketsIdentityProjection(t *testing.T) {
 	dataset, err := builder.Finish(ctx)
 	require.NoError(t, err)
 	before := dataset.Resources().DiskBytes
-	token := Token{Dataset: 7, Query: 9, Request: 1}
+	token := Token{Revision: CompletedRevision, Dataset: 7, Query: 9, Request: 1}
 	query, err := AllPackets(ctx, dataset, token)
 	require.NoError(t, err)
 	require.Equal(t, before, dataset.Resources().DiskBytes)
@@ -36,7 +36,7 @@ func TestAllPacketsIdentityProjection(t *testing.T) {
 	require.Equal(t, before, dataset.Resources().DiskBytes)
 	_, err = query.Page(ctx, PageRequest{Token: token, Limit: 1, MaxBytes: 64 << 10})
 	require.Error(t, err)
-	_, err = AllPackets(ctx, dataset, Token{Dataset: 8})
+	_, err = AllPackets(ctx, dataset, Token{Revision: CompletedRevision, Dataset: 8})
 	require.Error(t, err)
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()

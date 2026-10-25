@@ -46,7 +46,7 @@ func TestCompleteDatasetBeyondDisplayRetention(t *testing.T) {
 	if dataset.Count() != count || stats.Packets != count || stats.Bytes != 4*count {
 		t.Fatalf("incomplete totals: %+v", stats)
 	}
-	token := offline.Token{Dataset: 11, Query: 1, Request: 1}
+	token := offline.Token{Revision: offline.CompletedRevision, Dataset: 11, Query: 1, Request: 1}
 	all, err := dataset.Query(ctx, offline.QuerySpec{Token: token})
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func BenchmarkCompleteDataset(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				q, err := ds.Query(ctx, offline.QuerySpec{Token: offline.Token{Dataset: 1, Query: 1}})
+				q, err := ds.Query(ctx, offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: 1, Query: 1}})
 				if err != nil {
 					b.Fatal(err)
 				}

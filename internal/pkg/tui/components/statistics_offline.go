@@ -16,6 +16,7 @@ import (
 // these values incrementally, so the matching scope always agrees with the rows.
 func (s *StatisticsView) SetOfflineStatistics(global, matching offline.Statistics) {
 	s.offlineGlobal, s.offlineMatching = &global, &matching
+	s.offlineMatchingRevision = offline.CompletedRevision
 	s.dirty = true
 	s.lastRender = time.Time{}
 }
@@ -32,6 +33,7 @@ func (s *StatisticsView) SetOfflineResources(rows int, usage offline.ResourceUsa
 }
 
 func (s *StatisticsView) ClearOfflineStatistics() {
+	s.offlineAnalysisPending = false
 	s.offlineGlobal, s.offlineMatching = nil, nil
 	s.offlineCachedRows, s.offlineResources = 0, offline.ResourceUsage{}
 	s.dirty = true
@@ -50,7 +52,14 @@ func (s *StatisticsView) renderOfflineStatistics() string {
 		if i == 1 {
 			scope = "Matching query"
 		}
-		fmt.Fprintf(&out, "%s: %d packets | %d bytes\n", scope, stats.Packets, stats.Bytes)
+		fmt.Fprintf(&out, "%s: %d packets | %d bytes", scope, stats.Packets, stats.Bytes)
+		if i == 1 {
+			fmt.Fprintf(&out, " | revision %d", s.offlineMatchingRevision)
+			if s.offlineMatchingRevision == offline.BaseRevision {
+				out.WriteString("; application statistics pending")
+			}
+		}
+		out.WriteByte('\n')
 		fmt.Fprintf(&out, "  Packet size: %d–%d B | Sources: %d | Destinations: %d\n", stats.MinPacketSize, stats.MaxPacketSize, stats.Sources, stats.Destinations)
 		if stats.Packets > 0 {
 			fmt.Fprintf(&out, "  Capture interval: %s – %s\n", stats.First.Format("2006-01-02 15:04:05.999999999"), stats.Last.Format("2006-01-02 15:04:05.999999999"))
@@ -67,8 +76,30 @@ func (s *StatisticsView) renderOfflineStatistics() string {
 			fmt.Fprintf(&out, "  Bounded cardinality estimates: %s\n", strings.Join(stats.TruncatedCardinality, ", "))
 		}
 	}
-	out.WriteString("\nOverview: global dataset; Events: complete offline history; Calls: bounded retained history.")
+	if s.offlineAnalysisPending {
+		out.WriteString("\nProtocol statistics, Events and Calls pending ordered analysis.")
+	} else {
+		out.WriteString("\nOverview: global dataset; Events: complete offline history; Calls: bounded retained history.")
+	}
 	card := dashboard.NewCard("OFFLINE DATASET", out.String(), s.theme,
 		dashboard.WithIcon("📄"), dashboard.WithWidth(max(1, s.width-2)))
 	return card.Render()
+}
+
+func (s *StatisticsView) SetAnalysisPending(pending bool) {
+	if s.offlineAnalysisPending == pending {
+		return
+	}
+	s.offlineAnalysisPending = pending
+	s.dirty = true
+	s.lastRender = time.Time{}
+}
+
+func (s *StatisticsView) SetOfflineQueryRevision(revision offline.AnalysisRevision) {
+	if s.offlineMatchingRevision == revision {
+		return
+	}
+	s.offlineMatchingRevision = revision
+	s.dirty = true
+	s.lastRender = time.Time{}
 }

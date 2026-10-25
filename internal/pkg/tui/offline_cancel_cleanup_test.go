@@ -43,7 +43,7 @@ func TestOfflineCancelCleanupRetryPreservesReadySession(t *testing.T) {
 	require.Same(t, ready, m.offlineSession)
 	require.Same(t, events, m.eventStore)
 	require.Same(t, calls, m.callStore)
-	query, err := ready.Dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Dataset: first.generation}})
+	query, err := ready.Dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: first.generation}})
 	require.NoError(t, err, "retry must not close the installed ready dataset")
 	require.NoError(t, query.Close())
 	m.offlineController.mu.Lock()
@@ -110,7 +110,7 @@ func TestOfflineCancelCleanupReopenFailurePreservesReadySession(t *testing.T) {
 	require.False(t, m.offlineOpening)
 	require.Same(t, ready, m.offlineSession)
 	require.Equal(t, open.Config.Inputs, m.pcapFiles)
-	query, err := ready.Dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Dataset: first.generation}})
+	query, err := ready.Dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: first.generation}})
 	require.NoError(t, err)
 	require.NoError(t, query.Close())
 }

@@ -230,7 +230,7 @@ func (m Model) handleEventsViewClick(msg tea.MouseMsg, _ int) (Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+	if m.offlineSession != nil && m.offlineEvents() != nil {
 		index, ok := m.uiState.EventsView.LogicalIndexAtVisibleRow(row)
 		if !ok {
 			return m, nil
@@ -240,7 +240,7 @@ func (m Model) handleEventsViewClick(msg tea.MouseMsg, _ int) (Model, tea.Cmd) {
 		if m.offlineEventBrowse != nil {
 			query = uint64(m.offlineEventBrowse.queryGeneration)
 		}
-		identity := fmt.Sprintf("offline-%d-query-%d-row-%d", m.offlineSession.EventDataset.Generation(), query, index)
+		identity := fmt.Sprintf("offline-%d-query-%d-row-%d", m.offlineEvents().Generation(), query, index)
 		double := m.offlineEventBrowse != nil && m.offlineEventBrowse.current != nil && m.uiState.LastEventClickID == identity && now.Sub(m.uiState.LastEventClickTime) < 500*time.Millisecond
 		m.uiState.LastEventClickID = identity
 		m.uiState.LastEventClickTime = now

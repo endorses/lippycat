@@ -110,7 +110,7 @@ func TestStorageCorruptionRejected(t *testing.T) {
 				_, err := details.WriteAt([]byte{255}, 28)
 				require.NoError(t, err)
 			}
-			_, err := d.Detail(context.Background(), Token{Dataset: 1}, 0)
+			_, err := d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 1}, 0)
 			require.Error(t, err)
 			require.NoError(t, d.Close())
 			require.NoError(t, s.Close())

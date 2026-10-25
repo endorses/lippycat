@@ -115,14 +115,15 @@ type ownedBacking struct {
 // BackingRegistry owns every handle until its last read lease is released.
 // Close is retryable; callers close registries before their shared Storage.
 type BackingRegistry struct {
-	mu      sync.Mutex
-	cond    *sync.Cond
-	storage *Storage
-	entries []*ownedBacking
-	leases  int
-	closing bool
-	sealed  bool
-	failure error
+	mu            sync.Mutex
+	cond          *sync.Cond
+	storage       *Storage
+	entries       []*ownedBacking
+	leases        int
+	compactOwners int
+	closing       bool
+	sealed        bool
+	failure       error
 }
 
 func (s *Storage) NewBackingRegistry() *BackingRegistry {
@@ -573,6 +574,9 @@ func (r *BackingRegistry) Read(ctx context.Context, loc Locator) (*BackingLease,
 func (r *BackingRegistry) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.compactOwners != 0 {
+		return errors.New("offline backings still owned by analysis revisions")
+	}
 	r.closing = true
 	for r.leases > 0 {
 		r.cond.Wait()

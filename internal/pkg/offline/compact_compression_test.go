@@ -42,7 +42,7 @@ func compactCompressedFixture(t *testing.T) (*Storage, *diskDataset, Detail) {
 }
 
 func TestCompactCompressionSchemaMinorRejection(t *testing.T) {
-	for _, minor := range []uint16{0, 1, 2, 3, 4, 5, 7, 65535} {
+	for _, minor := range []uint16{0, 1, 2, 3, 4, 5, 6, 8, 65535} {
 		t.Run(fmt.Sprintf("minor-%d", minor), func(t *testing.T) {
 			s, b, detail, provenance := compactReviewBuilder(t)
 			require.NoError(t, b.AppendCompact(context.Background(), detail, provenance))
@@ -143,7 +143,7 @@ func TestCompactCompressedBlockRoundtrip(t *testing.T) {
 	s, d, want := compactCompressedFixture(t)
 	before := s.Resources().InFlightBytes
 	for _, id := range []PacketID{127, 0, 63, 12, 127, 0} {
-		got, err := d.Detail(context.Background(), Token{Dataset: 17}, id)
+		got, err := d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, id)
 		require.NoError(t, err, "id=%d", id)
 		require.Equal(t, want.Packet, got.Packet)
 		require.EqualValues(t, id, got.Source.Sequence)
@@ -151,7 +151,7 @@ func TestCompactCompressedBlockRoundtrip(t *testing.T) {
 	}
 	refs, err := d.compactOffsets(0)
 	require.NoError(t, err)
-	cached := s.cached(cacheKey{dataset: d, id: PacketID(refs[0]), kind: 17})
+	cached := s.cached(cacheKey{dataset: d, id: PacketID(refs[0]), kind: 17, revision: CompletedRevision})
 	require.NotEmpty(t, cached)
 	require.Equal(t, refs[1], binary.LittleEndian.Uint64(cached), "cache retains physical reference size")
 	require.EqualValues(t, len(cached)-8-compactBlockHeaderBytes, binary.LittleEndian.Uint64(cached[8+24:]), "cache owns expanded block")
@@ -159,7 +159,7 @@ func TestCompactCompressedBlockRoundtrip(t *testing.T) {
 	require.Error(t, err, "cached expanded block still validates physical reference size")
 	require.Zero(t, held)
 	require.Equal(t, before, s.Resources().InFlightBytes)
-	q, err := AllPackets(context.Background(), d, Token{Dataset: 17, Query: 1})
+	q, err := AllPackets(context.Background(), d, Token{Revision: CompletedRevision, Dataset: 17, Query: 1})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, q.Close()) })
 	count := 0

@@ -39,14 +39,14 @@ func TestBuilderUpdateDetailPersistsLatestFramesAndStatistics(t *testing.T) {
 	require.Equal(t, uint64(2), stats.MinPacketSize)
 	require.Equal(t, uint64(7), stats.MaxPacketSize)
 	require.Equal(t, map[string]uint64{"SIP": 1, "UDP": 1, "DNS": 1}, stats.Protocols)
-	detail, err := dataset.Detail(ctx, Token{Dataset: 12}, 0)
+	detail, err := dataset.Detail(ctx, Token{Revision: CompletedRevision, Dataset: 12}, 0)
 	require.NoError(t, err)
 	require.Equal(t, PacketID(0), detail.ID)
 	require.Equal(t, "final", detail.Packet.VoIPData.CallID)
 	require.Equal(t, "source.pcap", detail.Source.Path)
 	require.Equal(t, []byte{1, 2, 3}, detail.Packet.RawData)
 	for id := PacketID(0); id < 3; id++ {
-		_, err := dataset.Detail(ctx, Token{Dataset: 12}, id)
+		_, err := dataset.Detail(ctx, Token{Revision: CompletedRevision, Dataset: 12}, id)
 		require.NoError(t, err)
 	}
 	entries, err := os.ReadDir(b.d.dir)
@@ -58,7 +58,7 @@ func TestBuilderUpdateDetailPersistsLatestFramesAndStatistics(t *testing.T) {
 		physical += uint64(info.Size())
 	}
 	require.Equal(t, physical, storage.Resources().DiskBytes)
-	query, err := dataset.Query(ctx, QuerySpec{Token: Token{Dataset: 12, Query: 1}, Match: func(s Summary) bool {
+	query, err := dataset.Query(ctx, QuerySpec{Token: Token{Revision: CompletedRevision, Dataset: 12, Query: 1}, Match: func(s Summary) bool {
 		return s.packet.Protocol == "SIP" && s.packet.VoIPData.CallID == "final"
 	}})
 	require.NoError(t, err)

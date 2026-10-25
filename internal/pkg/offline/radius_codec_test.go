@@ -50,13 +50,13 @@ func TestCompactRADIUSMetadataRoundTripAndOwnership(t *testing.T) {
 	dataset, err := builder.Finish(context.Background())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, dataset.Close()) })
-	got, err := dataset.Detail(context.Background(), Token{Dataset: 17}, 0)
+	got, err := dataset.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 0)
 	require.NoError(t, err)
 	require.Equal(t, want.Packet.RADIUSData, got.Packet.RADIUSData)
 	require.Equal(t, "RADIUS", got.Packet.Protocol)
 	s.discardDatasetCache(dataset.(*diskDataset))
 	got.Packet.RADIUSData.Attributes[0] = "caller mutation"
-	again, err := dataset.Detail(context.Background(), Token{Dataset: 17}, 0)
+	again, err := dataset.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, 0)
 	require.NoError(t, err)
 	require.Equal(t, want.Packet.RADIUSData, again.Packet.RADIUSData)
 	// A finalized absent value must also override a decoder's provisional value.

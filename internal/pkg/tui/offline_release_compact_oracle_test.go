@@ -111,7 +111,7 @@ func runOfflineCompactOracle(t *testing.T, cfg OfflineAnalysisConfig, candidate 
 	for i, tc := range filterCases {
 		t.Run(tc.name, func(t *testing.T) {
 			query := func(ds offline.Dataset) offline.Query {
-				spec := offline.QuerySpec{Token: offline.Token{Dataset: ds.Generation(), Query: offline.QueryGeneration(i + 1)}}
+				spec := offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: ds.Generation(), Query: offline.QueryGeneration(i + 1)}}
 				if tc.filter != nil {
 					spec.Match = func(s offline.Summary) bool { return tc.filter.Match(s) }
 				}
@@ -268,7 +268,7 @@ func TestOfflineCompactOracleIndependentLogicalReference(t *testing.T) {
 	require.EqualValues(t, len(reference), ds.Dataset.Count())
 	for i, want := range reference {
 		want.ID = offline.PacketID(i)
-		got, err := ds.Dataset.Detail(context.Background(), offline.Token{Dataset: 901}, want.ID)
+		got, err := ds.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 901}, want.ID)
 		require.NoError(t, err)
 		require.NoError(t, offlineOracleRecord(want, got))
 	}
@@ -315,7 +315,7 @@ func TestOfflineCompactOracleSIPFinalization(t *testing.T) {
 		if len(session.Calls) != 1 || session.Calls[0].CallID != "oracle-eof" || session.Dataset.Statistics().Protocols["SIP"] == 0 {
 			return session, fmt.Errorf("SIP EOF fixture did not finalize expected call")
 		}
-		detail, err := session.Dataset.Detail(ctx, offline.Token{Dataset: generation}, 1)
+		detail, err := session.Dataset.Detail(ctx, offline.Token{Revision: offline.CompletedRevision, Dataset: generation}, 1)
 		if err != nil {
 			return session, err
 		}
@@ -539,11 +539,11 @@ func TestOfflineCompactOracleMetadataPresence(t *testing.T) {
 	ds, err := builder.Finish(context.Background())
 	require.NoError(t, err)
 	defer func() { require.NoError(t, ds.Close()) }()
-	q, err := ds.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Dataset: 903, Query: 1}})
+	q, err := ds.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: 903, Query: 1}})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, q.Close()) }()
 	for i, p := range packets {
-		d, err := ds.Detail(context.Background(), offline.Token{Dataset: 903}, offline.PacketID(i))
+		d, err := ds.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 903}, offline.PacketID(i))
 		require.NoError(t, err)
 		require.NoError(t, offlineOracleMetadata(offline.Detail{ID: offline.PacketID(i), Source: offline.SourcePosition{Path: "metadata-fixture", Sequence: uint64(i)}, Packet: p}, d))
 		page, err := q.Page(context.Background(), offline.PageRequest{Token: q.Token(), Row: uint64(i), Limit: 1, MaxBytes: 1 << 20})

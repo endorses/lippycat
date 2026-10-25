@@ -33,7 +33,7 @@ func TestScratchSharedBudgetAndReset(t *testing.T) {
 	require.NoError(t, f.Close())
 	require.NoError(t, f.Close())
 	require.Equal(t, baseline, s.Resources().DiskBytes)
-	_, err = d.Detail(context.Background(), Token{Dataset: 1}, 0)
+	_, err = d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 1}, 0)
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
 	require.NoError(t, s.Close())

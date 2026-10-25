@@ -169,6 +169,28 @@ func (e *Expression) AccountedBytes() uint64 {
 	return e.bytes
 }
 func (e *Expression) RequiredFields() []string { return append([]string(nil), e.fields...) }
+
+// BaseFieldsOnly proves this immutable tree uses normalized packet fields.
+// Free text retains its completed-analysis semantics even if a caller supplies
+// a narrower field list. Unknown fields cannot establish readiness.
+func (e *Expression) BaseFieldsOnly() bool {
+	if e == nil || !e.valid || e.spec.Op == "text" || e.spec.Op == "voip" {
+		return false
+	}
+	for _, field := range e.spec.Fields {
+		switch field {
+		case "src", "srcip", "dst", "dstip", "srcport", "dstport", "node", "nodeid", "interface", "length", "len":
+		default:
+			return false
+		}
+	}
+	for _, child := range e.spec.Children {
+		if !child.BaseFieldsOnly() {
+			return false
+		}
+	}
+	return true
+}
 func (e *Expression) Match(s Record) bool {
 	if e == nil || !e.valid {
 		return false

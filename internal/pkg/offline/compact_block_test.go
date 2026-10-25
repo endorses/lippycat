@@ -71,7 +71,7 @@ func TestCompactTypedBlockIntegrity(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, directory.Close())
 			before := storage.Resources().InFlightBytes
-			_, err = d.Detail(context.Background(), Token{Dataset: 1}, 0)
+			_, err = d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 1}, 0)
 			require.Error(t, err)
 			require.Equal(t, before, storage.Resources().InFlightBytes)
 		})
@@ -89,7 +89,7 @@ func TestCompactDirectoryIntegrity(t *testing.T) {
 	_, err = f.WriteAt([]byte{1}, compactHeaderBytes+16)
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
-	_, err = d.Detail(context.Background(), Token{Dataset: 1}, 0)
+	_, err = d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 1}, 0)
 	require.ErrorContains(t, err, "directory")
 }
 
@@ -110,6 +110,6 @@ func TestCompactHeaderCannotRemapRows(t *testing.T) {
 	_, err = f.WriteAt(first[:], int64(refs[0])+8)
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
-	_, err = d.Detail(context.Background(), Token{Dataset: 1}, 1)
+	_, err = d.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 1}, 1)
 	require.ErrorContains(t, err, "directory checksum")
 }

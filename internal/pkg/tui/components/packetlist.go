@@ -36,6 +36,7 @@ type (
 
 // PacketList is a component that displays a list of packets
 type PacketList struct {
+	analysisPending bool
 	virtual         bool
 	logicalCount    uint64
 	logicalCursor   uint64
@@ -121,6 +122,9 @@ func (p *PacketList) SetVirtualPackets(total, pageStart uint64, packets []Packet
 
 // IsVirtual reports whether packets represent a page of a logical dataset.
 func (p *PacketList) IsVirtual() bool { return p.virtual }
+
+// SetAnalysisPending changes only presentation, never stored packet metadata.
+func (p *PacketList) SetAnalysisPending(pending bool) { p.analysisPending = pending }
 
 // LogicalCount returns all navigable rows, independent of page residency.
 func (p *PacketList) LogicalCount() uint64 {
@@ -230,6 +234,7 @@ func (p *PacketList) SetInspecting(inspecting bool) {
 
 // SetPackets updates the slice-backed live/remote packet list.
 func (p *PacketList) SetPackets(packets []PacketDisplay) {
+	p.analysisPending = false
 	if p.virtual {
 		p.Reset()
 	}
@@ -1316,6 +1321,10 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 
 	// Truncate info
 	info := truncate(pkt.Info, infoWidth)
+	if p.analysisPending {
+		proto = truncate("Pending", protoWidth)
+		info = truncate("Protocol and application analysis pending", infoWidth)
+	}
 
 	// Format row (extra space after time for visual separation)
 	row := fmt.Sprintf(

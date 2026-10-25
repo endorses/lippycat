@@ -66,7 +66,7 @@ func BenchmarkOfflineAcceptance(b *testing.B) {
 	metrics["packets"] = float64(ds.Count())
 	metrics["events-arrived"] = float64(session.EventStore.Stats().Arrived)
 	metrics["completed-disk-B"] = float64(ds.Resources().DiskBytes)
-	token := offline.Token{Dataset: ds.Generation(), Query: 1}
+	token := offline.Token{Revision: offline.CompletedRevision, Dataset: ds.Generation(), Query: 1}
 	q, err := offline.AllPackets(ctx, ds, token)
 	require.NoError(b, err)
 	defer func() { require.NoError(b, q.Close()) }()

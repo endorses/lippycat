@@ -53,7 +53,7 @@ func TestCompactRowPoolPreservesRowsAcrossFlushes(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, b.d.compact.rowPool, "publication releases construction buffers")
 		for i := range count {
-			got, err := dataset.Detail(context.Background(), Token{Dataset: 17}, PacketID(i))
+			got, err := dataset.Detail(context.Background(), Token{Revision: CompletedRevision, Dataset: 17}, PacketID(i))
 			require.NoError(t, err)
 			require.Equal(t, want[i], got.Packet.Info)
 			require.EqualValues(t, i, got.Source.Sequence)

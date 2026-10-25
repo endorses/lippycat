@@ -67,7 +67,7 @@ func TestReleaseStatisticsAndDetailsFullScanReference(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, ds.Close()) })
 	wantGlobal := reference(func(int) bool { return true })
 	require.Equal(t, wantGlobal, ds.Statistics())
-	token := Token{Dataset: 61, Query: 1, Request: 7}
+	token := Token{Revision: CompletedRevision, Dataset: 61, Query: 1, Request: 7}
 	q, err := ds.Query(ctx, QuerySpec{Token: token, Match: func(s Summary) bool { return s.ID%4 == 1 }})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, q.Close()) }()
@@ -86,7 +86,7 @@ func TestReleaseStatisticsAndDetailsFullScanReference(t *testing.T) {
 			require.NoError(t, err)
 		}
 		s.mu.Lock()
-		_, cached := s.cache[cacheKey{d, id, recordKindDetail}]
+		_, cached := s.cache[cacheKey{d, id, recordKindDetail, CompletedRevision}]
 		s.mu.Unlock()
 		require.False(t, cached, "selected detail must be evicted")
 		got, err = ds.Detail(ctx, token, id)

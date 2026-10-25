@@ -56,7 +56,7 @@ func TestOfflineProductionCompactBacking(t *testing.T) {
 			}))
 			require.Equal(t, 1, manifests)
 			require.NoError(t, os.Truncate(path, 24))
-			detail, err := session.Dataset.Detail(context.Background(), offline.Token{Dataset: 91}, 0)
+			detail, err := session.Dataset.Detail(context.Background(), offline.Token{Revision: offline.CompletedRevision, Dataset: 91}, 0)
 			if policy == offline.BackingSource {
 				require.ErrorIs(t, err, offline.ErrSourceChanged)
 			} else {

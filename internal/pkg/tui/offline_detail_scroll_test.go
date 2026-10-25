@@ -54,9 +54,9 @@ func TestOfflineDetailScrollSurvivesHiddenBrowserRelease(t *testing.T) {
 }
 
 func TestOfflineDetailScrollIdentityExcludesStaleDatasetsQueriesAndCursors(t *testing.T) {
-	s := offlineBrowserState{detailScrollValid: true, detailScroll: 5, detailScrollCursor: 4, detailScrollToken: offline.Token{Dataset: 2, Query: 3}}
-	require.True(t, s.matchesDetailScroll(offline.Token{Dataset: 2, Query: 3, Request: 999}, 4))
-	require.False(t, s.matchesDetailScroll(offline.Token{Dataset: 5, Query: 3}, 4))
-	require.False(t, s.matchesDetailScroll(offline.Token{Dataset: 2, Query: 6}, 4))
-	require.False(t, s.matchesDetailScroll(offline.Token{Dataset: 2, Query: 3}, 5))
+	s := offlineBrowserState{detailScrollValid: true, detailScroll: 5, detailScrollCursor: 4, detailScrollToken: offline.Token{Revision: offline.CompletedRevision, Dataset: 2, Query: 3}}
+	require.True(t, s.matchesDetailScroll(offline.Token{Revision: offline.CompletedRevision, Dataset: 2, Query: 3, Request: 999}, 4))
+	require.False(t, s.matchesDetailScroll(offline.Token{Revision: offline.CompletedRevision, Dataset: 5, Query: 3}, 4))
+	require.False(t, s.matchesDetailScroll(offline.Token{Revision: offline.CompletedRevision, Dataset: 2, Query: 6}, 4))
+	require.False(t, s.matchesDetailScroll(offline.Token{Revision: offline.CompletedRevision, Dataset: 2, Query: 3}, 5))
 }

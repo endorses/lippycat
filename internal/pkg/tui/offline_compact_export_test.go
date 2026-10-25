@@ -21,7 +21,7 @@ func TestOfflineCompactPinnedExportAcrossSessionReplacement(t *testing.T) {
 	old, err := indexOfflineCompactDataset(ctx, storage, 51, cfg, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, old.Close()) })
-	query, err := old.Dataset.Query(ctx, offline.QuerySpec{Token: offline.Token{Dataset: 51, Query: 1}, Match: func(s offline.Summary) bool { return s.ID%2 == 0 }})
+	query, err := old.Dataset.Query(ctx, offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: 51, Query: 1}, Match: func(s offline.Summary) bool { return s.ID%2 == 0 }})
 	require.NoError(t, err)
 	var expected []offline.Detail
 	require.NoError(t, query.Iterate(ctx, func(d offline.Detail) error { expected = append(expected, d); return nil }))
@@ -85,6 +85,6 @@ func TestOfflineCompactPinnedExportAcrossSessionReplacement(t *testing.T) {
 		require.EqualValues(t, want.CapturedLength, info.CaptureLength)
 		require.EqualValues(t, want.OriginalLength, info.Length)
 	}
-	_, err = replacement.Dataset.Detail(ctx, offline.Token{Dataset: 52}, 0)
+	_, err = replacement.Dataset.Detail(ctx, offline.Token{Revision: offline.CompletedRevision, Dataset: 52}, 0)
 	require.NoError(t, err)
 }

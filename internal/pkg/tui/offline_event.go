@@ -24,6 +24,14 @@ type offlineRelatedOwner struct {
 	closed bool
 }
 
+func (o *offlineRelatedOwner) Cancel() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.cancel != nil {
+		o.cancel()
+	}
+}
+func (o *offlineRelatedOwner) Close() error { o.close(); return nil }
 func (o *offlineRelatedOwner) close() {
 	o.mu.Lock()
 	o.closed = true
@@ -47,6 +55,7 @@ func (m *Model) cancelOfflineRelated() {
 // bounded even when navigating a dataset with millions of distinct flows.
 type offlineRelatedState struct {
 	generation                         offline.DatasetGeneration
+	revision                           offline.AnalysisRevision
 	flow                               offline.Flow
 	cancel                             context.CancelFunc
 	known, available, navigate, failed bool
@@ -64,7 +73,7 @@ func offlineEventFlow(env events.Envelope) offline.Flow {
 }
 func (m *Model) presentOfflineRelated(event events.Event) {
 	s := m.offlineRelated
-	if s != nil && s.generation == m.offlineSession.Dataset.Generation() && s.flow == offlineEventFlow(m.relatedPacketEnvelope(event)) && s.known {
+	if s != nil && s.generation == m.offlineDataset().Generation() && s.revision == m.offlineRevision() && s.flow == offlineEventFlow(m.relatedPacketEnvelope(event)) && s.known {
 		m.uiState.EventsView.SetRelatedPacketsAvailable(s.available)
 	} else {
 		m.uiState.EventsView.SetRelatedPacketsPending()
@@ -89,17 +98,21 @@ func (m *Model) requestOfflineRelated() tea.Cmd {
 		return nil
 	}
 	flow := offlineEventFlow(m.relatedPacketEnvelope(selected.Event))
-	dataset := m.offlineSession.Dataset
-	if s := m.offlineRelated; s != nil && s.generation == dataset.Generation() && s.flow == flow {
+	dataset := m.offlineDataset()
+	if s := m.offlineRelated; s != nil && s.generation == dataset.Generation() && s.revision == dataset.Revision() && s.flow == flow {
 		return nil
 	}
 	if m.offlineRelated != nil {
 		m.offlineRelated.cancel()
 	}
-	if m.offlineSession.related == nil {
-		m.offlineSession.related = &offlineRelatedOwner{}
+	if m.offlineRelatedOwner == nil {
+		owner := &offlineRelatedOwner{}
+		if err := m.offlineSession.registerViewCloser(owner, owner.Cancel); err != nil {
+			return m.markError(err)
+		}
+		m.offlineRelatedOwner = owner
 	}
-	owner := m.offlineSession.related
+	owner := m.offlineRelatedOwner
 	owner.mu.Lock()
 	if owner.closed {
 		owner.mu.Unlock()
@@ -113,7 +126,7 @@ func (m *Model) requestOfflineRelated() tea.Cmd {
 	done := make(chan struct{})
 	owner.cancel, owner.done = cancel, done
 	owner.mu.Unlock()
-	state := &offlineRelatedState{generation: dataset.Generation(), flow: flow, cancel: cancel}
+	state := &offlineRelatedState{generation: dataset.Generation(), revision: dataset.Revision(), flow: flow, cancel: cancel}
 	m.offlineRelated = state
 	m.uiState.EventsView.SetRelatedPacketsPending()
 	m.prepareEventsViewLayout()
@@ -137,7 +150,7 @@ func (m *Model) requestOfflineRelated() tea.Cmd {
 			}
 		}
 
-		token := offline.Token{Dataset: state.generation, Query: 1, Request: 1}
+		token := offline.Token{Dataset: state.generation, Revision: state.revision, Query: 1, Request: 1}
 		query, err := dataset.Related(ctx, token, flow)
 		if err != nil {
 			result.err = err
@@ -171,7 +184,7 @@ func (m *Model) requestOfflineRelated() tea.Cmd {
 	return func() tea.Msg { return <-ch }
 }
 func (m Model) handleOfflineRelated(msg offlineRelatedMsg) (Model, tea.Cmd) {
-	if m.offlineRelated != msg.state || m.offlineSession == nil || m.offlineSession.Dataset.Generation() != msg.state.generation {
+	if m.offlineRelated != msg.state || m.offlineSession == nil || m.offlineDataset().Generation() != msg.state.generation || m.offlineRevision() != msg.state.revision || m.offlineOpening || m.offlineLeaving {
 		return m, nil
 	}
 	s := m.offlineRelated

@@ -41,7 +41,7 @@ func TestOfflineExportCompleteFilteredAndUnfiltered(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
 	for _, filtered := range []bool{false, true} {
 		t.Run(map[bool]string{false: "all", true: "beginning_middle_end"}[filtered], func(t *testing.T) {
-			spec := offline.QuerySpec{Token: offline.Token{Dataset: 1, Query: 1}}
+			spec := offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: 1, Query: 1}}
 			if filtered {
 				spec.Match = func(s offline.Summary) bool { return s.ID == 0 || s.ID == total/2 || s.ID == total-1 }
 			}
@@ -190,7 +190,7 @@ func TestOfflineExportReadyWithoutPacketView(t *testing.T) {
 		require.NoError(t, m.offlineBrowse.owner.close())
 	}
 	m.offlineBrowse = nil
-	m.offlineSession.browser = nil
+	m.offlinePacketViews = nil
 	m.startOfflineExport(filepath.Join(t.TempDir(), "unvisited.pcap"))
 	require.NotNil(t, m.offlineExport)
 	<-m.offlineExport.done
@@ -201,7 +201,7 @@ func TestOfflineExportReadyWithoutPacketView(t *testing.T) {
 func TestOfflineExportInstalledFilterSnapshot(t *testing.T) {
 	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
 	b := m.offlineBrowse.owner
-	q, err := b.dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Dataset: b.dataset.Generation(), Query: 2}, Match: func(s offline.Summary) bool { return s.ID == 0 || s.ID == 500 || s.ID == 1076 }})
+	q, err := b.dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: b.dataset.Generation(), Query: 2}, Match: func(s offline.Summary) bool { return s.ID == 0 || s.ID == 500 || s.ID == 1076 }})
 	require.NoError(t, err)
 	b.mu.Lock()
 	old := b.query
@@ -210,7 +210,7 @@ func TestOfflineExportInstalledFilterSnapshot(t *testing.T) {
 	require.NoError(t, old.Close())
 	m.startOfflineExport(filepath.Join(t.TempDir(), "filtered.pcap"))
 	// Replace the active filter immediately, while the command is still queued.
-	all, err := offline.AllPackets(context.Background(), b.dataset, offline.Token{Dataset: b.dataset.Generation(), Query: 3})
+	all, err := offline.AllPackets(context.Background(), b.dataset, offline.Token{Revision: offline.CompletedRevision, Dataset: b.dataset.Generation(), Query: 3})
 	require.NoError(t, err)
 	b.mu.Lock()
 	b.query = all

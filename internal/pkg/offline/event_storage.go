@@ -221,7 +221,8 @@ func (b *EventBuilder) Finish(ctx context.Context) (result EventDataset, err err
 	binary.LittleEndian.PutUint64(d.completion[24:32], d.count)
 	binary.LittleEndian.PutUint64(d.completion[32:40], d.dataBytes)
 	binary.LittleEndian.PutUint64(d.completion[40:48], d.offsetBytes)
-	binary.LittleEndian.PutUint32(d.completion[48:52], eventChecksum(d.completion[:48], nil))
+	binary.LittleEndian.PutUint64(d.completion[56:64], uint64(CompletedRevision))
+	binary.LittleEndian.PutUint32(d.completion[48:52], eventChecksum(d.completion[:48], d.completion[56:64]))
 	temp := filepath.Join(d.dir, "events.manifest.tmp")
 	f, err := os.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
@@ -270,6 +271,7 @@ func (b *EventBuilder) Abort() error {
 func (b *EventBuilder) Close() error { return b.Abort() }
 
 func (d *diskEventDataset) Generation() DatasetGeneration { return d.generation }
+func (d *diskEventDataset) Revision() AnalysisRevision    { return CompletedRevision }
 func (d *diskEventDataset) Count() uint64                 { return d.count }
 func (d *diskEventDataset) Resources() ResourceUsage      { return d.storage.Resources() }
 
@@ -324,8 +326,8 @@ func (d *diskEventDataset) Detail(ctx context.Context, token Token, id EventRowI
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if token.Dataset != d.generation {
-		return nil, errors.New("offline event detail dataset generation mismatch")
+	if token.Dataset != d.generation || token.Revision != d.Revision() {
+		return nil, errors.New("offline event detail dataset generation/revision mismatch")
 	}
 	if err := d.validate(); err != nil {
 		return nil, err
@@ -338,7 +340,7 @@ func (d *diskEventDataset) Detail(ctx context.Context, token Token, id EventRowI
 		d.storage.releaseMemory(eventLeaseMemory + EventPresentationBytesPerRow)
 		return nil, err
 	}
-	return &EventDetail{Record: record, lease: &eventLease{storage: d.storage, bytes: held + eventLeaseMemory + EventPresentationBytesPerRow}}, nil
+	return &EventDetail{Token: token, Record: record, lease: &eventLease{storage: d.storage, bytes: held + eventLeaseMemory + EventPresentationBytesPerRow}}, nil
 }
 
 func (d *diskEventDataset) Close() error {

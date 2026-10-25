@@ -24,13 +24,15 @@ func PinQuery(query Query) (*QueryPin, error) {
 	}
 	q.dataset.mu.RLock()
 	q.mu.RLock()
-	if q.closed || q.dataset.closed {
+	if err := q.validate(); err != nil {
 		q.mu.RUnlock()
 		q.dataset.mu.RUnlock()
-		return nil, fmt.Errorf("offline query closed")
+		return nil, err
 	}
 	return &QueryPin{query: q}, nil
 }
+
+func (p *QueryPin) Token() Token { return p.query.token }
 
 func (p *QueryPin) Count() uint64 { return p.query.count }
 

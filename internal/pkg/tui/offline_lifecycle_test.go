@@ -31,6 +31,7 @@ func offlineLifecycleModel(t *testing.T) (Model, OpenOfflineDatasetMsg) {
 	require.NoError(t, pcapgo.NewWriter(f).WriteFileHeader(65535, layers.LinkTypeEthernet))
 	require.NoError(t, f.Close())
 	m := NewModel(8, 8, "", "", []string{path}, false, false, "", false)
+	m.offlineController.index = indexOfflineDataset
 	t.Cleanup(func() { require.NoError(t, m.CloseOffline()); m.Shutdown() })
 	msg := FreezeOfflineOpen([]string{path}, "", 8)
 	msg.Limits.Directory = t.TempDir()
@@ -247,7 +248,7 @@ func TestOfflineLifecycleDuplicateCompletionCannotClosePublishedSession(t *testi
 	m, cmd = m.completeOffline(result)
 	require.Nil(t, cmd)
 	require.Same(t, result.session, m.offlineSession)
-	q, err := m.offlineSession.Dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Dataset: result.generation}})
+	q, err := m.offlineSession.Dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: result.generation}})
 	require.NoError(t, err)
 	require.NoError(t, q.Close())
 }
@@ -389,7 +390,7 @@ func failOfflineLeaving(t *testing.T, quit bool) (Model, OpenOfflineDatasetMsg) 
 	require.True(t, m.offlineCleanupFailed)
 	require.False(t, m.uiState.Quitting)
 	require.Contains(t, m.offlineModal(), "Retry cleanup")
-	_, err := m.offlineSession.Dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Dataset: result.generation}})
+	_, err := m.offlineSession.Dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Revision: offline.CompletedRevision, Dataset: result.generation}})
 	require.Error(t, err, "exercise an installed dataset whose readers already closed")
 	return m, open
 }

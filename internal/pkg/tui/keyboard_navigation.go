@@ -127,7 +127,7 @@ func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsToTop()
 			} else {
-				if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+				if m.offlineSession != nil && m.offlineEvents() != nil {
 					m.uiState.EventsView.SetLogicalCursor(0)
 				} else {
 					m.eventStore.SelectFirst()
@@ -166,7 +166,7 @@ func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsToBottom()
 			} else {
-				if m.offlineSession != nil && m.offlineSession.EventDataset != nil {
+				if m.offlineSession != nil && m.offlineEvents() != nil {
 					m.uiState.EventsView.SetLogicalCursor(^uint64(0))
 				} else {
 					m.eventStore.SelectLast()
